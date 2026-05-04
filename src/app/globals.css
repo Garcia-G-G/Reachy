@@ -1,26 +1,279 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ============================================================
+   Reachy — Editorial theme
+   See prompts/00-CONTEXT.md §0.6 and design-editorial.html
+   - Light mode only
+   - Border-radius: 0 (cards, inputs, buttons)
+   - Hard print shadows (no blurred soft shadows)
+   - Editorial palette: paper, ink, rule, burnt sienna accent
+   ============================================================ */
+
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* Editorial palette — exposed as `bg-paper`, `text-ink`, etc. */
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+
+  /* Editorial fonts (set on <html> by next/font in layout.tsx) */
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-italic: var(--font-instrument), Georgia, serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --font-heading: var(--font-fraunces), Georgia, serif;
+
+  /* shadcn token aliases (preserved so all shadcn components keep working) */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Radii — 0 by default per editorial rules; pill kept for avatars only */
+  --radius: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-4xl: 0;
+  --radius-full: 9999px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  /* Editorial palette — source of truth */
+  --paper: #f1ebdf;
+  --paper-2: #e8e0cf;
+  --ink: #14110d;
+  --ink-2: #4a4338;
+  --ink-3: #8b8170;
+  --rule: #c9bfa9;
+  --accent: #b6481a;
+
+  /* shadcn aliases mapped to the editorial palette */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --secondary: var(--paper-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-2);
+  --muted-foreground: var(--ink-3);
+  /* --accent inherited from editorial palette above */
+  --accent-foreground: var(--paper);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: var(--rule);
+  --input: var(--rule);
+  --ring: var(--ink);
+
+  /* Charts (kept neutral to fit the print palette) */
+  --chart-1: var(--ink);
+  --chart-2: var(--ink-2);
+  --chart-3: var(--ink-3);
+  --chart-4: var(--rule);
+  --chart-5: var(--accent);
+
+  /* Sidebar tokens (used later in app shell) */
+  --sidebar: var(--paper);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: var(--paper);
+  --sidebar-accent: var(--paper-2);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--rule);
+  --sidebar-ring: var(--ink);
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  *,
+  *::before,
+  *::after {
+    border-color: var(--rule);
+  }
+  html {
+    background: var(--paper);
+    color: var(--ink);
+  }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-inter), system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  button {
+    font: inherit;
+    cursor: pointer;
+  }
+  ::selection {
+    background: var(--ink);
+    color: var(--paper);
+  }
+  *:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ============================================================
+   Editorial utility classes
+   Use these directly (no Tailwind prefix) so they read well in JSX
+   ============================================================ */
+
+.display {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 0.94;
+  font-variation-settings: "opsz" 144;
+}
+
+.it {
+  font-family: var(--font-instrument), Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.mono-eyebrow {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.rule-thin {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  height: 0;
+}
+
+.rule-double {
+  border: 0;
+  border-top: 3px double var(--ink);
+  height: 0;
+}
+
+.shadow-print {
+  box-shadow: 14px 14px 0 var(--ink);
+}
+
+.btn-ink {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 16px 32px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  display: inline-block;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+.btn-ink:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.btn-ink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  padding: 16px 32px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  display: inline-block;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.btn-ghost:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.field {
+  border: 0;
+  border-bottom: 1px solid var(--ink);
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 15px;
+  padding: 8px 0;
+  width: 100%;
+  color: var(--ink);
+}
+.field:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+.card-paper {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+}
+.card-hard {
+  box-shadow: 14px 14px 0 var(--ink);
 }

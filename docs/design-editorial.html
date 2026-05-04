@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Reachy — Editorial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* tokens */
+  :root {
+    --paper:    #f1ebdf;
+    --paper-2:  #e8e0cf;
+    --ink:      #14110d;
+    --ink-2:    #4a4338;
+    --ink-3:    #8b8170;
+    --rule:     #c9bfa9;
+    --accent:   #b6481a;
+    --display:  'Fraunces', Georgia, serif;
+    --italic:   'Instrument Serif', Georgia, serif;
+    --body:     'Inter', -apple-system, system-ui, sans-serif;
+    --mono:     'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  /* reset */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  a { color: inherit; text-decoration: none; }
+  ul { list-style: none; }
+  button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  ::selection { background: var(--ink); color: var(--paper); }
+
+  /* utilities */
+  .it    { font-family: var(--italic); font-style: italic; }
+  .mono  { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+  .display { font-family: var(--display); font-weight: 400; letter-spacing: -.025em; line-height: .94; font-variation-settings: 'opsz' 144; }
+
+  /* ============ MASTHEAD ============ */
+  .masthead {
+    border-bottom: 1px solid var(--ink);
+  }
+  .masthead-inner {
+    max-width: 1200px; margin: 0 auto; padding: 16px 40px;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 24px;
+  }
+  .mast-l { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); }
+  .mast-c {
+    font-family: var(--display); font-weight: 600; font-size: 28px;
+    letter-spacing: -.02em; line-height: 1;
+  }
+  .mast-r {
+    text-align: right; display: flex; gap: 24px; justify-content: flex-end;
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2);
+  }
+  .mast-r a:hover { color: var(--accent); }
+
+  /* ============ COVER ============ */
+  .cover {
+    max-width: 1200px; margin: 0 auto;
+    padding: 140px 40px 160px;
+    text-align: center;
+  }
+  .cover .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--ink-3);
+    margin-bottom: 56px;
+  }
+  .cover .eyebrow .accent { color: var(--accent); margin: 0 6px; }
+
+  .cover h1 {
+    font-family: var(--display); font-weight: 400;
+    font-size: clamp(56px, 9vw, 128px);
+    letter-spacing: -.035em;
+    line-height: .95;
+    max-width: 14ch;
+    margin: 0 auto;
+  }
+  .cover h1 em { font-family: var(--italic); font-style: italic; font-weight: 400; color: var(--accent); }
+
+  .cover .lede {
+    font-family: var(--display); font-weight: 300;
+    font-size: 21px; line-height: 1.45;
+    color: var(--ink-2);
+    max-width: 44ch;
+    margin: 56px auto 0;
+    font-variation-settings: 'opsz' 36;
+  }
+
+  .cover .actions {
+    margin-top: 64px;
+    display: inline-flex; flex-direction: column; gap: 18px; align-items: center;
+  }
+  .btn-ink {
+    background: var(--ink); color: var(--paper);
+    padding: 16px 32px;
+    font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .18em; text-transform: uppercase;
+    transition: background .15s ease;
+  }
+  .btn-ink:hover { background: var(--accent); }
+  .cover .actions .meta { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+
+  /* ============ INDEX (qué incluye) ============ */
+  .index {
+    border-top: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+  }
+  .index-inner {
+    max-width: 1200px; margin: 0 auto;
+    padding: 56px 40px;
+    display: grid; grid-template-columns: 200px 1fr; gap: 56px; align-items: start;
+  }
+  .index-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-3);
+    padding-top: 12px;
+    border-top: 1px solid var(--ink);
+  }
+  .index-list {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px;
+  }
+  .index-item { padding-top: 12px; border-top: 1px solid var(--ink); }
+  .index-item .num {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .index-item h3 {
+    font-family: var(--display); font-weight: 500;
+    font-size: 28px; letter-spacing: -.02em; line-height: 1.05;
+    margin-bottom: 10px;
+  }
+  .index-item h3 em { font-family: var(--italic); font-style: italic; }
+  .index-item p {
+    font-size: 14px; line-height: 1.55; color: var(--ink-2);
+    max-width: 28ch;
+  }
+
+  /* ============ SPREAD ============ */
+  .spread {
+    background: var(--paper-2);
+  }
+  .spread-inner {
+    max-width: 1200px; margin: 0 auto;
+    padding: 96px 40px 112px;
+  }
+  .spread-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding-bottom: 18px; border-bottom: 1px solid var(--rule);
+    margin-bottom: 56px;
+  }
+  .spread-head h2 {
+    font-family: var(--display); font-weight: 400;
+    font-size: 44px; letter-spacing: -.025em; line-height: 1;
+  }
+  .spread-head h2 em { font-family: var(--italic); font-style: italic; }
+  .spread-head .meta { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+
+  .editor-mock {
+    background: var(--paper); border: 1px solid var(--ink);
+    box-shadow: 14px 14px 0 var(--ink);
+  }
+  .editor-bar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 18px; border-bottom: 1px solid var(--ink);
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  }
+  .editor-bar .num { color: var(--accent); }
+  .editor-bar .spacer { flex: 1; }
+  .editor-bar .stat { color: var(--ink-3); }
+
+  .editor-body {
+    display: grid; grid-template-columns: 220px 1fr; min-height: 460px;
+  }
+  .editor-side {
+    border-right: 1px solid var(--ink); padding: 22px 20px;
+  }
+  .editor-side .label {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 12px;
+  }
+  .editor-side .label + .label { margin-top: 28px; }
+  .issue {
+    display: flex; align-items: baseline; gap: 10px; padding: 7px 0;
+    border-bottom: 1px dotted var(--rule);
+  }
+  .issue:last-child { border-bottom: none; }
+  .issue .n { font-family: var(--display); font-size: 18px; color: var(--ink-3); width: 26px; }
+  .issue .t { font-family: var(--display); font-size: 15px; line-height: 1.15; }
+  .issue.active .n, .issue.active .t { color: var(--accent); font-weight: 500; }
+  .piece-link { padding: 6px 0; font-family: var(--display); font-size: 15px; color: var(--ink-2); }
+  .piece-link:hover { color: var(--accent); }
+
+  .editor-canvas {
+    padding: 28px;
+  }
+  .canvas-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding-bottom: 12px; border-bottom: 1px solid var(--ink);
+    margin-bottom: 22px;
+  }
+  .canvas-head h4 { font-family: var(--display); font-size: 22px; font-weight: 500; letter-spacing: -.015em; }
+  .canvas-head .date { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+
+  .pieces { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 18px; }
+  .piece { border: 1px solid var(--ink); display: flex; flex-direction: column; }
+  .piece-img { aspect-ratio: 4 / 5; }
+  .p1 { background: linear-gradient(135deg, #d8cfbb, var(--accent)); }
+  .p2 { background: linear-gradient(150deg, #c8c2b1, var(--ink)); }
+  .p3 { background: linear-gradient(160deg, #1f3a2f, var(--accent)); }
+  .piece-cap {
+    padding: 12px 14px; border-top: 1px solid var(--ink);
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .piece-cap .t { font-family: var(--display); font-size: 14px; font-weight: 500; }
+  .piece-cap .t small { font-family: var(--body); display: block; font-size: 10px; color: var(--ink-3); margin-top: 2px; font-weight: 400; letter-spacing: .03em; }
+  .piece-cap .px { font-family: var(--mono); font-size: 9px; letter-spacing: .12em; color: var(--ink-3); text-transform: uppercase; }
+
+  /* ============ COLOPHON ============ */
+  .colophon {
+    border-top: 1px solid var(--ink);
+    padding: 36px 40px;
+  }
+  .colophon-inner {
+    max-width: 1200px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .colophon-inner a:hover { color: var(--accent); }
+
+  /* responsive */
+  @media (max-width: 900px) {
+    .masthead-inner { grid-template-columns: 1fr; text-align: center; gap: 12px; }
+    .mast-r { justify-content: center; flex-wrap: wrap; gap: 14px; }
+    .cover { padding: 80px 24px 100px; }
+    .spread-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .spread-head h2 { font-size: 32px; }
+    .editor-body { grid-template-columns: 1fr; }
+    .editor-side { display: none; }
+    .pieces { grid-template-columns: 1fr; }
+    .colophon-inner { flex-direction: column; text-align: center; }
+    .index-inner { grid-template-columns: 1fr; gap: 24px; }
+    .index-list { grid-template-columns: 1fr; gap: 22px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Masthead -->
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="mast-l">Vol. 01 · No. 04 · 2026</div>
+    <div class="mast-c">Reachy</div>
+    <nav class="mast-r">
+      <a>Producto</a>
+      <a>Suscripción</a>
+      <a>Acceder →</a>
+    </nav>
+  </div>
+</header>
+
+<!-- Cover -->
+<section class="cover">
+  <div class="eyebrow">№ 01<span class="accent">—</span>Edición de bienvenida</div>
+
+  <h1>Tu app merece más que un post a las <em>3 a.m.</em></h1>
+
+  <p class="lede">
+    Reachy convierte cada lanzamiento en una <em class="it">pequeña edición</em> — imágenes, copy y reels con la coherencia de una revista bien editada. Multi-proyecto, en español e inglés, con tu marca.
+  </p>
+
+  <div class="actions">
+    <a class="btn-ink">Empezar la primera edición</a>
+    <span class="meta">Beta abierta · sin tarjeta · desde $0/mes</span>
+  </div>
+</section>
+
+<!-- Index: qué incluye -->
+<section class="index">
+  <div class="index-inner">
+    <div class="index-label">— Lo que produce<br/>cada edición</div>
+    <div class="index-list">
+      <article class="index-item">
+        <div class="num">№ 01 — Imágenes</div>
+        <h3>Hero, OG, posts, <em>covers.</em></h3>
+        <p>Generadas con OpenAI gpt-image-1 y fal.ai (FLUX, Recraft). Cada formato en el tamaño que necesitas.</p>
+      </article>
+      <article class="index-item">
+        <div class="num">№ 02 — Copy</div>
+        <h3>Tweets, hilos, <em>captions.</em></h3>
+        <p>Cada pieza en español e inglés, lado a lado, con el tono de tu brand kit. Sin clichés genéricos.</p>
+      </article>
+      <article class="index-item">
+        <div class="num">№ 03 — Reels</div>
+        <h3>Verticales 9:16, <em>listos.</em></h3>
+        <p>Compuestos con FFmpeg desde tus imágenes y textos, o generados con Veo 3.1 cuando la ocasión lo merece.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- Spread / Dashboard preview -->
+<section class="spread">
+  <div class="spread-inner">
+    <div class="spread-head">
+      <h2>El <em>taller</em>.</h2>
+      <span class="meta">— pliego 02</span>
+    </div>
+
+    <div class="editor-mock">
+      <div class="editor-bar">
+        <span class="num">№ 12</span>
+        <span>SaaS Tracker — Lanzamiento Mayo</span>
+        <span class="spacer"></span>
+        <span class="stat">12 piezas · 2 en cola</span>
+      </div>
+      <div class="editor-body">
+        <aside class="editor-side">
+          <div class="label">— Cabeceras</div>
+          <div class="issue active"><span class="n">01</span><span class="t">SaaS Tracker</span></div>
+          <div class="issue"><span class="n">02</span><span class="t">HabitForge</span></div>
+          <div class="issue"><span class="n">03</span><span class="t">NoteSync</span></div>
+
+          <div class="label">— Esta edición</div>
+          <div class="piece-link">› Portada</div>
+          <div class="piece-link">› Carrusel</div>
+          <div class="piece-link">› Hilo</div>
+          <div class="piece-link">› Reel</div>
+          <div class="piece-link">› Email</div>
+        </aside>
+
+        <section class="editor-canvas">
+          <div class="canvas-head">
+            <h4>Edición № 12</h4>
+            <span class="date">04 · 05 · 2026</span>
+          </div>
+          <div class="pieces">
+            <article class="piece">
+              <div class="piece-img p1"></div>
+              <div class="piece-cap">
+                <div class="t">Portada<small>Hero · landing</small></div>
+                <div class="px">1920×1080</div>
+              </div>
+            </article>
+            <article class="piece">
+              <div class="piece-img p2"></div>
+              <div class="piece-cap">
+                <div class="t">Carrusel<small>Instagram</small></div>
+                <div class="px">1080×1350</div>
+              </div>
+            </article>
+            <article class="piece">
+              <div class="piece-img p3"></div>
+              <div class="piece-cap">
+                <div class="t">Reel<small>30 segundos</small></div>
+                <div class="px">1080×1920</div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Colophon -->
+<footer class="colophon">
+  <div class="colophon-inner">
+    <span>© Reachy 2026</span>
+    <span>Hecho con Inter, Fraunces, Instrument Serif</span>
+    <span><a>Contacto</a> · <a>Self-hosting</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
