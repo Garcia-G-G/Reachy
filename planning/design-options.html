@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Reachy — 5 propuestas de diseño</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;600&family=Archivo:wght@400;700;900&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ============ RESET ============ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0a0a;
+    color: #fafafa;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.5;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  ul, ol { list-style: none; }
+  img, svg { display: block; max-width: 100%; }
+
+  /* ============ TOP PICKER ============ */
+  .topbar {
+    max-width: 1180px; margin: 0 auto; padding: 32px 24px 24px;
+  }
+  .topbar-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .top-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .22em; color: #8a8a8a; }
+  .top-title { font-size: 22px; font-weight: 600; margin-top: 4px; color: #fff; }
+  .top-hint { font-size: 12px; color: #8a8a8a; }
+  .picker { display: flex; flex-wrap: wrap; gap: 8px; }
+  .picker-btn {
+    padding: 9px 16px; border-radius: 999px; font-size: 13px;
+    background: #141414; color: #d4d4d4; border: 1px solid #222;
+    transition: all .15s ease;
+  }
+  .picker-btn:hover { background: #1c1c1c; color: #fff; }
+  .picker-btn[data-active="true"] { background: #fff; color: #0a0a0a; border-color: #fff; }
+
+  /* ============ STAGE WRAPPER ============ */
+  .stages { max-width: 1180px; margin: 0 auto; padding: 0 24px 80px; }
+  .stage { display: none; border-radius: 18px; overflow: hidden; box-shadow: 0 30px 80px -20px rgba(0,0,0,.6); }
+  .stage.active { display: block; }
+
+  /* ============ COMMON: Browser bar mock ============ */
+  .browserbar {
+    display: flex; align-items: center; gap: 6px;
+    height: 32px; padding: 0 14px;
+    background: #f1f1f1; border-bottom: 1px solid #e0e0e0;
+  }
+  .browserbar .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .browserbar .url { margin-left: 10px; font: 11px/1 'Geist Mono', ui-monospace, monospace; color: #666; }
+
+  /* ============ DESIGN 1 — GEIST (dark, dev-tool) ============ */
+  .d1 { background: #0a0a0a; color: #fafafa; position: relative; overflow: hidden; }
+  .d1 .glow { position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(600px circle at 50% 0%, rgba(0,112,243,.22), transparent 60%); }
+  .d1 .nav { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto;
+    padding: 18px 32px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #161616; }
+  .d1 .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .d1 .brand .logo-tri { width: 22px; height: 22px; }
+  .d1 .brand .v { color: #555; font: 11px 'Geist Mono', monospace; margin-left: 4px; }
+  .d1 .navlinks { display: flex; gap: 28px; font-size: 14px; color: #999; }
+  .d1 .navlinks a:hover { color: #fff; }
+  .d1 .navactions { display: flex; align-items: center; gap: 12px; }
+  .d1 .btn-primary { background: #fff; color: #000; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+  .d1 .btn-secondary { border: 1px solid #2a2a2a; color: #fff; padding: 7px 14px; border-radius: 6px; font-size: 13px; font: 500 13px 'Geist Mono', monospace; }
+  .d1 .btn-link { color: #999; font-size: 14px; }
+
+  .d1 .hero { position: relative; z-index: 1; max-width: 880px; margin: 0 auto;
+    padding: 86px 32px 64px; text-align: center; }
+  .d1 .badge { display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 12px; border: 1px solid #1f1f1f; border-radius: 999px;
+    font: 11px 'Geist Mono', monospace; color: #999; margin-bottom: 32px; }
+  .d1 .badge .pulse { width: 6px; height: 6px; border-radius: 50%; background: #34d399; }
+  .d1 h1 { font-size: 68px; font-weight: 600; letter-spacing: -.035em; line-height: 1.05;
+    background: linear-gradient(180deg,#fff 0%,#888 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .d1 .sub { color: #999; max-width: 520px; margin: 22px auto 0; font-size: 18px; }
+  .d1 .ctas { margin-top: 36px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .d1 .ctas .btn-primary { padding: 12px 20px; font-size: 14px; }
+  .d1 .ctas .btn-secondary { padding: 12px 20px; font-size: 13px; }
+  .d1 .trusted { font: 11px 'Geist Mono', monospace; color: #555; margin-top: 36px; }
+
+  .d1 .preview { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 32px 72px; }
+  .d1 .card-frame { background: #0e0e0e; border: 1px solid #1c1c1c; border-radius: 12px; overflow: hidden; }
+  .d1 .app-grid { display: grid; grid-template-columns: 240px 1fr; min-height: 420px; }
+  .d1 .sidebar { border-right: 1px solid #161616; padding: 16px 12px; }
+  .d1 .side-label { font: 11px 'Geist Mono', monospace; color: #555; padding: 0 8px; margin: 0 0 8px; }
+  .d1 .side-item { display: flex; align-items: center; gap: 10px; padding: 7px 8px;
+    border-radius: 6px; font-size: 13px; color: #999; }
+  .d1 .side-item .swatch { width: 8px; height: 8px; border-radius: 2px; }
+  .d1 .side-item.active { background: #161616; color: #fff; }
+  .d1 .side-item + .side-label { margin-top: 22px; }
+
+  .d1 .main { padding: 22px; }
+  .d1 .main-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .d1 .main-head h3 { font-size: 15px; font-weight: 600; color: #fff; }
+  .d1 .main-head p { font: 11px 'Geist Mono', monospace; color: #666; margin-top: 4px; }
+  .d1 .asset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .d1 .asset { aspect-ratio: 4 / 3; border-radius: 6px; border: 1px solid #1c1c1c;
+    display: flex; align-items: flex-end; padding: 8px; font: 10px 'Geist Mono', monospace; color: #999; }
+  .d1 .asset.empty { border-style: dashed; align-items: center; justify-content: center; color: #555; font-family: 'Inter', sans-serif; font-size: 12px; }
+  .d1 .a1 { background: linear-gradient(135deg, rgba(59,130,246,.22), rgba(168,85,247,.22)); }
+  .d1 .a2 { background: linear-gradient(135deg, rgba(16,185,129,.22), rgba(20,184,166,.22)); }
+  .d1 .a3 { background: linear-gradient(135deg, rgba(245,158,11,.22), rgba(236,72,153,.22)); }
+  .d1 .a4 { background: linear-gradient(135deg, rgba(236,72,153,.22), rgba(168,85,247,.22)); }
+  .d1 .a5 { background: linear-gradient(135deg, rgba(34,211,238,.22), rgba(59,130,246,.22)); }
+
+  /* ============ DESIGN 2 — LINEAR REFINED (light, calm) ============ */
+  .d2 { background: #fafafa; color: #0e0e10; }
+  .d2 .grad-bg { background: radial-gradient(1200px 600px at 50% -120px, rgba(94,106,210,.18), transparent 60%); }
+  .d2 .nav { max-width: 1080px; margin: 0 auto; padding: 18px 32px;
+    display: flex; align-items: center; justify-content: space-between; }
+  .d2 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .d2 .brand .logo { width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg,#5e6ad2,#9aa1ff); }
+  .d2 .navlinks { display: flex; gap: 32px; font-size: 14px; color: #555; }
+  .d2 .navactions { display: flex; align-items: center; gap: 12px; }
+  .d2 .btn-primary { background: #0e0e10; color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+  .d2 .btn-link { font-size: 14px; color: #333; }
+
+  .d2 .hero { max-width: 880px; margin: 0 auto; padding: 96px 32px 64px; text-align: center; }
+  .d2 .pill { display: inline-block; padding: 5px 12px; border-radius: 999px;
+    font-size: 12px; font-weight: 500; margin-bottom: 24px;
+    background: rgba(94,106,210,.08); color: #5e6ad2; border: 1px solid rgba(94,106,210,.2); }
+  .d2 h1 { font-size: 60px; font-weight: 600; letter-spacing: -.035em; line-height: 1.05; color: #0e0e10; }
+  .d2 .sub { color: #555; max-width: 520px; margin: 24px auto 0; font-size: 18px; }
+  .d2 .ctas { margin-top: 36px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .d2 .ctas .btn-primary { padding: 11px 20px; font-size: 14px; }
+  .d2 .btn-outline { padding: 11px 20px; font-size: 14px; border-radius: 6px;
+    border: 1px solid #d4d4d8; background: #fff; color: #0e0e10; }
+
+  .d2 .preview { max-width: 1080px; margin: 0 auto; padding: 0 32px 80px; }
+  .d2 .card-frame { background: #fff; border: 1px solid #e5e5e7; border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04); overflow: hidden; }
+  .d2 .app-grid { display: grid; grid-template-columns: 240px 1fr; min-height: 460px; }
+  .d2 .sidebar { border-right: 1px solid #ececef; padding: 18px 14px; }
+  .d2 .ws { display: flex; align-items: center; gap: 10px; padding: 8px;
+    border-radius: 8px; background: #f4f4f5; }
+  .d2 .ws-logo { width: 26px; height: 26px; border-radius: 6px;
+    background: linear-gradient(135deg,#818cf8,#a78bfa); }
+  .d2 .ws-name { font-size: 13px; font-weight: 500; color: #18181b; }
+  .d2 .ws-sub { font-size: 11px; color: #71717a; }
+  .d2 .nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    border-radius: 6px; font-size: 13px; color: #3f3f46; margin-top: 2px; }
+  .d2 .nav-item.active { background: #f4f4f5; color: #18181b; font-weight: 500; }
+  .d2 .nav-section-top { margin-top: 16px; }
+
+  .d2 .main { padding: 24px; background: #fff; }
+  .d2 .main-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+  .d2 .main-head .eyebrow { font-size: 11px; color: #71717a; }
+  .d2 .main-head h3 { font-size: 19px; font-weight: 600; color: #0e0e10; margin-top: 2px; }
+  .d2 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+  .d2 .stat { background: #fff; border: 1px solid #e5e5e7; border-radius: 12px; padding: 14px; }
+  .d2 .stat .label { font-size: 11px; color: #71717a; }
+  .d2 .stat .value { font-size: 22px; font-weight: 600; margin-top: 4px; color: #0e0e10; }
+  .d2 .stat .delta { font-size: 11px; color: #5e6ad2; margin-top: 4px; }
+  .d2 .panel { border: 1px solid #e5e5e7; border-radius: 12px; padding: 14px; }
+  .d2 .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .d2 .panel-head .ttl { font-size: 13px; font-weight: 500; color: #0e0e10; }
+  .d2 .panel-head a { font-size: 12px; color: #5e6ad2; }
+  .d2 .thumbs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .d2 .thumb { aspect-ratio: 1 / 1; border-radius: 8px; }
+  .d2 .t1 { background: linear-gradient(135deg, #c7d2fe, #ddd6fe); }
+  .d2 .t2 { background: linear-gradient(135deg, #a7f3d0, #99f6e4); }
+  .d2 .t3 { background: linear-gradient(135deg, #fde68a, #fbcfe8); }
+  .d2 .t4 { background: linear-gradient(135deg, #a5f3fc, #bfdbfe); }
+  .d2 .t5 { background: linear-gradient(135deg, #fbcfe8, #fecaca); }
+
+  /* ============ DESIGN 3 — STRIPE GLASS ============ */
+  .d3 { background: #fff; color: #0a2540; position: relative; overflow: hidden; min-height: 760px; }
+  .d3 .heroBg { position: absolute; inset: -10% -10% 60% -10%; pointer-events: none;
+    background: conic-gradient(from 220deg at 50% 0%, #ff80b5, #9089fc, #80c7ff, #ffd07a, #ff80b5);
+    filter: blur(80px); opacity: .42; }
+  .d3 .nav { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto;
+    padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+  .d3 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 18px; }
+  .d3 .brand .logo { width: 30px; height: 30px; border-radius: 10px;
+    background: conic-gradient(from 0deg, #635bff, #ff80b5, #ffd07a, #80c7ff, #635bff); }
+  .d3 .navlinks { display: flex; gap: 28px; font-size: 14px; color: #425466; }
+  .d3 .navactions { display: flex; align-items: center; gap: 12px; }
+  .d3 .btn-primary { background: #635bff; color: #fff; padding: 8px 18px;
+    border-radius: 999px; font-size: 13px; font-weight: 500; }
+  .d3 .glass { background: rgba(255,255,255,.55); backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,.6);
+    border-radius: 18px; box-shadow: 0 30px 60px -20px rgba(10,37,64,.18); }
+
+  .d3 .hero { position: relative; z-index: 1; max-width: 880px; margin: 0 auto;
+    padding: 80px 32px 56px; text-align: center; }
+  .d3 h1 { font-size: 68px; font-weight: 600; letter-spacing: -.035em; line-height: 1.05; color: #0a2540; }
+  .d3 .sub { color: #425466; max-width: 540px; margin: 24px auto 0; font-size: 18px; }
+  .d3 .ctas { margin-top: 36px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .d3 .ctas .btn-primary { padding: 12px 24px; font-size: 14px; }
+  .d3 .btn-glass { padding: 12px 24px; font-size: 14px; border-radius: 999px;
+    background: rgba(255,255,255,.7); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.6); color: #0a2540; }
+
+  .d3 .preview { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 32px 64px; }
+  .d3 .glass-wrap { padding: 8px; }
+  .d3 .card-frame { background: #fff; border: 1px solid #e6ecf2; border-radius: 14px; overflow: hidden; }
+  .d3 .app-grid { display: grid; grid-template-columns: 240px 1fr; min-height: 440px; }
+  .d3 .sidebar { border-right: 1px solid #f0f4f8; padding: 22px; }
+  .d3 .side-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .15em; color: #94a3b8; margin-bottom: 12px; }
+  .d3 .nav-item { padding: 10px 12px; border-radius: 10px; font-size: 13px; color: #425466; }
+  .d3 .nav-item.active { background: #f5f7fb; color: #0a2540; font-weight: 500; }
+  .d3 .plan-card { margin-top: 22px; padding: 14px; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(99,91,255,.08), rgba(255,128,181,.08)); font-size: 12px; }
+  .d3 .plan-card .name { font-weight: 600; color: #0a2540; margin-bottom: 4px; }
+  .d3 .plan-card .credits { color: #425466; }
+
+  .d3 .main { padding: 28px; }
+  .d3 .main-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+  .d3 .main-head h3 { font-size: 18px; font-weight: 600; color: #0a2540; }
+  .d3 .live { padding: 4px 10px; border-radius: 999px; font-size: 11px;
+    background: #ecfdf5; color: #047857; border: 1px solid #d1fae5; }
+  .d3 .ftr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .d3 .ftr { padding: 18px; border: 1px solid #e6ecf2; border-radius: 14px; }
+  .d3 .ftr .icn { width: 40px; height: 40px; border-radius: 10px; margin-bottom: 12px; }
+  .d3 .ftr .ttl { font-weight: 600; color: #0a2540; }
+  .d3 .ftr .desc { font-size: 13px; color: #425466; margin-top: 2px; }
+  .d3 .icn-1 { background: linear-gradient(135deg,#635bff,#9089fc); }
+  .d3 .icn-2 { background: linear-gradient(135deg,#ff80b5,#ffd07a); }
+  .d3 .icn-3 { background: linear-gradient(135deg,#80c7ff,#7af0c4); }
+  .d3 .icn-4 { background: linear-gradient(135deg,#ffd07a,#ff80b5); }
+
+  /* ============ DESIGN 4 — NEO-BRUTALIST ============ */
+  .d4 { background: #fff8e7; color: #0a0a0a; font-family: 'Archivo', sans-serif; }
+  .d4 .grid-bg { background-image:
+    linear-gradient(#0a0a0a10 1px, transparent 1px),
+    linear-gradient(90deg, #0a0a0a10 1px, transparent 1px);
+    background-size: 24px 24px; }
+  .d4 .nav { max-width: 1080px; margin: 0 auto; padding: 20px 32px;
+    display: flex; align-items: center; justify-content: space-between; }
+  .d4 .brand { display: flex; align-items: center; gap: 10px; }
+  .d4 .brand-logo { width: 36px; height: 36px; background: #d4ff3a; border: 2px solid #0a0a0a;
+    box-shadow: 4px 4px 0 #0a0a0a; display: flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 18px; border-radius: 6px; }
+  .d4 .brand-name { font-size: 22px; font-weight: 900; letter-spacing: -.02em; }
+  .d4 .navlinks { display: flex; gap: 8px; }
+  .d4 .navlinks a { padding: 6px 12px; background: #fff; border: 2px solid #0a0a0a;
+    box-shadow: 4px 4px 0 #0a0a0a; font-size: 13px; font-weight: 700; border-radius: 6px; }
+  .d4 .nb-btn { background: #0a0a0a; color: #fff; padding: 10px 18px;
+    border: 2px solid #0a0a0a; border-radius: 6px; box-shadow: 6px 6px 0 #d4ff3a;
+    font-size: 14px; font-weight: 700; }
+
+  .d4 .hero { max-width: 920px; margin: 0 auto; padding: 64px 32px 40px; text-align: center; }
+  .d4 .tag-pink { display: inline-block; background: #ff7ad9; padding: 6px 14px;
+    border: 2px solid #0a0a0a; box-shadow: 4px 4px 0 #0a0a0a;
+    font-weight: 700; font-size: 13px; border-radius: 6px; margin-bottom: 28px; }
+  .d4 h1 { font-size: 78px; font-weight: 900; letter-spacing: -.03em; line-height: 1; text-transform: uppercase; }
+  .d4 h1 .hl { background: #fcd34d; padding: 0 14px; display: inline-block; transform: rotate(-1deg); }
+  .d4 .sub { font-size: 19px; max-width: 580px; margin: 28px auto 0; font-weight: 500; }
+  .d4 .ctas { margin-top: 40px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .d4 .ctas .nb-btn { padding: 16px 28px; font-size: 16px; }
+  .d4 .ctas .ghost { background: #fff; color: #0a0a0a; padding: 16px 28px;
+    border: 2px solid #0a0a0a; border-radius: 6px; box-shadow: 6px 6px 0 #0a0a0a;
+    font-weight: 700; font-size: 16px; }
+
+  .d4 .preview { max-width: 1080px; margin: 0 auto; padding: 0 32px 64px; }
+  .d4 .card-frame { background: #fff; border: 2px solid #0a0a0a; box-shadow: 8px 8px 0 #0a0a0a;
+    border-radius: 8px; padding: 8px; }
+  .d4 .app-grid { display: grid; grid-template-columns: 250px 1fr; min-height: 440px; }
+  .d4 .sidebar { background: #fffbe9; border-right: 2px solid #0a0a0a; padding: 20px; }
+  .d4 .side-label { font-size: 11px; font-weight: 900; text-transform: uppercase; margin-bottom: 12px; }
+  .d4 .pill-blue { background: #7ad7ff; padding: 8px 12px; border: 2px solid #0a0a0a;
+    box-shadow: 4px 4px 0 #0a0a0a; font-weight: 700; font-size: 13px; border-radius: 6px; margin-bottom: 8px; }
+  .d4 .pill-white { background: #fff; padding: 8px 12px; border: 2px solid #0a0a0a;
+    box-shadow: 4px 4px 0 #0a0a0a; font-weight: 700; font-size: 13px; border-radius: 6px; margin-bottom: 8px; }
+  .d4 .side-add { width: 100%; padding: 8px 12px; background: #0a0a0a; color: #fff;
+    border: 2px solid #0a0a0a; border-radius: 6px; font-weight: 700; font-size: 12px;
+    box-shadow: 4px 4px 0 #d4ff3a; margin-top: 4px; }
+  .d4 .side-list { font-size: 13px; font-weight: 700; line-height: 2; }
+
+  .d4 .main { padding: 24px; }
+  .d4 .main-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .d4 .main-head h3 { font-size: 22px; font-weight: 900; text-transform: uppercase; }
+  .d4 .badge-counter { background: #ff7ad9; padding: 6px 12px; border: 2px solid #0a0a0a;
+    box-shadow: 4px 4px 0 #0a0a0a; font-weight: 700; font-size: 12px; border-radius: 6px; }
+  .d4 .asset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .d4 .nb-asset { aspect-ratio: 1 / 1; border: 2px solid #0a0a0a; box-shadow: 4px 4px 0 #0a0a0a;
+    border-radius: 6px; padding: 10px; display: flex; flex-direction: column;
+    justify-content: flex-end; font-weight: 900; font-size: 13px; line-height: 1.2; }
+  .d4 .a-lime { background: #d4ff3a; }
+  .d4 .a-pink { background: #ff7ad9; }
+  .d4 .a-blue { background: #7ad7ff; }
+  .d4 .a-orange { background: #fdba74; }
+  .d4 .a-purple { background: #d8b4fe; }
+  .d4 .a-add { background: #fff; align-items: center; justify-content: center; font-size: 32px; }
+
+  /* ============ DESIGN 5 — EDITORIAL / STUDIO ============ */
+  .d5 { background: #f5f1ea; color: #1c1a17; }
+  .d5 .display { font-family: 'Fraunces', serif; font-weight: 500; letter-spacing: -.02em; line-height: 1; }
+  .d5 .serif-italic { font-family: 'Instrument Serif', serif; font-style: italic; font-weight: 400; }
+  .d5 .mono-tag { font: 11px/1 'JetBrains Mono', monospace; letter-spacing: .12em;
+    text-transform: uppercase; color: #7a6f5e; }
+  .d5 .nav { max-width: 1080px; margin: 0 auto; padding: 24px 40px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid rgba(28,26,23,.12); }
+  .d5 .brand { display: flex; align-items: baseline; gap: 12px; }
+  .d5 .brand-name { font-family: 'Fraunces', serif; font-weight: 500; font-size: 24px; }
+  .d5 .navlinks { display: flex; gap: 30px; font-size: 14px; }
+  .d5 .btn-primary { background: #1c1a17; color: #f5f1ea; padding: 9px 20px;
+    border-radius: 999px; font-size: 13px; font-weight: 500; }
+
+  .d5 .hero { max-width: 1000px; margin: 0 auto; padding: 80px 40px 64px; }
+  .d5 .hero h1 { font-size: 90px; font-weight: 500; letter-spacing: -.025em; line-height: .96;
+    font-family: 'Fraunces', serif; }
+  .d5 .hero h1 em { font-family: 'Instrument Serif', serif; font-style: italic; font-weight: 400; }
+  .d5 .hero-row { display: grid; grid-template-columns: 2fr 1fr; gap: 48px; margin-top: 56px; }
+  .d5 .hero-text { font-size: 19px; line-height: 1.55; color: #3d3933; }
+  .d5 .hero-cta { margin-top: 28px; display: flex; align-items: center; gap: 18px; }
+  .d5 .hero-cta .btn-primary { padding: 12px 24px; font-size: 14px; }
+  .d5 .hero-cta a { font-size: 13px; text-decoration: underline; text-underline-offset: 4px; color: #1c1a17; }
+  .d5 .aside { border-top: 1px solid rgba(28,26,23,.12); padding-top: 18px; }
+  .d5 .aside .step { font-size: 14px; color: #3d3933; padding: 10px 0; border-bottom: 1px solid rgba(28,26,23,.08); }
+  .d5 .aside .step em { color: #b6481a; margin-right: 6px; }
+
+  .d5 .preview { max-width: 1080px; margin: 0 auto; padding: 0 40px 80px; }
+  .d5 .card-frame { background: #fff; border: 1px solid #e6dfd2; overflow: hidden; }
+  .d5 .app-grid { display: grid; grid-template-columns: 260px 1fr; min-height: 440px; }
+  .d5 .sidebar { background: #faf6ef; border-right: 1px solid #e6dfd2; padding: 28px; }
+  .d5 .proj-list { display: flex; flex-direction: column; gap: 18px; }
+  .d5 .proj-name { font-family: 'Fraunces', serif; font-size: 20px; font-weight: 500; line-height: 1.1; }
+  .d5 .proj-name.muted { color: #b8b0a3; }
+  .d5 .proj-meta { font-size: 11px; color: #7a6f5e; margin-top: 4px; }
+  .d5 .next-issue { margin-top: 36px; }
+  .d5 .next-issue .body { font-size: 13px; color: #3d3933; margin-top: 4px; }
+
+  .d5 .main { padding: 32px; }
+  .d5 .main-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 24px; }
+  .d5 .main-head h3 { font-family: 'Fraunces', serif; font-size: 32px; font-weight: 500; }
+  .d5 .figs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .d5 figure .img { aspect-ratio: 3 / 4; }
+  .d5 figcaption { margin-top: 10px; font-size: 12px; color: #3d3933; }
+  .d5 figcaption em { font-family: 'Instrument Serif', serif; font-style: italic; }
+  .d5 .img-1 { background: linear-gradient(135deg,#e0d5c3,rgba(182,72,26,.32)); }
+  .d5 .img-2 { background: linear-gradient(135deg,#cbd5c0,#1c1a17); }
+  .d5 .img-3 { background: linear-gradient(135deg,#1c1a17,#b6481a); }
+
+  /* ============ FOOTER ============ */
+  .footer { max-width: 1180px; margin: 0 auto; padding: 0 24px 40px; font-size: 12px; color: #777; }
+
+  /* ============ Responsive notes ============ */
+  @media (max-width: 900px) {
+    .d1 .app-grid, .d2 .app-grid, .d3 .app-grid, .d4 .app-grid, .d5 .app-grid { grid-template-columns: 1fr; }
+    .d1 .sidebar, .d2 .sidebar, .d3 .sidebar, .d4 .sidebar, .d5 .sidebar { display: none; }
+    .d1 h1, .d3 h1 { font-size: 44px; }
+    .d2 h1 { font-size: 40px; }
+    .d4 h1 { font-size: 52px; }
+    .d5 .hero h1 { font-size: 56px; }
+    .d5 .hero-row { grid-template-columns: 1fr; gap: 24px; }
+    .d3 .ftr-grid, .d4 .asset-grid, .d1 .asset-grid, .d2 .thumbs, .d5 .figs { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-row">
+    <div>
+      <div class="top-eyebrow">MarKetOL · Design exploration</div>
+      <div class="top-title">5 direcciones para tu app de marketing</div>
+    </div>
+    <div class="top-hint">Cambia entre opciones &nbsp;→</div>
+  </div>
+  <nav class="picker">
+    <button class="picker-btn" data-target="design-1" data-active="true">1 · Geist (dev-first dark)</button>
+    <button class="picker-btn" data-target="design-2">2 · Linear refined</button>
+    <button class="picker-btn" data-target="design-3">3 · Stripe glass</button>
+    <button class="picker-btn" data-target="design-4">4 · Neo-brutalist</button>
+    <button class="picker-btn" data-target="design-5">5 · Editorial studio</button>
+  </nav>
+</header>
+
+<main class="stages">
+
+<!-- ============================ DESIGN 1 — GEIST ============================ -->
+<section id="design-1" class="stage active">
+  <div class="d1">
+    <div class="glow"></div>
+
+    <div class="nav">
+      <div class="brand">
+        <svg class="logo-tri" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L22 22H2L12 2Z" fill="#fff"/></svg>
+        <span>marketol</span>
+        <span class="v">v0.1</span>
+      </div>
+      <nav class="navlinks">
+        <a>Productos</a><a>Precios</a><a>Docs</a><a>Changelog</a>
+      </nav>
+      <div class="navactions">
+        <button class="btn-link">Iniciar sesión</button>
+        <button class="btn-primary">Probar gratis →</button>
+      </div>
+    </div>
+
+    <div class="hero">
+      <span class="badge"><span class="pulse"></span> nuevo · gpt-image-1 + fal.ai integrados</span>
+      <h1>Marketing para tus<br/>apps, generado.</h1>
+      <p class="sub">Una pipeline para crear hero images, posts, OG cards y reels para cada app que lances. Multi-proyecto, bilingüe, self-hosted.</p>
+      <div class="ctas">
+        <button class="btn-primary">Empezar &nbsp;→</button>
+        <button class="btn-secondary">$ npx create-reachy</button>
+      </div>
+      <p class="trusted">Trusted by builders shipping at 3am</p>
+    </div>
+
+    <div class="preview">
+      <div class="card-frame">
+        <div class="browserbar">
+          <span class="dot" style="background:#ff5f57"></span>
+          <span class="dot" style="background:#febc2e"></span>
+          <span class="dot" style="background:#28c840"></span>
+          <span class="url">reachy.local/projects/saas-tracker</span>
+        </div>
+        <div class="app-grid">
+          <aside class="sidebar">
+            <p class="side-label">PROYECTOS</p>
+            <div class="side-item active"><span class="swatch" style="background:#60a5fa"></span>SaaS Tracker</div>
+            <div class="side-item"><span class="swatch" style="background:#f472b6"></span>HabitForge</div>
+            <div class="side-item"><span class="swatch" style="background:#fbbf24"></span>NoteSync</div>
+            <p class="side-label">GENERAR</p>
+            <div class="side-item">Hero image</div>
+            <div class="side-item">Post social</div>
+            <div class="side-item">OG card</div>
+            <div class="side-item">Reel 9:16</div>
+            <div class="side-item">Email header</div>
+          </aside>
+          <section class="main">
+            <div class="main-head">
+              <div>
+                <h3>Generación reciente</h3>
+                <p>12 assets · 2 en cola · última hace 4m</p>
+              </div>
+              <button class="btn-primary">+ Nuevo asset</button>
+            </div>
+            <div class="asset-grid">
+              <div class="asset a1">hero · 1920×1080</div>
+              <div class="asset a2">og · 1200×630</div>
+              <div class="asset a3">post · 1080×1350</div>
+              <div class="asset a4">reel · 1080×1920</div>
+              <div class="asset a5">cover · 1500×500</div>
+              <div class="asset empty">+ generar</div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ DESIGN 2 — LINEAR REFINED ============================ -->
+<section id="design-2" class="stage">
+  <div class="d2 grad-bg">
+    <div class="nav">
+      <div class="brand">
+        <div class="logo"></div>
+        <span>Reachy</span>
+      </div>
+      <nav class="navlinks">
+        <a>Producto</a><a>Plantillas</a><a>Precios</a><a>Blog</a>
+      </nav>
+      <div class="navactions">
+        <button class="btn-link">Entrar</button>
+        <button class="btn-primary">Crear cuenta</button>
+      </div>
+    </div>
+
+    <div class="hero">
+      <span class="pill">Beta privada · invitaciones abiertas</span>
+      <h1>El sistema de marketing<br/>para indie hackers.</h1>
+      <p class="sub">Cada app que envías merece imágenes, copy y posts a la altura. Reachy los genera en minutos con tu marca.</p>
+      <div class="ctas">
+        <button class="btn-primary">Empezar gratis</button>
+        <button class="btn-outline">Ver demo (1 min)</button>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="card-frame">
+        <div class="app-grid">
+          <aside class="sidebar">
+            <div class="ws">
+              <div class="ws-logo"></div>
+              <div>
+                <div class="ws-name">SaaS Tracker</div>
+                <div class="ws-sub">Workspace</div>
+              </div>
+            </div>
+            <div class="nav-section-top"></div>
+            <div class="nav-item active">📊  Dashboard</div>
+            <div class="nav-item">🎨  Brand kit</div>
+            <div class="nav-item">🖼️  Imágenes</div>
+            <div class="nav-item">📝  Copy</div>
+            <div class="nav-item">🎬  Reels</div>
+            <div class="nav-item">📅  Calendario</div>
+            <div class="nav-item">⚙️  Ajustes</div>
+          </aside>
+          <section class="main">
+            <div class="main-head">
+              <div>
+                <div class="eyebrow">Proyecto</div>
+                <h3>SaaS Tracker — Lanzamiento de Mayo</h3>
+              </div>
+              <button class="btn-primary">Generar campaña</button>
+            </div>
+            <div class="stats">
+              <div class="stat">
+                <div class="label">Assets generados</div>
+                <div class="value">38</div>
+                <div class="delta">+12 esta semana</div>
+              </div>
+              <div class="stat">
+                <div class="label">En cola</div>
+                <div class="value">3</div>
+                <div class="delta" style="color:#71717a">~2 min restantes</div>
+              </div>
+              <div class="stat">
+                <div class="label">Costo del mes</div>
+                <div class="value">$4.21</div>
+                <div class="delta" style="color:#71717a">openai · fal · r2</div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div class="ttl">Últimos assets</div>
+                <a>Ver todos →</a>
+              </div>
+              <div class="thumbs">
+                <div class="thumb t1"></div>
+                <div class="thumb t2"></div>
+                <div class="thumb t3"></div>
+                <div class="thumb t4"></div>
+                <div class="thumb t5"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ DESIGN 3 — STRIPE GLASS ============================ -->
+<section id="design-3" class="stage">
+  <div class="d3">
+    <div class="heroBg"></div>
+
+    <div class="nav">
+      <div class="brand">
+        <div class="logo"></div>
+        <span>Reachy</span>
+      </div>
+      <nav class="navlinks">
+        <a>Producto</a><a>Soluciones</a><a>Precios</a><a>Recursos</a>
+      </nav>
+      <div class="navactions">
+        <a style="font-size:14px">Iniciar sesión</a>
+        <button class="btn-primary">Probar →</button>
+      </div>
+    </div>
+
+    <div class="hero">
+      <h1>Marketing financiero<br/>para creadores de software.</h1>
+      <p class="sub">Genera, agenda y mide el material que mueve la aguja. Imágenes, copy, reels — con tu marca, en dos idiomas, en segundos.</p>
+      <div class="ctas">
+        <button class="btn-primary">Empezar gratis &nbsp;→</button>
+        <button class="btn-glass">Hablar con ventas</button>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="glass glass-wrap">
+        <div class="card-frame">
+          <div class="app-grid">
+            <aside class="sidebar">
+              <div class="side-eyebrow">Workspace</div>
+              <div class="nav-item active">Inicio</div>
+              <div class="nav-item">Generar</div>
+              <div class="nav-item">Biblioteca</div>
+              <div class="nav-item">Brand kits</div>
+              <div class="nav-item">Programación</div>
+              <div class="nav-item">Analítica</div>
+              <div class="plan-card">
+                <div class="name">Plan Indie</div>
+                <div class="credits">2,000 créditos / mes</div>
+              </div>
+            </aside>
+            <section class="main">
+              <div class="main-head">
+                <h3>Genera tu próxima campaña</h3>
+                <span class="live">● activo</span>
+              </div>
+              <div class="ftr-grid">
+                <div class="ftr">
+                  <div class="icn icn-1"></div>
+                  <div class="ttl">Hero image</div>
+                  <div class="desc">Para tu landing — 1920×1080</div>
+                </div>
+                <div class="ftr">
+                  <div class="icn icn-2"></div>
+                  <div class="ttl">Post Instagram</div>
+                  <div class="desc">Carrusel 1080×1350</div>
+                </div>
+                <div class="ftr">
+                  <div class="icn icn-3"></div>
+                  <div class="ttl">Reel 9:16</div>
+                  <div class="desc">Para Reels, TikTok, Shorts</div>
+                </div>
+                <div class="ftr">
+                  <div class="icn icn-4"></div>
+                  <div class="ttl">Email header</div>
+                  <div class="desc">Para newsletter — 600×200</div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ DESIGN 4 — NEO-BRUTALIST ============================ -->
+<section id="design-4" class="stage">
+  <div class="d4 grid-bg">
+    <div class="nav">
+      <div class="brand">
+        <div class="brand-logo">M</div>
+        <span class="brand-name">MARKETOL!</span>
+      </div>
+      <nav class="navlinks">
+        <a>PRODUCTO</a>
+        <a>PRECIOS</a>
+        <a>DOCS</a>
+      </nav>
+      <button class="nb-btn">EMPEZAR &nbsp;→</button>
+    </div>
+
+    <div class="hero">
+      <span class="tag-pink">★ NUEVO · BUILT BY INDIE HACKERS</span>
+      <h1>Tu app merece<br/><span class="hl">marketing real.</span></h1>
+      <p class="sub">Olvídate del Canva infinito. Generamos imágenes, copy y reels para cada app que lances. Sin diseñador, sin excusas.</p>
+      <div class="ctas">
+        <button class="nb-btn">CREAR MI PROYECTO &nbsp;→</button>
+        <button class="ghost">VER VIDEO (90s)</button>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="card-frame">
+        <div class="app-grid">
+          <aside class="sidebar">
+            <div class="side-label">▼ TUS APPS</div>
+            <div class="pill-blue">SaaS Tracker</div>
+            <div class="pill-white">HabitForge</div>
+            <div class="pill-white">NoteSync</div>
+            <button class="side-add">+ NUEVA APP</button>
+            <div class="side-label" style="margin-top:24px">▼ GENERAR</div>
+            <div class="side-list">
+              → Hero image<br/>
+              → Post social<br/>
+              → Reel 9:16<br/>
+              → OG image<br/>
+              → Email
+            </div>
+          </aside>
+          <section class="main">
+            <div class="main-head">
+              <h3>Generador rápido</h3>
+              <span class="badge-counter">12 ASSETS HOY ⚡</span>
+            </div>
+            <div class="asset-grid">
+              <div class="nb-asset a-lime">HERO<br/>1920×1080</div>
+              <div class="nb-asset a-pink">POST<br/>1080×1350</div>
+              <div class="nb-asset a-blue">REEL<br/>1080×1920</div>
+              <div class="nb-asset a-orange">OG<br/>1200×630</div>
+              <div class="nb-asset a-purple">EMAIL<br/>600×200</div>
+              <div class="nb-asset a-add">+</div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ DESIGN 5 — EDITORIAL ============================ -->
+<section id="design-5" class="stage">
+  <div class="d5">
+    <div class="nav">
+      <div class="brand">
+        <span class="brand-name">Reachy</span>
+        <span class="mono-tag">— Studio édition</span>
+      </div>
+      <nav class="navlinks">
+        <a>Trabajo</a><a>Método</a><a>Precios</a><a>Diario</a>
+      </nav>
+      <button class="btn-primary">Solicitar acceso</button>
+    </div>
+
+    <div class="hero">
+      <div class="mono-tag" style="margin-bottom:32px">Vol. 01 — Marketing para indie SaaS</div>
+      <h1>El estudio de <em>marketing</em> que vive dentro de tu producto.</h1>
+      <div class="hero-row">
+        <div>
+          <p class="hero-text">Reachy es una práctica editorial para creadores de software. Cada app que lanzas recibe su propia identidad visual, una biblioteca de assets, y una cadencia de publicación pensada para humanos — no para el algoritmo.</p>
+          <div class="hero-cta">
+            <button class="btn-primary">Empezar mi proyecto</button>
+            <a>Ver el manifesto →</a>
+          </div>
+        </div>
+        <aside class="aside">
+          <div class="mono-tag" style="margin-bottom:12px">Cómo funciona</div>
+          <div class="step"><em class="serif-italic">Uno.</em>Subes tu app y su brand kit.</div>
+          <div class="step"><em class="serif-italic">Dos.</em>Generamos identidad visual extendida.</div>
+          <div class="step"><em class="serif-italic">Tres.</em>Publicas o agendas, en dos idiomas.</div>
+        </aside>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="mono-tag" style="margin-bottom:14px">— Vista del estudio</div>
+      <div class="card-frame">
+        <div class="app-grid">
+          <aside class="sidebar">
+            <div class="mono-tag" style="margin-bottom:14px">Proyectos</div>
+            <div class="proj-list">
+              <div>
+                <div class="proj-name">SaaS Tracker</div>
+                <div class="proj-meta">12 assets · activo</div>
+              </div>
+              <div>
+                <div class="proj-name muted">HabitForge</div>
+                <div class="proj-meta">borrador</div>
+              </div>
+              <div>
+                <div class="proj-name muted">NoteSync</div>
+                <div class="proj-meta">archivado</div>
+              </div>
+            </div>
+            <div class="next-issue">
+              <div class="mono-tag">Próximo número</div>
+              <div class="body">Lanzamiento de Mayo — 6 piezas, 2 reels.</div>
+            </div>
+          </aside>
+          <section class="main">
+            <div class="main-head">
+              <h3>Edición de hoy</h3>
+              <span class="mono-tag">04 mayo 2026</span>
+            </div>
+            <div class="figs">
+              <figure>
+                <div class="img img-1"></div>
+                <figcaption><em>Pieza 01.</em> Hero · Landing principal</figcaption>
+              </figure>
+              <figure>
+                <div class="img img-2"></div>
+                <figcaption><em>Pieza 02.</em> Carrusel · Instagram</figcaption>
+              </figure>
+              <figure>
+                <div class="img img-3"></div>
+                <figcaption><em>Pieza 03.</em> Reel · 30 segundos</figcaption>
+              </figure>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  Mockups locales para Reachy — sin dependencias externas (excepto fuentes Google). Cambia entre opciones con los botones arriba.
+</footer>
+
+<script>
+  const buttons = document.querySelectorAll('.picker-btn');
+  const stages  = document.querySelectorAll('.stage');
+  buttons.forEach(b => b.addEventListener('click', () => {
+    buttons.forEach(x => x.dataset.active = 'false');
+    b.dataset.active = 'true';
+    stages.forEach(s => s.classList.remove('active'));
+    document.getElementById(b.dataset.target).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+</script>
+</body>
+</html>
