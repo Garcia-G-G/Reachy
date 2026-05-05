@@ -29,7 +29,11 @@ const upsertBrandKitInput = z.object({
   fontBody: z.string().trim().max(80).optional().nullable(),
   voice: voiceSchema.optional(),
   keywords: z.array(z.string().trim().min(1).max(40)).max(40).optional(),
-  languages: z.array(z.enum(['en', 'es'])).min(1).max(2).optional(),
+  languages: z
+    .array(z.enum(['en', 'es']))
+    .min(1)
+    .max(2)
+    .optional(),
 });
 
 export type UpsertBrandKitInput = z.infer<typeof upsertBrandKitInput>;
@@ -50,11 +54,7 @@ export async function getBrandKitForProject(
     .limit(1);
   if (!proj) return null;
 
-  const [kit] = await db
-    .select()
-    .from(brandKit)
-    .where(eq(brandKit.projectId, proj.id))
-    .limit(1);
+  const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
 
   return { project: proj, brandKit: kit ?? null };
 }

@@ -11,7 +11,12 @@ const slugRegex = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
 const createProjectInput = z.object({
   name: z.string().trim().min(2).max(60),
-  slug: z.string().trim().regex(slugRegex, 'lowercase letters, numbers, dashes; min 2 chars').min(2).max(60),
+  slug: z
+    .string()
+    .trim()
+    .regex(slugRegex, 'lowercase letters, numbers, dashes; min 2 chars')
+    .min(2)
+    .max(60),
   description: z.string().trim().max(280).optional().or(z.literal('')),
   websiteUrl: z.string().trim().url().optional().or(z.literal('')),
   audience: z.string().trim().max(200).optional().or(z.literal('')),

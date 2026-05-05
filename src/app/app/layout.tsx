@@ -1,5 +1,5 @@
-import { useTranslations } from 'next-intl';
 import { redirect } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { type ReactNode, Suspense } from 'react';
 import { SidebarHeaders } from '@/components/app/sidebar-headers';
 import { SignOutButton } from '@/components/app/sign-out-button';
