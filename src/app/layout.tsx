@@ -1,5 +1,8 @@
 import type { Metadata } from 'next';
 import { Fraunces, Instrument_Serif, Inter, JetBrains_Mono } from 'next/font/google';
+import { NextIntlClientProvider } from 'next-intl';
+import { getLocale } from 'next-intl/server';
+import { Toaster } from '@/components/ui/sonner';
 import { env } from '@/env';
 import './globals.css';
 
@@ -33,22 +36,27 @@ const jetbrains = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(env.BETTER_AUTH_URL),
   title: {
-    default: 'Reachy — Edición de bienvenida',
+    default: 'Reachy — Welcome edition',
     template: '%s · Reachy',
   },
   description:
-    'Reachy convierte cada lanzamiento en una pequeña edición — imágenes, copy y reels con la coherencia de una revista bien editada.',
+    'Reachy turns every indie SaaS launch into a small edition — images, copy, reels, OG cards, all coherent with your brand.',
   applicationName: 'Reachy',
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const locale = await getLocale();
+
   return (
     <html
-      lang="es"
+      lang={locale}
       className={`${fraunces.variable} ${instrument.variable} ${inter.variable} ${jetbrains.variable}`}
       suppressHydrationWarning
     >
-      <body>{children}</body>
+      <body>
+        <NextIntlClientProvider>{children}</NextIntlClientProvider>
+        <Toaster />
+      </body>
     </html>
   );
 }

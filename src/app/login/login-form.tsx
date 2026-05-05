@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState } from 'react';
 import { authClient } from '@/lib/auth-client';
 
@@ -18,6 +19,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ERROR_ID = 'login-form-error';
 
 export function LoginForm({ googleEnabled, next }: LoginFormProps) {
+  const t = useTranslations('Login');
   const [email, setEmail] = useState('');
   const [state, setState] = useState<FormState>({ kind: 'idle' });
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,7 +32,7 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
     e.preventDefault();
     const trimmed = email.trim();
     if (!EMAIL_RE.test(trimmed)) {
-      setState({ kind: 'error', message: 'Enter a valid email address.' });
+      setState({ kind: 'error', message: t('errorInvalidEmail') });
       return;
     }
 
@@ -43,7 +45,7 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
     if (error) {
       setState({
         kind: 'error',
-        message: error.message ?? 'Could not send magic link. Try again in a moment.',
+        message: error.message ?? t('errorSendFailed'),
       });
       return;
     }
@@ -59,11 +61,10 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
     if (error) {
       setState({
         kind: 'error',
-        message: error.message ?? 'Google sign-in failed.',
+        message: error.message ?? t('errorGoogle'),
       });
       return;
     }
-    // social() redirects on success; if we're still here, reset.
     setState({ kind: 'idle' });
   }
 
@@ -75,7 +76,7 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
       <form onSubmit={onSubmit} className="space-y-8" noValidate>
         <div>
           <label htmlFor="email" className="mono-eyebrow mb-3 block">
-            Email
+            {t('emailLabel')}
           </label>
           <input
             ref={inputRef}
@@ -88,7 +89,7 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             disabled={sending}
-            placeholder="you@studio.app"
+            placeholder={t('emailPlaceholder')}
             className="field placeholder:text-ink-3"
             aria-invalid={hasError}
             aria-describedby={hasError ? ERROR_ID : undefined}
@@ -100,13 +101,13 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
           disabled={sending || !email.trim()}
           className="btn-ink w-full disabled:opacity-50"
         >
-          {sending ? 'Sending…' : 'Send magic link'}
+          {sending ? t('submitting') : t('submit')}
         </button>
       </form>
 
       <div className="flex items-center gap-4">
         <span className="h-px flex-1 bg-rule" aria-hidden />
-        <span className="mono-eyebrow">or</span>
+        <span className="mono-eyebrow">{t('or')}</span>
         <span className="h-px flex-1 bg-rule" aria-hidden />
       </div>
 
@@ -116,9 +117,9 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
         disabled={!googleEnabled || sending}
         className="btn-ghost w-full disabled:opacity-40"
         aria-disabled={!googleEnabled}
-        title={googleEnabled ? undefined : 'Google sign-in is not configured in this environment.'}
+        title={googleEnabled ? undefined : t('googleDisabledTitle')}
       >
-        Continue with Google
+        {t('googleCta')}
       </button>
 
       {state.kind === 'sent' && (
@@ -128,12 +129,11 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
           className="border-t border-ink pt-6 text-sm leading-relaxed text-ink-2"
         >
           <p>
-            Magic link on its way to <span className="font-mono text-ink">{state.email}</span>.
-            Check your inbox — the link expires in 15 minutes.
+            {t('sentBefore')}
+            <span className="font-mono text-ink">{state.email}</span>
+            {t('sentAfter')}
           </p>
-          <p className="mono-eyebrow mt-3 text-ink-3">
-            If the email is unset locally, check the dev server terminal for the URL.
-          </p>
+          <p className="mono-eyebrow mt-3 text-ink-3">{t('sentDevHint')}</p>
         </div>
       )}
 
