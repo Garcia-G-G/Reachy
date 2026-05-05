@@ -4,6 +4,7 @@ import { nextCookies } from 'better-auth/next-js';
 import { magicLink } from 'better-auth/plugins';
 import { env } from '@/env';
 import { db } from './db/client';
+import * as authSchema from './db/schema/auth';
 import { sendMagicLinkEmail } from './email/sendMagicLinkEmail';
 
 function buildSocialProviders() {
@@ -16,7 +17,7 @@ function buildSocialProviders() {
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
-  database: drizzleAdapter(db, { provider: 'pg' }),
+  database: drizzleAdapter(db, { provider: 'pg', schema: authSchema }),
   emailAndPassword: { enabled: false },
   socialProviders: buildSocialProviders(),
   plugins: [
