@@ -1,18 +1,35 @@
-import { redirect } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { redirect } from 'next/navigation';
 import { type ReactNode, Suspense } from 'react';
+import { SidebarHeaders } from '@/components/app/sidebar-headers';
 import { SignOutButton } from '@/components/app/sign-out-button';
 import { MonoEyebrow } from '@/components/editorial';
+import { listProjectsForCurrentUser } from '@/server/actions/projects';
 import { getSession } from '@/server/getSession';
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
   if (!session) redirect('/login');
 
-  return <AppShell email={session.user.email}>{children}</AppShell>;
+  const projects = await listProjectsForCurrentUser();
+  const sidebarProjects = projects.map((p) => ({ id: p.id, slug: p.slug, name: p.name }));
+
+  return (
+    <AppShell email={session.user.email} projects={sidebarProjects}>
+      {children}
+    </AppShell>
+  );
 }
 
-function AppShell({ email, children }: { email: string; children: ReactNode }) {
+function AppShell({
+  email,
+  projects,
+  children,
+}: {
+  email: string;
+  projects: { id: string; slug: string; name: string }[];
+  children: ReactNode;
+}) {
   const t = useTranslations('AppShell');
 
   return (
@@ -32,12 +49,7 @@ function AppShell({ email, children }: { email: string; children: ReactNode }) {
             <p className="mono-eyebrow mt-2 text-ink-3">{t('volume')}</p>
           </div>
 
-          <section>
-            <MonoEyebrow as="div">{t('headersSection')}</MonoEyebrow>
-            <ul className="mt-4 space-y-3 text-sm leading-snug text-ink-2">
-              <li className="text-ink-3 italic">{t('noHeaders')}</li>
-            </ul>
-          </section>
+          <SidebarHeaders projects={projects} />
 
           <section>
             <MonoEyebrow as="div">{t('thisEditionSection')}</MonoEyebrow>
