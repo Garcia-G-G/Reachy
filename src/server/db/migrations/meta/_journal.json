@@ -8,6 +8,13 @@
       "when": 1777942415700,
       "tag": "0000_lame_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778015504488,
+      "tag": "0001_wide_purple_man",
+      "breakpoints": true
     }
   ]
 }
