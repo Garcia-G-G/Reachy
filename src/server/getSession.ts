@@ -1,12 +1,15 @@
+import 'server-only';
 import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { cache } from 'react';
 import { auth } from './auth';
 
-export async function getSession() {
+export const getSession = cache(async () => {
   return auth.api.getSession({ headers: await headers() });
-}
+});
 
 export async function requireSession() {
   const session = await getSession();
-  if (!session) throw new Error('UNAUTHORIZED');
+  if (!session) redirect('/login');
   return session;
 }

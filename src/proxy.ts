@@ -1,10 +1,13 @@
+import { getSessionCookie } from 'better-auth/cookies';
 import { type NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/server/auth';
 
-export async function proxy(req: NextRequest) {
-  const session = await auth.api.getSession({ headers: req.headers });
+// Proxy does an optimistic cookie-existence check only.
+// Real auth validation happens in app/app/layout.tsx (getSession()) and inside
+// every Server Action — see Next.js auth guide and better-auth docs.
+export function proxy(req: NextRequest) {
+  const sessionCookie = getSessionCookie(req);
 
-  if (!session) {
+  if (!sessionCookie) {
     const url = new URL('/login', req.url);
     const next = req.nextUrl.pathname + req.nextUrl.search;
     url.searchParams.set('next', next);

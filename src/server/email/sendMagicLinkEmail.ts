@@ -1,9 +1,27 @@
+import 'server-only';
 import { Resend } from 'resend';
 import { env } from '@/env';
 
 type SendArgs = { to: string; url: string };
 
 const SUBJECT = 'Sign in to Reachy';
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function assertSameOrigin(url: string): void {
+  const expected = new URL(env.BETTER_AUTH_URL).origin;
+  const actual = new URL(url).origin;
+  if (actual !== expected) {
+    throw new Error(`Magic-link URL origin mismatch: expected ${expected}, got ${actual}`);
+  }
+}
 
 function plainText(url: string) {
   return [
@@ -18,6 +36,7 @@ function plainText(url: string) {
 }
 
 function html(url: string) {
+  const safeUrl = escapeHtml(url);
   return `<!doctype html>
 <html lang="en">
   <body style="margin:0;padding:48px 24px;background:#f1ebdf;color:#14110d;font-family:'Inter',system-ui,sans-serif;">
@@ -27,10 +46,10 @@ function html(url: string) {
         <h1 style="font-family:'Fraunces',Georgia,serif;font-size:40px;line-height:1.05;letter-spacing:-.02em;margin:0 0 24px;">Step into your editor&rsquo;s desk.</h1>
         <p style="font-size:15px;line-height:1.55;margin:0 0 32px;">Click the button below to sign in. The link expires in 15 minutes.</p>
         <p style="margin:0 0 32px;">
-          <a href="${url}" style="display:inline-block;background:#14110d;color:#f1ebdf;padding:16px 32px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;text-decoration:none;">Sign in to Reachy</a>
+          <a href="${safeUrl}" style="display:inline-block;background:#14110d;color:#f1ebdf;padding:16px 32px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;text-decoration:none;">Sign in to Reachy</a>
         </p>
         <p style="font-size:13px;color:#4a4338;margin:0 0 8px;">Or copy and paste this URL:</p>
-        <p style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;word-break:break-all;color:#4a4338;margin:0 0 32px;">${url}</p>
+        <p style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;word-break:break-all;color:#4a4338;margin:0 0 32px;">${safeUrl}</p>
         <hr style="border:0;border-top:1px solid #c9bfa9;margin:32px 0;" />
         <p style="font-size:12px;color:#8b8170;margin:0;">If you did not request this email, you can ignore it.</p>
       </td></tr>
@@ -40,6 +59,8 @@ function html(url: string) {
 }
 
 export async function sendMagicLinkEmail({ to, url }: SendArgs): Promise<void> {
+  assertSameOrigin(url);
+
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
     console.log('\n[reachy:auth] Magic link (dev fallback — RESEND_API_KEY or EMAIL_FROM missing)');
     console.log(`[reachy:auth] to:  ${to}`);
