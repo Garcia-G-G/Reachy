@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Fraunces, Instrument_Serif, Inter, JetBrains_Mono } from 'next/font/google';
-import '@/env';
+import { env } from '@/env';
 import './globals.css';
 
 const fraunces = Fraunces({
@@ -31,7 +31,7 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('http://localhost:3000'),
+  metadataBase: new URL(env.BETTER_AUTH_URL),
   title: {
     default: 'Reachy — Edición de bienvenida',
     template: '%s · Reachy',

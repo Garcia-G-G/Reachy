@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { authClient } from '@/lib/auth-client';
 
 interface LoginFormProps {
@@ -14,14 +14,25 @@ type FormState =
   | { kind: 'sent'; email: string }
   | { kind: 'error'; message: string };
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ERROR_ID = 'login-form-error';
+
 export function LoginForm({ googleEnabled, next }: LoginFormProps) {
   const [email, setEmail] = useState('');
   const [state, setState] = useState<FormState>({ kind: 'idle' });
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (state.kind === 'error') inputRef.current?.focus();
+  }, [state.kind]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const trimmed = email.trim();
-    if (!trimmed) return;
+    if (!EMAIL_RE.test(trimmed)) {
+      setState({ kind: 'error', message: 'Enter a valid email address.' });
+      return;
+    }
 
     setState({ kind: 'sending' });
     const { error } = await authClient.signIn.magicLink({
@@ -50,10 +61,14 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
         kind: 'error',
         message: error.message ?? 'Google sign-in failed.',
       });
+      return;
     }
+    // social() redirects on success; if we're still here, reset.
+    setState({ kind: 'idle' });
   }
 
   const sending = state.kind === 'sending';
+  const hasError = state.kind === 'error';
 
   return (
     <div className="space-y-10">
@@ -63,6 +78,7 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
             Email
           </label>
           <input
+            ref={inputRef}
             id="email"
             type="email"
             name="email"
@@ -74,6 +90,8 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
             disabled={sending}
             placeholder="you@studio.app"
             className="field placeholder:text-ink-3"
+            aria-invalid={hasError}
+            aria-describedby={hasError ? ERROR_ID : undefined}
           />
         </div>
 
@@ -119,8 +137,8 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
         </div>
       )}
 
-      {state.kind === 'error' && (
-        <p role="alert" className="border-t border-accent pt-6 text-sm text-accent">
+      {hasError && (
+        <p id={ERROR_ID} role="alert" className="border-t border-accent pt-6 text-sm text-accent">
           {state.message}
         </p>
       )}
