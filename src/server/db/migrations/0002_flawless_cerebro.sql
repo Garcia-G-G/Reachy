@@ -1,0 +1,1 @@
+ALTER TABLE "brand_kit" ADD COLUMN "languages" jsonb DEFAULT '["en"]'::jsonb NOT NULL;

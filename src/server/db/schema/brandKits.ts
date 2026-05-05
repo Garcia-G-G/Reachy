@@ -2,7 +2,13 @@ import { relations } from 'drizzle-orm';
 import { jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { project } from './projects';
 
-type Voice = { tone: string; doNot: string[]; examples: string[] };
+export type BrandVoice = {
+  tone: string;
+  doSay: string[];
+  dontSay: string[];
+};
+
+export type BrandLanguage = 'en' | 'es';
 
 export const brandKit = pgTable(
   'brand_kit',
@@ -18,8 +24,9 @@ export const brandKit = pgTable(
     fontHeading: text('font_heading'),
     fontBody: text('font_body'),
     logoUrl: text('logo_url'),
-    voice: jsonb('voice').$type<Voice>(),
+    voice: jsonb('voice').$type<BrandVoice>(),
     keywords: jsonb('keywords').$type<string[]>().default([]),
+    languages: jsonb('languages').$type<BrandLanguage[]>().default(['en']).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
