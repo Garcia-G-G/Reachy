@@ -14,7 +14,7 @@
     "db:down": "docker compose -f docker/docker-compose.yml down",
     "db:logs": "docker compose -f docker/docker-compose.yml logs -f",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "node --import tsx ./src/server/db/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
@@ -48,6 +48,7 @@
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

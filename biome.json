@@ -18,7 +18,8 @@
       "!**/*.min.*",
       "!**/pnpm-lock.yaml",
       "!**/next-env.d.ts",
-      "!docs"
+      "!docs",
+      "!planning"
     ]
   },
   "formatter": {
