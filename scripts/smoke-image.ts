@@ -1,19 +1,15 @@
 import { config as loadEnv } from 'dotenv';
 import { eq } from 'drizzle-orm';
 import { db } from '@/server/db/client';
-import { project } from '@/server/db/schema/projects';
-import { generation } from '@/server/db/schema/generations';
 import { asset } from '@/server/db/schema/assets';
+import { generation } from '@/server/db/schema/generations';
+import { project } from '@/server/db/schema/projects';
 import { getImageQueue } from '@/server/jobs/queue';
 
 loadEnv({ path: '.env.local' });
 
 async function main() {
-  const [proj] = await db
-    .select()
-    .from(project)
-    .where(eq(project.slug, 'saas-tracker'))
-    .limit(1);
+  const [proj] = await db.select().from(project).where(eq(project.slug, 'saas-tracker')).limit(1);
   if (!proj) {
     console.error('No project saas-tracker — create one first.');
     process.exit(1);
@@ -53,11 +49,7 @@ async function main() {
   const start = Date.now();
   while (Date.now() - start < 90_000) {
     await new Promise((r) => setTimeout(r, 2_000));
-    const [row] = await db
-      .select()
-      .from(generation)
-      .where(eq(generation.id, gen.id))
-      .limit(1);
+    const [row] = await db.select().from(generation).where(eq(generation.id, gen.id)).limit(1);
     if (!row) continue;
     console.log(`[t+${Math.round((Date.now() - start) / 1000)}s] status=${row.status}`);
     if (row.status === 'done' || row.status === 'failed') {

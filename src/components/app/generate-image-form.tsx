@@ -315,7 +315,7 @@ function ResultPanel({
     );
   }
 
-  const assets = run.kind === 'done' ? run.assets : run.assets;
+  const assets = run.assets;
   const grid = assets.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
 
   return (
