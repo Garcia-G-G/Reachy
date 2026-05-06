@@ -5,12 +5,17 @@ loadEnv({ path: '.env' });
 
 async function main() {
   const { startImageWorker } = await import('./imageWorker');
-  const worker = startImageWorker();
+  const { startVideoWorker } = await import('./videoWorker');
+
+  const imageWorker = startImageWorker();
   console.log('[reachy:worker] image-gen worker started.');
 
+  const videoWorker = startVideoWorker();
+  console.log('[reachy:worker] video-gen worker started.');
+
   const shutdown = async (signal: string) => {
-    console.log(`[reachy:worker] ${signal} received — closing worker...`);
-    await worker.close();
+    console.log(`[reachy:worker] ${signal} received — closing workers...`);
+    await Promise.all([imageWorker.close(), videoWorker.close()]);
     process.exit(0);
   };
 

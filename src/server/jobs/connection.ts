@@ -16,4 +16,5 @@ export function createBullConnection(): Redis {
 
 export const QUEUE_NAMES = {
   imageGen: 'image-gen',
+  videoGen: 'video-gen',
 } as const;

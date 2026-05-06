@@ -16,6 +16,7 @@ export function GenerateSubNav({ slug }: GenerateSubNavProps) {
   const items = [
     { href: `${base}/image`, label: t('subNavImage') },
     { href: `${base}/copy`, label: t('subNavCopy') },
+    { href: `${base}/reel`, label: t('subNavReel') },
   ];
 
   return (

@@ -5,16 +5,17 @@ import { useTranslations } from 'next-intl';
 
 interface LibraryTabsProps {
   slug: string;
-  active: 'image' | 'copy';
+  active: 'image' | 'copy' | 'reel';
 }
 
 export function LibraryTabs({ slug, active }: LibraryTabsProps) {
   const t = useTranslations('Library');
   const base = `/app/projects/${slug}/library`;
 
-  const items: Array<{ href: string; label: string; key: 'image' | 'copy' }> = [
+  const items: Array<{ href: string; label: string; key: 'image' | 'copy' | 'reel' }> = [
     { href: base, label: t('tabImage'), key: 'image' },
     { href: `${base}?tab=copy`, label: t('tabCopy'), key: 'copy' },
+    { href: `${base}?tab=reel`, label: t('tabReel'), key: 'reel' },
   ];
 
   return (
