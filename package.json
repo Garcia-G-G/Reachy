@@ -16,7 +16,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --import tsx ./src/server/db/migrate.ts",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "worker": "node --import tsx ./src/server/jobs/worker.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1044.0",
