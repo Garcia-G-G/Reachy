@@ -36,7 +36,7 @@ export function CopyArchive({ editions }: { editions: CopyArchiveRow[] }) {
         <span className="mono-eyebrow text-ink-3">{t('colFormat')}</span>
         <span className="mono-eyebrow text-ink-3">{t('colLanguage')}</span>
         <span className="mono-eyebrow text-ink-3">{t('colSnippet')}</span>
-        <span className="mono-eyebrow text-ink-3 text-right">{t('colActions')}</span>
+        <span className="sr-only">Actions</span>
       </div>
 
       {editions.map((edition) => {
@@ -159,9 +159,10 @@ function Row({
           <button
             type="button"
             onClick={copy}
+            aria-label={copied ? `Copied ${language} copy` : `Copy ${language} version`}
             className="mono-eyebrow text-ink-3 transition-colors hover:text-accent"
           >
-            {copied ? '✓' : '⧉'}
+            <span aria-hidden="true">{copied ? '✓' : '⧉'}</span>
           </button>
         )}
         {payload && (

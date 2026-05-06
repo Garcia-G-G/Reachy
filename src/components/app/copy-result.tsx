@@ -61,9 +61,14 @@ function Column({
         <button
           type="button"
           onClick={onCopy}
+          aria-label={
+            copied
+              ? `Copied ${language} copy to clipboard`
+              : `Copy ${language} version to clipboard`
+          }
           className="mono-eyebrow text-ink-3 transition-colors hover:text-accent"
         >
-          {copied ? '✓ Copied' : '⧉ Copy'}
+          <span aria-hidden="true">{copied ? '✓ Copied' : '⧉ Copy'}</span>
         </button>
       </header>
       <div>
