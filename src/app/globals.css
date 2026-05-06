@@ -277,3 +277,15 @@
 .card-hard {
   box-shadow: 14px 14px 0 var(--ink);
 }
+
+/* Editorial body text used by Copy results, archive snippets, and any
+   long-form editorial paragraph. Uses Fraunces at a light weight for
+   magazine-column readability. */
+.serif-body {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 300;
+  font-size: 17px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}

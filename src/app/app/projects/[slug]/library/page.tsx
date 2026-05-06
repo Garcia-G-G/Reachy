@@ -2,13 +2,23 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
+import { CopyArchive, type CopyArchiveRow } from '@/components/app/copy-archive';
 import { LibraryGrid } from '@/components/app/library-grid';
+import { LibraryTabs } from '@/components/app/library-tabs';
 import { MonoEyebrow } from '@/components/editorial';
+import { listCopyEditionsForProject } from '@/server/actions/copy';
 import { listAssetsForProject } from '@/server/actions/images';
 import { getProjectBySlug } from '@/server/actions/projects';
 
 interface LibraryPageProps {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}
+
+type Tab = 'image' | 'copy';
+
+function normalizeTab(raw: string | undefined): Tab {
+  return raw === 'copy' ? 'copy' : 'image';
 }
 
 export async function generateMetadata({ params }: LibraryPageProps): Promise<Metadata> {
@@ -18,16 +28,38 @@ export async function generateMetadata({ params }: LibraryPageProps): Promise<Me
   return { title: project ? `${project.name} — ${t('metaTitle')}` : t('metaTitle') };
 }
 
-export default async function LibraryPage({ params }: LibraryPageProps) {
+export default async function LibraryPage({ params, searchParams }: LibraryPageProps) {
   const { slug } = await params;
+  const sp = await searchParams;
+  const tab = normalizeTab(sp.tab);
+
   const project = await getProjectBySlug(slug);
   if (!project) notFound();
 
-  const assets = await listAssetsForProject(project.id);
+  const imageAssetsP = tab === 'image' ? listAssetsForProject(project.id) : Promise.resolve([]);
+  const copyEditionsP =
+    tab === 'copy' ? listCopyEditionsForProject(project.id) : Promise.resolve([]);
+  const [imageAssets, copyEditions] = await Promise.all([imageAssetsP, copyEditionsP]);
+
+  // For the image tab, drop copy assets (they have no width/height/url).
+  const imageOnly = imageAssets.filter((a) => a.kind !== 'copy');
+
+  const copyRows: CopyArchiveRow[] = copyEditions.map((e) => ({
+    generationId: e.generationId,
+    format: e.format,
+    createdAt: e.createdAt,
+    costCents: e.costCents,
+    status: e.status,
+    errorMessage: e.errorMessage,
+    esPayload: e.es?.payload ?? null,
+    enPayload: e.en?.payload ?? null,
+  }));
 
   return (
-    <LibraryPageContent
-      assets={assets.map((a) => ({
+    <Content
+      slug={project.slug}
+      tab={tab}
+      images={imageOnly.map((a) => ({
         id: a.id,
         format: a.format,
         width: a.width,
@@ -37,6 +69,7 @@ export default async function LibraryPage({ params }: LibraryPageProps) {
         bytes: a.bytes,
         createdAt: a.createdAt.toISOString(),
       }))}
+      copyRows={copyRows}
     />
   );
 }
@@ -52,7 +85,17 @@ interface LibraryAsset {
   createdAt: string;
 }
 
-function LibraryPageContent({ assets }: { assets: LibraryAsset[] }) {
+function Content({
+  slug,
+  tab,
+  images,
+  copyRows,
+}: {
+  slug: string;
+  tab: Tab;
+  images: LibraryAsset[];
+  copyRows: CopyArchiveRow[];
+}) {
   const t = useTranslations('Library');
 
   return (
@@ -78,11 +121,21 @@ function LibraryPageContent({ assets }: { assets: LibraryAsset[] }) {
         </p>
       </div>
 
-      {assets.length === 0 ? (
-        <p className="text-ink-3 italic">{t('empty')}</p>
-      ) : (
-        <LibraryGrid assets={assets} />
-      )}
+      <LibraryTabs slug={slug} active={tab} />
+
+      {tab === 'image' &&
+        (images.length === 0 ? (
+          <p className="text-ink-3 italic">{t('empty')}</p>
+        ) : (
+          <LibraryGrid assets={images} />
+        ))}
+
+      {tab === 'copy' &&
+        (copyRows.length === 0 ? (
+          <p className="text-ink-3 italic">{t('emptyCopy')}</p>
+        ) : (
+          <CopyArchive editions={copyRows} />
+        ))}
     </div>
   );
 }

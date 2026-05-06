@@ -14,18 +14,23 @@ export function ProjectTabs({ slug }: ProjectTabsProps) {
   const base = `/app/projects/${slug}`;
 
   const tabs = [
-    { href: base, label: t('tabOverview') },
-    { href: `${base}/generate/image`, label: t('tabGenerate') },
-    { href: `${base}/library`, label: t('tabLibrary') },
-    { href: `${base}/identity`, label: t('tabIdentity') },
-    { href: `${base}/archive`, label: t('tabArchive') },
+    { href: base, label: t('tabOverview'), match: base },
+    { href: `${base}/generate/image`, label: t('tabGenerate'), match: `${base}/generate` },
+    { href: `${base}/library`, label: t('tabLibrary'), match: `${base}/library` },
+    { href: `${base}/identity`, label: t('tabIdentity'), match: `${base}/identity` },
+    { href: `${base}/archive`, label: t('tabArchive'), match: `${base}/archive` },
   ];
 
   return (
     <nav className="border-b border-rule" aria-label="Project sections">
       <ul className="-mb-px flex flex-wrap gap-8">
         {tabs.map((tab) => {
-          const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+          // Overview tab: only match exact base path. Other tabs: match
+          // their section root (e.g. /generate matches /generate/image AND /generate/copy).
+          const isActive =
+            tab.match === base
+              ? pathname === base
+              : pathname === tab.match || pathname.startsWith(`${tab.match}/`);
           return (
             <li key={tab.href}>
               <Link
