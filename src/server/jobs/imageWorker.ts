@@ -1,13 +1,13 @@
 import 'server-only';
 import { Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
-import { generateImage } from '@/server/ai/imageGen';
 import { getFormat } from '@/server/ai/formats';
+import { generateImage } from '@/server/ai/imageGen';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
 import { putR2 } from '@/server/storage/r2';
-import { QUEUE_NAMES, createBullConnection } from './connection';
+import { createBullConnection, QUEUE_NAMES } from './connection';
 import type { ImageGenJobData } from './queue';
 
 export function startImageWorker(): Worker<ImageGenJobData> {
@@ -17,10 +17,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
       const { generationId, projectId, prompt, format, provider, model, n } = job.data;
       const fm = getFormat(format);
 
-      await db
-        .update(generation)
-        .set({ status: 'running' })
-        .where(eq(generation.id, generationId));
+      await db.update(generation).set({ status: 'running' }).where(eq(generation.id, generationId));
 
       try {
         const result = await generateImage({ prompt, format, provider, model, n });

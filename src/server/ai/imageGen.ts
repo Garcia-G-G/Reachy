@@ -1,10 +1,11 @@
 import 'server-only';
 import sharp from 'sharp';
+import type { ImageFormat, ImageFormatSpec, ImageProvider } from '@/lib/image-formats';
 import { getFal } from './fal';
-import { type ImageFormat, getFormat, type ImageFormatSpec } from './formats';
+import { getFormat } from './formats';
 import { getOpenAI } from './openai';
 
-export type ImageProvider = 'openai' | 'fal';
+export type { ImageProvider };
 
 export interface GenerateImageInput {
   prompt: string;
@@ -158,21 +159,4 @@ export async function generateImage(input: GenerateImageInput): Promise<Generate
   throw new Error(`Unknown image provider: ${input.provider satisfies never}`);
 }
 
-export const IMAGE_PROVIDERS: {
-  provider: ImageProvider;
-  models: { id: string; label: string }[];
-}[] = [
-  {
-    provider: 'openai',
-    models: [{ id: 'gpt-image-1', label: 'OpenAI · GPT Image 1' }],
-  },
-  {
-    provider: 'fal',
-    models: [
-      { id: 'fal-ai/flux-2-pro', label: 'fal.ai · FLUX.2 [pro]' },
-      { id: 'fal-ai/flux-2-flex', label: 'fal.ai · FLUX.2 [flex]' },
-      { id: 'fal-ai/recraft-v3', label: 'fal.ai · Recraft V3' },
-      { id: 'fal-ai/nano-banana-2', label: 'fal.ai · Nano Banana 2' },
-    ],
-  },
-];
+export { IMAGE_PROVIDERS } from '@/lib/image-formats';

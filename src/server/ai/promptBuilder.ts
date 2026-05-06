@@ -1,7 +1,7 @@
 import 'server-only';
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
-import { type ImageFormat, getFormat } from './formats';
+import { getFormat, type ImageFormat } from './formats';
 
 interface BuildArgs {
   idea: string;

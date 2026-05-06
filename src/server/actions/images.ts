@@ -3,16 +3,16 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { type ImageFormat, IMAGE_FORMAT_KEYS } from '@/server/ai/formats';
-import { type ImageProvider } from '@/server/ai/imageGen';
+import { IMAGE_FORMAT_KEYS, type ImageFormat } from '@/server/ai/formats';
+import type { ImageProvider } from '@/server/ai/imageGen';
 import { buildImagePrompt } from '@/server/ai/promptBuilder';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { brandKit } from '@/server/db/schema/brandKits';
 import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
-import { getImageQueue } from '@/server/jobs/queue';
 import { getSession } from '@/server/getSession';
+import { getImageQueue } from '@/server/jobs/queue';
 
 const enqueueInput = z.object({
   projectId: z.string().uuid(),
@@ -47,11 +47,7 @@ export async function enqueueImageGeneration(
     .limit(1);
   if (!proj) return { ok: false, error: 'not-found' };
 
-  const [kit] = await db
-    .select()
-    .from(brandKit)
-    .where(eq(brandKit.projectId, proj.id))
-    .limit(1);
+  const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
 
   const prompt = buildImagePrompt({
     idea: parsed.data.idea,
@@ -107,7 +103,7 @@ export async function enqueueImageGeneration(
 
 export async function listGenerationsForProject(
   projectId: string,
-): Promise<typeof generation.$inferSelect[]> {
+): Promise<(typeof generation.$inferSelect)[]> {
   const session = await getSession();
   if (!session) return [];
 
@@ -128,7 +124,7 @@ export async function listGenerationsForProject(
 
 export async function listAssetsForProject(
   projectId: string,
-): Promise<typeof asset.$inferSelect[]> {
+): Promise<(typeof asset.$inferSelect)[]> {
   const session = await getSession();
   if (!session) return [];
 

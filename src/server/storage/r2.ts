@@ -35,11 +35,7 @@ export interface PutR2Result {
   bytes: number;
 }
 
-export async function putR2(
-  key: string,
-  body: Buffer,
-  contentType: string,
-): Promise<PutR2Result> {
+export async function putR2(key: string, body: Buffer, contentType: string): Promise<PutR2Result> {
   if (!env.R2_BUCKET) throw new Error('R2_BUCKET is not set.');
   const r2 = getR2();
   await r2.send(
@@ -57,9 +53,7 @@ export async function putR2(
 export async function signedDownloadUrl(key: string, expiresInSec = 60 * 5): Promise<string> {
   if (!env.R2_BUCKET) throw new Error('R2_BUCKET is not set.');
   const r2 = getR2();
-  return getSignedUrl(
-    r2,
-    new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }),
-    { expiresIn: expiresInSec },
-  );
+  return getSignedUrl(r2, new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }), {
+    expiresIn: expiresInSec,
+  });
 }

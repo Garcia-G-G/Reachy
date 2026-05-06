@@ -15,6 +15,8 @@ export function ProjectTabs({ slug }: ProjectTabsProps) {
 
   const tabs = [
     { href: base, label: t('tabOverview') },
+    { href: `${base}/generate/image`, label: t('tabGenerate') },
+    { href: `${base}/library`, label: t('tabLibrary') },
     { href: `${base}/identity`, label: t('tabIdentity') },
     { href: `${base}/archive`, label: t('tabArchive') },
   ];
@@ -23,7 +25,7 @@ export function ProjectTabs({ slug }: ProjectTabsProps) {
     <nav className="border-b border-rule" aria-label="Project sections">
       <ul className="-mb-px flex flex-wrap gap-8">
         {tabs.map((tab) => {
-          const isActive = pathname === tab.href;
+          const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
           return (
             <li key={tab.href}>
               <Link

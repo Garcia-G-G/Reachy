@@ -2,7 +2,7 @@ import 'server-only';
 import { Queue } from 'bullmq';
 import type { ImageFormat } from '@/server/ai/formats';
 import type { ImageProvider } from '@/server/ai/imageGen';
-import { QUEUE_NAMES, createBullConnection } from './connection';
+import { createBullConnection, QUEUE_NAMES } from './connection';
 
 export interface ImageGenJobData {
   generationId: string;
