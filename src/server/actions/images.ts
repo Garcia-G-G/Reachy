@@ -1,6 +1,6 @@
 'use server';
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { IMAGE_FORMAT_KEYS, type ImageFormat } from '@/server/ai/formats';
@@ -13,6 +13,7 @@ import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
 import { getSession } from '@/server/getSession';
 import { getImageQueue } from '@/server/jobs/queue';
+import { checkDailyUsage } from '@/server/lib/usage-cap';
 
 const enqueueInput = z.object({
   projectId: z.string().uuid(),
@@ -39,13 +40,25 @@ export async function enqueueImageGeneration(
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
   }
 
-  // Ownership check + load project + brand kit in one round-trip-set.
+  // Ownership + archive check in one round-trip. Archived projects are
+  // read-only — the dashboard already hides them, but a stale tab could still
+  // POST here. Refuse cleanly.
   const [proj] = await db
     .select()
     .from(project)
-    .where(and(eq(project.id, parsed.data.projectId), eq(project.userId, session.user.id)))
+    .where(
+      and(
+        eq(project.id, parsed.data.projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
     .limit(1);
   if (!proj) return { ok: false, error: 'not-found' };
+
+  // Per-user daily cap. Failures count too — they hit the upstream provider.
+  const usage = await checkDailyUsage(session.user.id, 'image');
+  if (!usage.ok) return { ok: false, error: `daily-cap (${usage.used}/${usage.cap})` };
 
   const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
 
@@ -78,15 +91,22 @@ export async function enqueueImageGeneration(
   if (!gen) return { ok: false, error: 'enqueue failed' };
 
   try {
-    await getImageQueue().add('generate', {
-      generationId: gen.id,
-      projectId: proj.id,
-      prompt,
-      format: parsed.data.format as ImageFormat,
-      provider: parsed.data.provider as ImageProvider,
-      model: parsed.data.model,
-      n: parsed.data.n,
-    });
+    // jobId = generationId so a double-submit (network retry, double click)
+    // collapses into a single job. BullMQ rejects the second add with the same
+    // jobId — we treat that as already-enqueued and return ok.
+    await getImageQueue().add(
+      'generate',
+      {
+        generationId: gen.id,
+        projectId: proj.id,
+        prompt,
+        format: parsed.data.format as ImageFormat,
+        provider: parsed.data.provider as ImageProvider,
+        model: parsed.data.model,
+        n: parsed.data.n,
+      },
+      { jobId: gen.id },
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'queue error';
     await db
@@ -110,7 +130,13 @@ export async function listGenerationsForProject(
   const [proj] = await db
     .select({ id: project.id })
     .from(project)
-    .where(and(eq(project.id, projectId), eq(project.userId, session.user.id)))
+    .where(
+      and(
+        eq(project.id, projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
     .limit(1);
   if (!proj) return [];
 
@@ -131,7 +157,13 @@ export async function listAssetsForProject(
   const [proj] = await db
     .select({ id: project.id })
     .from(project)
-    .where(and(eq(project.id, projectId), eq(project.userId, session.user.id)))
+    .where(
+      and(
+        eq(project.id, projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
     .limit(1);
   if (!proj) return [];
 

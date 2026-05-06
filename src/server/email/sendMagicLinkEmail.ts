@@ -78,8 +78,13 @@ export async function sendMagicLinkEmail({ to, url }: SendArgs): Promise<void> {
   });
 
   if (error) {
-    console.error('[reachy:auth] Resend send failed:', error);
-    console.log(`[reachy:auth] Dev fallback URL for ${to}: ${url}`);
+    // Never log the magic-link URL in production — server logs are persisted
+    // by hosting providers and would let anyone with log access impersonate
+    // the user. Log a sanitized error only.
+    console.error('[reachy:auth] Resend send failed:', error.message ?? error);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[reachy:auth] Dev fallback URL for ${to}: ${url}`);
+    }
     throw new Error(`Failed to send magic link: ${error.message ?? 'unknown error'}`);
   }
 }

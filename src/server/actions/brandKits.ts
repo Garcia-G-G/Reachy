@@ -1,6 +1,6 @@
 'use server';
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { db } from '@/server/db/client';
@@ -50,7 +50,13 @@ export async function getBrandKitForProject(
   const [proj] = await db
     .select()
     .from(project)
-    .where(and(eq(project.id, projectId), eq(project.userId, session.user.id)))
+    .where(
+      and(
+        eq(project.id, projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
     .limit(1);
   if (!proj) return null;
 
@@ -68,11 +74,17 @@ export async function upsertBrandKit(input: UpsertBrandKitInput): Promise<Action
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
   }
 
-  // Verify ownership of the parent project before any write.
+  // Verify ownership + archive of the parent project before any write.
   const [proj] = await db
     .select({ id: project.id, slug: project.slug })
     .from(project)
-    .where(and(eq(project.id, parsed.data.projectId), eq(project.userId, session.user.id)))
+    .where(
+      and(
+        eq(project.id, parsed.data.projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
     .limit(1);
   if (!proj) return { ok: false, error: 'not-found' };
 

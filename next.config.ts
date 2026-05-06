@@ -6,6 +6,12 @@ const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  // 'same-origin-allow-popups' is required so the Google OAuth popup can
+  // close itself and notify the opener (better-auth's social sign-in flow).
+  // 'same-origin' would break Google sign-in. See:
+  // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cross-Origin-Opener-Policy
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
+  { key: 'Cross-Origin-Resource-Policy', value: 'same-site' },
 ];
 
 const r2PublicHostname = (() => {

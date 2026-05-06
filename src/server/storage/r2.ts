@@ -19,6 +19,12 @@ function getR2(): S3Client {
       accessKeyId: env.R2_ACCESS_KEY_ID,
       secretAccessKey: env.R2_SECRET_ACCESS_KEY,
     },
+    // AWS SDK v3 ≥3.729 sends a CRC32 default-integrity header that R2 rejects
+    // ("Header 'x-amz-checksum-algorithm' with value 'CRC32' not implemented").
+    // Falling back to WHEN_REQUIRED preserves checksums for ops that demand them
+    // (uploadPart, etc) without breaking single-shot PutObject against R2.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
   return cached;
 }

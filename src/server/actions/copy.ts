@@ -1,6 +1,6 @@
 'use server';
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import {
@@ -16,6 +16,7 @@ import { brandKit } from '@/server/db/schema/brandKits';
 import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
 import { getSession } from '@/server/getSession';
+import { checkDailyUsage } from '@/server/lib/usage-cap';
 
 // Validate format with a single-element fallback so z.enum gets at least one
 // option even if the keys array is somehow empty at runtime (it isn't, but the
@@ -56,48 +57,50 @@ async function persistGenerationAndAssets(args: {
 }): Promise<GenerateOk> {
   const { projectId, projectSlug, format, idea, result, promptLanguage } = args;
 
-  // Insert the generation row already 'done' — copy is synchronous, no worker.
-  const [gen] = await db
-    .insert(generation)
-    .values({
+  // Wrap generation + asset inserts in a single transaction so we can never
+  // end up with a billed generation row that has no assets (or assets with no
+  // parent). If either insert fails, both roll back and the user sees the
+  // failure path that re-records a `failed` generation row.
+  const generationId = await db.transaction(async (tx) => {
+    const [gen] = await tx
+      .insert(generation)
+      .values({
+        projectId,
+        type: 'copy',
+        format,
+        status: 'done',
+        provider: 'openai',
+        model: result.model,
+        prompt: result.userPrompt,
+        params: {
+          idea,
+          promptLanguage,
+          systemPrompt: result.systemPrompt,
+          usage: result.usage,
+        },
+        costCents: result.costCents,
+        finishedAt: new Date(),
+      })
+      .returning({ id: generation.id });
+    if (!gen) throw new Error('failed to insert generation row');
+
+    const rows: Array<typeof asset.$inferInsert> = (['es', 'en'] as const).map((lang) => ({
+      generationId: gen.id,
       projectId,
-      type: 'copy',
+      kind: 'copy' as const,
       format,
-      status: 'done',
-      provider: 'openai',
-      model: result.model,
-      prompt: result.userPrompt,
-      params: {
-        idea,
-        promptLanguage,
-        systemPrompt: result.systemPrompt,
-        usage: result.usage,
-      },
-      costCents: result.costCents,
-      finishedAt: new Date(),
-    })
-    .returning();
-  if (!gen) throw new Error('failed to insert generation row');
-
-  // One asset per language. Stringify non-string payloads (objects/arrays) so
-  // the `text` column always holds a flat string. The `format` column tells
-  // the renderer how to parse it back.
-  const rows: Array<typeof asset.$inferInsert> = (['es', 'en'] as const).map((lang) => ({
-    generationId: gen.id,
-    projectId,
-    kind: 'copy' as const,
-    format,
-    language: lang,
-    text: serializePayload(result.payload[lang]),
-  }));
-
-  await db.insert(asset).values(rows);
+      language: lang,
+      text: serializePayload(result.payload[lang]),
+    }));
+    await tx.insert(asset).values(rows);
+    return gen.id;
+  });
 
   revalidatePath(`/app/projects/${projectSlug}/library`, 'layout');
   revalidatePath(`/app/projects/${projectSlug}/generate/copy`, 'layout');
 
   return {
-    generationId: gen.id,
+    generationId,
     projectSlug,
     format,
     payload: result.payload,
@@ -116,13 +119,22 @@ export async function generateCopyAction(
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
   }
 
-  // Ownership check + load project + brand kit in one round-trip-set.
+  // Ownership + archive check. Archived projects are read-only.
   const [proj] = await db
     .select()
     .from(project)
-    .where(and(eq(project.id, parsed.data.projectId), eq(project.userId, session.user.id)))
+    .where(
+      and(
+        eq(project.id, parsed.data.projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
     .limit(1);
   if (!proj) return { ok: false, error: 'not-found' };
+
+  const usage = await checkDailyUsage(session.user.id, 'copy');
+  if (!usage.ok) return { ok: false, error: `daily-cap (${usage.used}/${usage.cap})` };
 
   const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
 
@@ -181,7 +193,7 @@ export async function regenerateCopyVariant(
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
   }
 
-  // Load original generation + verify ownership in one inner-join.
+  // Load original generation + verify ownership + archive state in one join.
   const [orig] = await db
     .select({
       id: generation.id,
@@ -193,10 +205,19 @@ export async function regenerateCopyVariant(
     })
     .from(generation)
     .innerJoin(project, eq(project.id, generation.projectId))
-    .where(and(eq(generation.id, parsed.data.generationId), eq(project.userId, session.user.id)))
+    .where(
+      and(
+        eq(generation.id, parsed.data.generationId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
     .limit(1);
   if (!orig) return { ok: false, error: 'not-found' };
   if (orig.type !== 'copy') return { ok: false, error: 'wrong-type' };
+
+  const usage = await checkDailyUsage(session.user.id, 'copy');
+  if (!usage.ok) return { ok: false, error: `daily-cap (${usage.used}/${usage.cap})` };
 
   const params = (orig.params ?? {}) as { idea?: string; promptLanguage?: 'en' | 'es' };
   const idea = params.idea?.trim();
@@ -287,7 +308,13 @@ export async function listCopyEditionsForProject(projectId: string): Promise<Cop
   const [proj] = await db
     .select({ id: project.id })
     .from(project)
-    .where(and(eq(project.id, projectId), eq(project.userId, session.user.id)))
+    .where(
+      and(
+        eq(project.id, projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
     .limit(1);
   if (!proj) return [];
 
@@ -302,11 +329,17 @@ export async function listCopyEditionsForProject(projectId: string): Promise<Cop
   if (gens.length === 0) return [];
 
   const genIds = gens.map((g) => g.id);
-  const allAssets = await db.select().from(asset).where(eq(asset.kind, 'copy'));
+  // Pull only the copy-assets that belong to these generations — server-side
+  // filter, no full-table scan. The composite predicate hits asset_generation_id_idx
+  // and avoids returning every copy asset in the database.
+  const scopedAssets = await db
+    .select()
+    .from(asset)
+    .where(and(eq(asset.kind, 'copy'), inArray(asset.generationId, genIds)));
 
-  const assetsByGen = new Map<string, typeof allAssets>();
-  for (const a of allAssets) {
-    if (!a.generationId || !genIds.includes(a.generationId)) continue;
+  const assetsByGen = new Map<string, typeof scopedAssets>();
+  for (const a of scopedAssets) {
+    if (!a.generationId) continue;
     const list = assetsByGen.get(a.generationId) ?? [];
     list.push(a);
     assetsByGen.set(a.generationId, list);

@@ -1,5 +1,5 @@
 import 'server-only';
-import { Worker } from 'bullmq';
+import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { getFormat } from '@/server/ai/formats';
 import { generateImage } from '@/server/ai/imageGen';
@@ -10,6 +10,24 @@ import { putR2 } from '@/server/storage/r2';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 import type { ImageGenJobData } from './queue';
 
+// Errors we don't want BullMQ to retry. OpenAI/fal will reject the same prompt
+// the second time too — retrying just burns the wallet a second time.
+const PERMANENT_ERROR_PATTERNS = [
+  /content[_ ]policy/i,
+  /refus/i,
+  /invalid_request/i,
+  /unsupported/i,
+  /model_not_found/i,
+  /\b400\b/,
+  /\b401\b/,
+  /\b403\b/,
+  /\b404\b/,
+];
+
+function isPermanent(message: string): boolean {
+  return PERMANENT_ERROR_PATTERNS.some((re) => re.test(message));
+}
+
 export function startImageWorker(): Worker<ImageGenJobData> {
   const worker = new Worker<ImageGenJobData>(
     QUEUE_NAMES.imageGen,
@@ -19,13 +37,22 @@ export function startImageWorker(): Worker<ImageGenJobData> {
 
       await db.update(generation).set({ status: 'running' }).where(eq(generation.id, generationId));
 
+      // Idempotency: wipe any rows from a prior failed attempt so we never
+      // double-charge the archive when BullMQ retries this job.
+      if (job.attemptsMade > 0) {
+        await db.delete(asset).where(eq(asset.generationId, generationId));
+      }
+
       try {
         const result = await generateImage({ prompt, format, provider, model, n });
 
+        // One round-trip insert instead of N. Order is preserved by the array
+        // index so `${i+1}.png` keys still align with row order.
+        const rows: Array<typeof asset.$inferInsert> = [];
         for (const [i, buf] of result.buffers.entries()) {
           const key = `${projectId}/${generationId}/${i + 1}.png`;
           const upload = await putR2(key, buf, result.contentType);
-          await db.insert(asset).values({
+          rows.push({
             generationId,
             projectId,
             kind: 'image',
@@ -37,6 +64,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
             bytes: upload.bytes,
           });
         }
+        await db.insert(asset).values(rows);
 
         await db
           .update(generation)
@@ -57,12 +85,25 @@ export function startImageWorker(): Worker<ImageGenJobData> {
             finishedAt: new Date(),
           })
           .where(eq(generation.id, generationId));
+
+        // Don't burn another retry on errors that won't resolve themselves.
+        if (isPermanent(message)) {
+          throw new UnrecoverableError(message);
+        }
         throw err;
       }
     },
     {
       connection: createBullConnection(),
-      concurrency: 4,
+      // Image gen + R2 upload routinely exceeds BullMQ's 30s default lock.
+      // Without this, a long-running job is marked stalled, picked up by a
+      // second worker, and we double-bill OpenAI.
+      lockDuration: 120_000,
+      stalledInterval: 30_000,
+      // OpenAI image-gen tier-1 is 5 RPM. With concurrency:4 × n:4 we'd trip
+      // it on the first burst. Drop to 2 and add a soft per-minute cap.
+      concurrency: 2,
+      limiter: { max: 6, duration: 60_000 },
     },
   );
 
@@ -71,6 +112,9 @@ export function startImageWorker(): Worker<ImageGenJobData> {
   });
   worker.on('completed', (job) => {
     console.log(`[reachy:worker] job ${job.id} completed (gen=${job.data.generationId})`);
+  });
+  worker.on('error', (err) => {
+    console.error('[reachy:worker] worker error:', err.message);
   });
 
   return worker;

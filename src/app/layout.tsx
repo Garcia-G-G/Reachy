@@ -6,15 +6,19 @@ import { Toaster } from '@/components/ui/sonner';
 import { env } from '@/env';
 import './globals.css';
 
+// `latin-ext` covers Spanish accents (á é í ó ú ñ ¿ ¡) and other Latin
+// scripts. Reachy's primary audience is Latin American indie hackers, so we
+// pay the small extra subset weight to render Spanish correctly without
+// fallback glyphs. See: https://nextjs.org/docs/app/getting-started/fonts
 const fraunces = Fraunces({
-  subsets: ['latin'],
+  subsets: ['latin', 'latin-ext'],
   variable: '--font-fraunces',
   axes: ['opsz', 'SOFT'],
   display: 'swap',
 });
 
 const instrument = Instrument_Serif({
-  subsets: ['latin'],
+  subsets: ['latin', 'latin-ext'],
   weight: '400',
   style: ['italic', 'normal'],
   variable: '--font-instrument',
@@ -22,13 +26,13 @@ const instrument = Instrument_Serif({
 });
 
 const inter = Inter({
-  subsets: ['latin'],
+  subsets: ['latin', 'latin-ext'],
   variable: '--font-inter',
   display: 'swap',
 });
 
 const jetbrains = JetBrains_Mono({
-  subsets: ['latin'],
+  subsets: ['latin', 'latin-ext'],
   variable: '--font-jetbrains',
   display: 'swap',
 });
@@ -50,7 +54,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html
       lang={locale}
-      className={`${fraunces.variable} ${instrument.variable} ${inter.variable} ${jetbrains.variable}`}
+      // Browser auto-translation (Chrome's "translate this page" for Spanish
+      // users browsing the EN UI) mutates text nodes mid-render and triggers
+      // React 19 hydration NotFoundError. Garcia's audience overlaps EN/ES,
+      // so we explicitly opt out — the in-app locale switcher is the path.
+      // Refs: https://github.com/facebook/react/issues/11538
+      //       https://github.com/vercel/next.js/discussions/66313
+      translate="no"
+      className={`notranslate ${fraunces.variable} ${instrument.variable} ${inter.variable} ${jetbrains.variable}`}
       suppressHydrationWarning
     >
       <body>

@@ -34,6 +34,12 @@ export interface GenerateCopyResult {
   costCents: number;
   usage: {
     promptTokens: number;
+    /**
+     * Subset of promptTokens that came from OpenAI's prompt cache (≥1024
+     * matching prefix tokens). Charged at half the regular input rate; we
+     * use this for the cents estimate.
+     */
+    cachedPromptTokens: number;
     completionTokens: number;
     totalTokens: number;
   };
@@ -50,10 +56,18 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4.1': { input: 2.5, output: 10 },
 };
 
-function estimateCostCents(model: string, prompt: number, completion: number): number {
+function estimateCostCents(
+  model: string,
+  prompt: number,
+  cached: number,
+  completion: number,
+): number {
   const p = MODEL_PRICING[model] ?? MODEL_PRICING['gpt-5.5'];
   if (!p) return 0;
-  const usd = (prompt * p.input + completion * p.output) / 1_000_000;
+  // OpenAI charges cached input tokens at 50% of the regular input rate.
+  // Source: https://developers.openai.com/api/docs/guides/prompt-caching
+  const fresh = Math.max(0, prompt - cached);
+  const usd = (fresh * p.input + cached * p.input * 0.5 + completion * p.output) / 1_000_000;
   return Math.max(1, Math.round(usd * 100));
 }
 
@@ -77,9 +91,12 @@ export async function generateCopy(args: GenerateCopyArgs): Promise<GenerateCopy
   const schema = copySchemas[args.format];
   const openai = getOpenAI();
 
-  // GPT-5.x rejects any non-default temperature value; older models accept
-  // the full 0..2 range. Only attach the field for models that support it.
-  const supportsTemperature = !/^gpt-5(\.|-|$)/.test(model);
+  // GPT-5.x rejects any non-default temperature value (verified empirically:
+  // 400 "does not support 0.7"). Older models accept the full 0..2 range.
+  // For gpt-5.x we send `reasoning_effort: 'none'` instead — schema-bound
+  // JSON does not benefit from chain-of-thought tokens, and they're billed.
+  // (gpt-5.5 supports 'none'|'low'|'medium'|'high'|'xhigh', not 'minimal'.)
+  const isGpt5 = /^gpt-5(\.|-|$)/.test(model);
 
   const completion = await openai.chat.completions.create({
     model,
@@ -95,7 +112,7 @@ export async function generateCopy(args: GenerateCopyArgs): Promise<GenerateCopy
         strict: true,
       },
     },
-    ...(supportsTemperature ? { temperature } : {}),
+    ...(isGpt5 ? { reasoning_effort: 'none' as const } : { temperature }),
   });
 
   const choice = completion.choices[0];
@@ -123,14 +140,16 @@ export async function generateCopy(args: GenerateCopyArgs): Promise<GenerateCopy
     completion_tokens: 0,
     total_tokens: 0,
   };
+  const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
 
   return {
     payload: parsed as { es: CopyPayload['value']; en: CopyPayload['value'] },
     systemPrompt,
     userPrompt,
-    costCents: estimateCostCents(model, usage.prompt_tokens, usage.completion_tokens),
+    costCents: estimateCostCents(model, usage.prompt_tokens, cached, usage.completion_tokens),
     usage: {
       promptTokens: usage.prompt_tokens,
+      cachedPromptTokens: cached,
       completionTokens: usage.completion_tokens,
       totalTokens: usage.total_tokens,
     },

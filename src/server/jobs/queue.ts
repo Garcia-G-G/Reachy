@@ -27,5 +27,10 @@ export function getImageQueue(): Queue<ImageGenJobData> {
       removeOnFail: { count: 200, age: 60 * 60 * 24 * 30 },
     },
   });
+  cached.on('error', (err) => {
+    // BullMQ surfaces internal connection errors via this event. Without a
+    // listener Node treats them as unhandled and crashes the dev server.
+    console.error('[reachy:queue] image-gen error:', err.message);
+  });
   return cached;
 }
