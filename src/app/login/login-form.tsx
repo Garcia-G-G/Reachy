@@ -133,7 +133,9 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
             <span className="font-mono text-ink">{state.email}</span>
             {t('sentAfter')}
           </p>
-          <p className="mono-eyebrow mt-3 text-ink-3">{t('sentDevHint')}</p>
+          {process.env.NODE_ENV !== 'production' && (
+            <p className="mono-eyebrow mt-3 text-ink-3">{t('sentDevHint')}</p>
+          )}
         </div>
       )}
 

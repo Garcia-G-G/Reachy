@@ -8,9 +8,22 @@ const securityHeaders = [
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
 ];
 
+const r2PublicHostname = (() => {
+  const raw = process.env.R2_PUBLIC_URL;
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).hostname;
+  } catch {
+    return undefined;
+  }
+})();
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  images: {
+    remotePatterns: r2PublicHostname ? [{ protocol: 'https', hostname: r2PublicHostname }] : [],
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

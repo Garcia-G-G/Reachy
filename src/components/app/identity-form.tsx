@@ -105,19 +105,21 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
     inFlight.current = ctrl;
 
     setSaveState({ kind: 'saving' });
-    const voice: BrandVoice = {
-      tone: tone.trim(),
-      doSay: doSay
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .slice(0, 20),
-      dontSay: dontSay
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .slice(0, 20),
-    };
+    const trimmedTone = tone.trim();
+    const doSayLines = doSay
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 20);
+    const dontSayLines = dontSay
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 20);
+    const hasVoice = trimmedTone.length > 0 || doSayLines.length > 0 || dontSayLines.length > 0;
+    const voice: BrandVoice | undefined = hasVoice
+      ? { tone: trimmedTone, doSay: doSayLines, dontSay: dontSayLines }
+      : undefined;
     const keywords = keywordsRaw
       .split(',')
       .map((s) => s.trim())
@@ -428,10 +430,29 @@ function SaveStatus({
   state: SaveState;
   t: ReturnType<typeof useTranslations<'Identity'>>;
 }) {
-  if (state.kind === 'idle') return <div className="mono-eyebrow text-ink-3">&nbsp;</div>;
-  if (state.kind === 'saving') return <div className="mono-eyebrow text-ink-3">{t('saving')}</div>;
+  const baseProps = { role: 'status' as const, 'aria-live': 'polite' as const };
+  if (state.kind === 'idle')
+    return (
+      <div {...baseProps} className="mono-eyebrow text-ink-3">
+        &nbsp;
+      </div>
+    );
+  if (state.kind === 'saving')
+    return (
+      <div {...baseProps} className="mono-eyebrow text-ink-3">
+        {t('saving')}
+      </div>
+    );
   if (state.kind === 'error')
-    return <div className="mono-eyebrow text-accent">{state.message}</div>;
+    return (
+      <div role="alert" aria-live="assertive" className="mono-eyebrow text-accent">
+        {state.message}
+      </div>
+    );
   const time = state.at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  return <div className="mono-eyebrow text-ink-3">{t('savedAt', { time })}</div>;
+  return (
+    <div {...baseProps} className="mono-eyebrow text-ink-3">
+      {t('savedAt', { time })}
+    </div>
+  );
 }

@@ -90,6 +90,13 @@ export async function updateProject(input: UpdateProjectInput): Promise<ActionRe
   if (rest.audience !== undefined) patch.audience = emptyToNull(rest.audience);
   if (rest.tone !== undefined) patch.tone = emptyToNull(rest.tone);
 
+  // Capture the prior slug so we can invalidate its cached paths if the slug changes.
+  const [prior] = await db
+    .select({ slug: project.slug })
+    .from(project)
+    .where(and(eq(project.id, id), eq(project.userId, session.user.id)))
+    .limit(1);
+
   try {
     const [row] = await db
       .update(project)
@@ -99,7 +106,10 @@ export async function updateProject(input: UpdateProjectInput): Promise<ActionRe
     if (!row) return { ok: false, error: 'not-found' };
 
     revalidatePath('/app', 'layout');
-    revalidatePath(`/app/projects/${row.slug}`);
+    revalidatePath(`/app/projects/${row.slug}`, 'layout');
+    if (prior && prior.slug !== row.slug) {
+      revalidatePath(`/app/projects/${prior.slug}`, 'layout');
+    }
     return { ok: true, data: row };
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -121,6 +131,7 @@ export async function archiveProject(id: string): Promise<ActionResult<Project>>
   if (!row) return { ok: false, error: 'not-found' };
 
   revalidatePath('/app', 'layout');
+  revalidatePath(`/app/projects/${row.slug}`, 'layout');
   return { ok: true, data: row };
 }
 
@@ -139,10 +150,13 @@ export async function getProjectBySlug(slug: string): Promise<Project | null> {
   const session = await getSession();
   if (!session) return null;
 
+  // Filter out archived projects so /app/projects/{archived-slug} 404s.
   const [row] = await db
     .select()
     .from(project)
-    .where(and(eq(project.userId, session.user.id), eq(project.slug, slug)))
+    .where(
+      and(eq(project.userId, session.user.id), eq(project.slug, slug), isNull(project.archivedAt)),
+    )
     .limit(1);
   return row ?? null;
 }

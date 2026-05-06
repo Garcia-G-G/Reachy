@@ -11,7 +11,7 @@ import { getSession } from '@/server/getSession';
 const hexColor = z
   .string()
   .trim()
-  .regex(/^#[0-9a-fA-F]{6}$/, 'Use a 6-digit hex color (#aabbcc)');
+  .regex(/^#([0-9a-fA-F]{3}){1,2}$/, 'Use a hex color (#abc or #aabbcc)');
 
 const voiceSchema = z.object({
   tone: z.string().trim().max(280).default(''),

@@ -98,10 +98,13 @@ export function BrandPreview({
   );
 }
 
+// Already loaded via next/font/google in app/layout.tsx — no need to fetch again.
+const SELF_HOSTED = new Set(['Fraunces', 'Inter', 'JetBrains Mono', 'Instrument Serif']);
 const loaded = new Set<string>();
 
 function loadGoogleFont(family: string) {
   if (typeof document === 'undefined') return;
+  if (SELF_HOSTED.has(family)) return;
   if (loaded.has(family)) return;
   loaded.add(family);
 

@@ -10,12 +10,13 @@ function slugify(name: string): string {
   return name
     .toLowerCase()
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/\p{Diacritic}/gu, '')
     .replace(/[^a-z0-9\s-]/g, '')
     .trim()
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
-    .slice(0, 60);
+    .slice(0, 60)
+    .replace(/-+$/, '');
 }
 
 export function NewProjectForm() {
