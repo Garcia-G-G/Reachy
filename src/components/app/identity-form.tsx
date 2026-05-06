@@ -70,6 +70,11 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
   const inFlight = useRef<AbortController | null>(null);
   const saveRef = useRef<() => Promise<void>>(async () => {});
 
+  // Keep saveRef in sync with the latest closure on every commit.
+  useEffect(() => {
+    saveRef.current = save;
+  });
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps drive the debounce; save is read via ref.
   useEffect(() => {
     if (isFirstRun.current) {
@@ -93,8 +98,6 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
     keywordsRaw,
     languages,
   ]);
-
-  saveRef.current = save;
 
   async function save() {
     inFlight.current?.abort();

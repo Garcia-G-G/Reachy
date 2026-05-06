@@ -78,33 +78,53 @@ export async function upsertBrandKit(input: UpsertBrandKitInput): Promise<Action
 
   const { projectId, ...rest } = parsed.data;
 
+  // Only write fields the caller provided. Unset columns inherit DB defaults
+  // on INSERT and stay untouched on UPDATE.
+  const insertValues: typeof brandKit.$inferInsert = { projectId };
+  const updateSet: Partial<typeof brandKit.$inferInsert> = {};
+  if (rest.primaryColor !== undefined) {
+    insertValues.primaryColor = rest.primaryColor;
+    updateSet.primaryColor = rest.primaryColor;
+  }
+  if (rest.secondaryColor !== undefined) {
+    insertValues.secondaryColor = rest.secondaryColor;
+    updateSet.secondaryColor = rest.secondaryColor;
+  }
+  if (rest.accentColor !== undefined) {
+    insertValues.accentColor = rest.accentColor;
+    updateSet.accentColor = rest.accentColor;
+  }
+  if (rest.bgColor !== undefined) {
+    insertValues.bgColor = rest.bgColor;
+    updateSet.bgColor = rest.bgColor;
+  }
+  if (rest.fontHeading !== undefined) {
+    insertValues.fontHeading = rest.fontHeading;
+    updateSet.fontHeading = rest.fontHeading;
+  }
+  if (rest.fontBody !== undefined) {
+    insertValues.fontBody = rest.fontBody;
+    updateSet.fontBody = rest.fontBody;
+  }
+  if (rest.voice !== undefined) {
+    insertValues.voice = rest.voice;
+    updateSet.voice = rest.voice;
+  }
+  if (rest.keywords !== undefined) {
+    insertValues.keywords = rest.keywords;
+    updateSet.keywords = rest.keywords;
+  }
+  if (rest.languages !== undefined) {
+    insertValues.languages = rest.languages;
+    updateSet.languages = rest.languages;
+  }
+
   const [row] = await db
     .insert(brandKit)
-    .values({
-      projectId,
-      primaryColor: rest.primaryColor ?? null,
-      secondaryColor: rest.secondaryColor ?? null,
-      accentColor: rest.accentColor ?? null,
-      bgColor: rest.bgColor ?? null,
-      fontHeading: rest.fontHeading ?? null,
-      fontBody: rest.fontBody ?? null,
-      voice: rest.voice ?? null,
-      keywords: rest.keywords ?? [],
-      languages: rest.languages ?? ['en'],
-    })
+    .values(insertValues)
     .onConflictDoUpdate({
       target: brandKit.projectId,
-      set: {
-        ...(rest.primaryColor !== undefined && { primaryColor: rest.primaryColor }),
-        ...(rest.secondaryColor !== undefined && { secondaryColor: rest.secondaryColor }),
-        ...(rest.accentColor !== undefined && { accentColor: rest.accentColor }),
-        ...(rest.bgColor !== undefined && { bgColor: rest.bgColor }),
-        ...(rest.fontHeading !== undefined && { fontHeading: rest.fontHeading }),
-        ...(rest.fontBody !== undefined && { fontBody: rest.fontBody }),
-        ...(rest.voice !== undefined && { voice: rest.voice }),
-        ...(rest.keywords !== undefined && { keywords: rest.keywords }),
-        ...(rest.languages !== undefined && { languages: rest.languages }),
-      },
+      set: updateSet,
     })
     .returning();
 
