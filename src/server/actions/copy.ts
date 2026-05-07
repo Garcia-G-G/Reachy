@@ -26,15 +26,19 @@ const FORMAT_VALUES = COPY_FORMAT_KEYS as [CopyFormat, ...CopyFormat[]];
 const generateInput = z.object({
   projectId: z.string().uuid(),
   format: z.enum(FORMAT_VALUES),
-  idea: z.string().trim().min(3).max(600),
+  idea: z.string().trim().max(600).default(''),
   promptLanguage: z.enum(['en', 'es']).default('en'),
+  /** When set, this overrides the project brief for this generation only. */
+  oneShotBriefText: z.string().trim().max(50_000).optional(),
+  /** When true, skip the project brief for this generation. */
+  skipBrief: z.boolean().optional().default(false),
 });
 
 const variantInput = z.object({
   generationId: z.string().uuid(),
 });
 
-export type GenerateCopyInput = z.infer<typeof generateInput>;
+export type GenerateCopyInput = z.input<typeof generateInput>;
 export type RegenerateCopyVariantInput = z.infer<typeof variantInput>;
 
 type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -138,10 +142,26 @@ export async function generateCopyAction(
 
   const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
 
+  // Resolve which brief, if any, to use for this generation.
+  // Precedence: explicit one-shot > project brief > none.
+  let effectiveBrief: string | undefined;
+  if (parsed.data.oneShotBriefText && parsed.data.oneShotBriefText.length > 0) {
+    effectiveBrief = parsed.data.oneShotBriefText;
+  } else if (!parsed.data.skipBrief && proj.briefText && proj.briefText.length > 0) {
+    effectiveBrief = proj.briefText;
+  }
+
+  // Idea is required only when there is no brief; with a brief, it's the
+  // optional "angle" for this specific post.
+  const ideaTrimmed = parsed.data.idea;
+  if (!effectiveBrief && ideaTrimmed.length < 3) {
+    return { ok: false, error: 'idea-required' };
+  }
+
   try {
     const result = await generateCopy({
       format: parsed.data.format,
-      idea: parsed.data.idea,
+      idea: ideaTrimmed,
       project: {
         name: proj.name,
         audience: proj.audience,
@@ -152,6 +172,7 @@ export async function generateCopyAction(
       brandKit: kit ?? null,
       promptLanguage: parsed.data.promptLanguage,
       temperature: 0.7,
+      briefText: effectiveBrief,
     });
 
     const ok = await persistGenerationAndAssets({
@@ -159,7 +180,7 @@ export async function generateCopyAction(
       projectSlug: proj.slug,
       format: parsed.data.format,
       promptLanguage: parsed.data.promptLanguage,
-      idea: parsed.data.idea,
+      idea: ideaTrimmed,
       result,
     });
     return { ok: true, data: ok };
@@ -173,8 +194,8 @@ export async function generateCopyAction(
       status: 'failed',
       provider: 'openai',
       model: undefined,
-      prompt: parsed.data.idea,
-      params: { idea: parsed.data.idea, promptLanguage: parsed.data.promptLanguage },
+      prompt: ideaTrimmed,
+      params: { idea: ideaTrimmed, promptLanguage: parsed.data.promptLanguage },
       errorMessage: msg.slice(0, 500),
       finishedAt: new Date(),
     });
@@ -222,7 +243,6 @@ export async function regenerateCopyVariant(
   const params = (orig.params ?? {}) as { idea?: string; promptLanguage?: 'en' | 'es' };
   const idea = params.idea?.trim();
   const promptLanguage = params.promptLanguage === 'es' ? 'es' : 'en';
-  if (!idea) return { ok: false, error: 'missing-idea' };
   const format = orig.format as CopyFormat;
   if (!COPY_FORMAT_KEYS.includes(format)) return { ok: false, error: 'unknown-format' };
 
@@ -230,11 +250,14 @@ export async function regenerateCopyVariant(
   const [proj] = await db.select().from(project).where(eq(project.id, orig.projectId)).limit(1);
   if (!proj) return { ok: false, error: 'not-found' };
   const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
+  const effectiveBrief = proj.briefText && proj.briefText.length > 0 ? proj.briefText : undefined;
+
+  if (!idea && !effectiveBrief) return { ok: false, error: 'missing-idea-and-brief' };
 
   try {
     const result = await generateCopy({
       format,
-      idea,
+      idea: idea ?? '',
       project: {
         name: proj.name,
         audience: proj.audience,
@@ -245,13 +268,14 @@ export async function regenerateCopyVariant(
       brandKit: kit ?? null,
       promptLanguage,
       temperature: 0.9, // hotter for variant
+      briefText: effectiveBrief,
     });
     const ok = await persistGenerationAndAssets({
       projectId: proj.id,
       projectSlug: proj.slug,
       format,
       promptLanguage,
-      idea,
+      idea: idea ?? '',
       result,
     });
     return { ok: true, data: ok };
