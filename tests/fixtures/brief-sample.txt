@@ -1,0 +1,4 @@
+Reachy v0.4
+- Bilingual ES/EN copy
+- Editorial design system
+- Per-project brief grounds every generation
