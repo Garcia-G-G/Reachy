@@ -1,5 +1,10 @@
 import 'server-only';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env } from '@/env';
 
@@ -62,4 +67,16 @@ export async function signedDownloadUrl(key: string, expiresInSec = 60 * 5): Pro
   return getSignedUrl(r2, new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }), {
     expiresIn: expiresInSec,
   });
+}
+
+/** Best-effort delete; swallows errors so a missing key never blocks the caller. */
+export async function deleteR2(key: string): Promise<void> {
+  if (!env.R2_BUCKET) return;
+  try {
+    const r2 = getR2();
+    await r2.send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));
+  } catch {
+    // Intentionally swallow — replacing a brief should not fail just because
+    // the previous file was already gone.
+  }
 }
