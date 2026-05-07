@@ -119,17 +119,24 @@ export async function setProjectBrief(input: SetProjectBriefInput): Promise<Resu
   const previousR2Key = proj.briefR2Key;
   const now = new Date();
 
-  await db
-    .update(project)
-    .set({
-      briefText: parseResult.text,
-      briefFilename: storedFilename,
-      briefMime: storedMime,
-      briefBytes: storedBytes,
-      briefR2Key: newR2Key,
-      briefUpdatedAt: now,
-    })
-    .where(eq(project.id, proj.id));
+  try {
+    await db
+      .update(project)
+      .set({
+        briefText: parseResult.text,
+        briefFilename: storedFilename,
+        briefMime: storedMime,
+        briefBytes: storedBytes,
+        briefR2Key: newR2Key,
+        briefUpdatedAt: now,
+      })
+      .where(eq(project.id, proj.id));
+  } catch (err) {
+    // DB write failed; if we already uploaded a new R2 object, it's now an
+    // orphan. Best-effort cleanup before propagating the error.
+    if (newR2Key) await deleteR2(newR2Key);
+    throw err;
+  }
 
   if (previousR2Key && previousR2Key !== newR2Key) {
     await deleteR2(previousR2Key);
@@ -200,6 +207,8 @@ export interface BriefSummary {
 export async function getProjectBriefSummary(projectId: string): Promise<BriefSummary | null> {
   const session = await getSession();
   if (!session) return null;
+  const id = z.string().uuid().safeParse(projectId);
+  if (!id.success) return null;
   const [proj] = await db
     .select({
       briefText: project.briefText,
@@ -209,7 +218,7 @@ export async function getProjectBriefSummary(projectId: string): Promise<BriefSu
       briefUpdatedAt: project.briefUpdatedAt,
     })
     .from(project)
-    .where(and(eq(project.id, projectId), eq(project.userId, session.user.id)))
+    .where(and(eq(project.id, id.data), eq(project.userId, session.user.id)))
     .limit(1);
   if (!proj) return null;
 
