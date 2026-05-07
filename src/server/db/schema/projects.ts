@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { index, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { asset } from './assets';
 import { user } from './auth';
 import { brandKit } from './brandKits';
@@ -18,6 +18,12 @@ export const project = pgTable(
     websiteUrl: text('website_url'),
     audience: text('audience'),
     tone: text('tone'),
+    briefText: text('brief_text'),
+    briefFilename: text('brief_filename'),
+    briefMime: text('brief_mime'),
+    briefBytes: integer('brief_bytes'),
+    briefR2Key: text('brief_r2_key'),
+    briefUpdatedAt: timestamp('brief_updated_at'),
     archivedAt: timestamp('archived_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
