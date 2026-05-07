@@ -120,6 +120,7 @@ Ver `design-editorial.html` (versión final iterada).
 - [x] Sesión 1: Investigación profunda + 5 mockups + dirección elegida
 - [ ] Sesión 2: Build de prompts .md por fase (en progreso)
 - [ ] Sesión 3: Garcia ejecuta Fase 1 con Claude Code Max
+- [x] 2026-05-07: Doc-grounded copy — per-project brief + one-shot override (rama feat/doc-grounded-copy, pendiente UI smoke)
 - [ ] Sesión N: feedback y siguientes fases
 
 ## 9. Cambios de decisiones (changelog)
@@ -128,3 +129,4 @@ Ver `design-editorial.html` (versión final iterada).
 - 2026-05-04: Dirección de diseño inicial = Linear refined.
 - 2026-05-04: Cambio de dirección a **Editorial / Magazine** (Garcia rechaza el look "AI-generated" genérico). Vocabulario UI editorial (cabecera/edición/pieza). Tokens y reglas estrictas en design-editorial.html.
 - 2026-05-04: Nombre confirmado = **Reachy**. Reemplazado en todos los prompts.
+- 2026-05-07: Brief de proyecto añadido al generador de copy. Cada proyecto puede tener un brief (txt/md/pdf/docx, hasta 10 MB / 25 000 chars). Inyectado al prompt como bloque `<brief>` con regla "anchor every claim". Override one-shot por generación (txt/md inline) o skip. Idea opcional cuando hay brief. Aprobado approach A (raw text), rechazado B (versionado) y C (estructurado).
