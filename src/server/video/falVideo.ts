@@ -3,17 +3,41 @@ import { getFal } from '@/server/ai/fal';
 
 /**
  * Default fal.ai model for text-to-video reels in 9:16. Veo 3.1 Fast as of
- * May 2026: 720p, 24fps, costs ~$0.05/sec. See:
+ * May 2026: 720p, 24fps. Pricing: $0.10/sec without audio, $0.15/sec with
+ * audio (text-to-video). Supported durations are 4 / 6 / 8 seconds — passing
+ * any other value to `submitVeo` is rejected by the fal API. See:
  *   https://fal.ai/models/fal-ai/veo3.1/fast/api
+ *   https://fal.ai/models/fal-ai/veo3.1/fast (pricing)
  */
 export const DEFAULT_VEO_MODEL = 'fal-ai/veo3.1/fast';
+
+/** Veo 3.1 Fast valid duration steps. submitVeo snaps to the nearest one. */
+export const VEO_VALID_DURATIONS = [4, 6, 8] as const;
+
+/** Cost in USD cents per generated second (without audio). */
+export const VEO_FAST_CENTS_PER_SEC = 10;
+
+/** Snap an arbitrary duration to the nearest fal-supported Veo step. */
+export function snapVeoDuration(seconds: number): 4 | 6 | 8 {
+  const candidates = VEO_VALID_DURATIONS;
+  let best: 4 | 6 | 8 = candidates[0];
+  let bestDelta = Math.abs(seconds - candidates[0]);
+  for (const c of candidates) {
+    const d = Math.abs(seconds - c);
+    if (d < bestDelta) {
+      best = c;
+      bestDelta = d;
+    }
+  }
+  return best;
+}
 
 export interface VeoSubmitArgs {
   prompt: string;
   /** 9:16 for reels; 16:9 for landscape video. */
   aspectRatio: '9:16' | '16:9';
-  /** Veo 3.1 supports 5–10s per generation (verify per model card). */
-  durationSec: number;
+  /** Must be one of VEO_VALID_DURATIONS (4/6/8). The caller should snap. */
+  durationSec: 4 | 6 | 8;
   model?: string;
 }
 
@@ -112,8 +136,34 @@ export interface DownloadResult {
   bytes: number;
 }
 
+/**
+ * fal.ai serves Veo outputs from `*.fal.media` / `fal.media`. We never let an
+ * arbitrary URL through — even though the URL comes back from our own polling
+ * loop, defense-in-depth keeps an SSRF chain (compromised fal upstream, MITM
+ * on the queue response, future webhook flow) from turning the worker into a
+ * proxy onto the cluster's internal network.
+ */
+const ALLOWED_VEO_HOSTS = /(^|\.)fal\.media$/i;
+
+function assertVeoHost(rawUrl: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('downloadVeoVideo: invalid URL');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`downloadVeoVideo: refusing non-https url (${parsed.protocol})`);
+  }
+  if (!ALLOWED_VEO_HOSTS.test(parsed.hostname)) {
+    throw new Error(`downloadVeoVideo: refusing host ${parsed.hostname}`);
+  }
+  return parsed;
+}
+
 export async function downloadVeoVideo(url: string): Promise<DownloadResult> {
-  const res = await fetch(url);
+  assertVeoHost(url);
+  const res = await fetch(url, { redirect: 'error' });
   if (!res.ok) {
     throw new Error(`Download failed: ${res.status} ${res.statusText}`);
   }

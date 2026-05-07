@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
@@ -323,16 +324,17 @@ function ResultPanel({
       <div className={`grid gap-3 ${grid}`}>
         {assets.map((a) => (
           <figure key={a.id} className="space-y-2">
-            <div className="border border-ink">
+            <div className="relative aspect-square border border-ink">
               {a.publicUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <Image
                   src={a.publicUrl}
                   alt=""
-                  className="block aspect-square h-full w-full object-cover"
+                  fill
+                  sizes="(min-width: 1024px) 25vw, 50vw"
+                  className="object-cover"
                 />
               ) : (
-                <div className="flex aspect-square items-center justify-center bg-paper-2 mono-eyebrow text-ink-3">
+                <div className="flex h-full w-full items-center justify-center bg-paper-2 mono-eyebrow text-ink-3">
                   no public url
                 </div>
               )}

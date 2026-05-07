@@ -56,12 +56,23 @@ const planSchema = z.object({
   scenes: z.array(plannedSceneSchema).min(1).max(10),
 });
 
+// Tighten URL validation: z.string().url() accepts file://, javascript:, data:,
+// ftp: — anything WHATWG considers a valid URL. Without the protocol guard a
+// malicious caller could ask the worker to read /etc/passwd via file:// or
+// hit an internal SSRF target. Restrict to http(s) on the public R2 host.
+const httpsUrl = z
+  .string()
+  .url()
+  .refine((u) => /^https?:\/\//i.test(u), {
+    message: 'sceneImageUrl must be http(s)',
+  });
+
 const composeInput = z.object({
   projectId: z.string().uuid(),
   engine: z.enum(['ffmpeg', 'veo']),
   plan: planSchema,
   /** For engine='ffmpeg': one URL per scene (`null` for brand-bg scenes). */
-  sceneImageUrls: z.array(z.string().url().nullable()).optional(),
+  sceneImageUrls: z.array(httpsUrl.nullable()).optional(),
 });
 
 export type PlanReelInput = z.infer<typeof planInput>;

@@ -13,7 +13,16 @@ function buildSocialProviders() {
   const id = env.GOOGLE_CLIENT_ID;
   const secret = env.GOOGLE_CLIENT_SECRET;
   if (!id || !secret) return undefined;
-  return { google: { clientId: id, clientSecret: secret } };
+  // Pin the OAuth scope explicitly. Without this, better-auth still defaults
+  // to email+profile, but pinning it keeps a future plugin upgrade from
+  // silently widening what we ask Google for.
+  return {
+    google: {
+      clientId: id,
+      clientSecret: secret,
+      scope: ['email', 'profile'],
+    },
+  };
 }
 
 const redis = getRedis();
@@ -38,6 +47,17 @@ export const auth = betterAuth({
   emailAndPassword: { enabled: false },
   socialProviders: buildSocialProviders(),
   secondaryStorage,
+  // Trust only our canonical origin. Anything else (preview deploys, custom
+  // domains) must be added explicitly. Defense in depth against open-redirect
+  // chains via callbackURL/next params.
+  trustedOrigins: [env.BETTER_AUTH_URL],
+  // Force Secure / SameSite=lax cookies in production regardless of any
+  // upstream proxy stripping the `https` scheme. In dev we leave the default
+  // (HTTP cookies on localhost).
+  advanced: {
+    useSecureCookies: env.NODE_ENV === 'production',
+    defaultCookieAttributes: { sameSite: 'lax' },
+  },
   // Tighter than the 100/60s default. /sign-in/magic-link is the only abusable
   // endpoint right now (each call sends a Resend email).
   // Backed by Redis when REDIS_URL is set so the limit holds across instances;
@@ -54,7 +74,14 @@ export const auth = betterAuth({
   plugins: [
     magicLink({
       expiresIn: 60 * 15,
+      // Pin to the documented default so a plugin upgrade can't silently
+      // weaken either knob.
       disableSignUp: false,
+      allowedAttempts: 1,
+      // Hash tokens at rest. Without this, anyone with read access to the
+      // verification table (logs, support backup, breached snapshot) can mint
+      // a working magic link for any pending sign-in.
+      storeToken: 'hashed',
       sendMagicLink: async ({ email, url }) => {
         await sendMagicLinkEmail({ to: email, url });
       },

@@ -105,8 +105,13 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
               `format=yuv420p`,
             ].join(',');
 
+        // expansion=none disables drawtext's %{...} expression evaluator on
+        // the textfile contents — without it a user-supplied scene text like
+        // "Try %{eif:1/0:d}" would be parsed as a filter expression instead
+        // of rendered verbatim. ffmpeg's default is "normal" expansion.
+        // https://ffmpeg.org/ffmpeg-filters.html#drawtext-1 ("expansion")
         const draw = safeText
-          ? `,drawtext=fontfile='${fontFile}':textfile='${safeText}':fontsize=${overlayFontSize(s.scene.textPosition)}:fontcolor=${textColor}:x=(w-tw)/2:y=${overlayY}:line_spacing=10:box=1:boxcolor=0x000000${isBrand ? '00' : '88'}:boxborderw=24`
+          ? `,drawtext=fontfile='${fontFile}':textfile='${safeText}':expansion=none:fontsize=${overlayFontSize(s.scene.textPosition)}:fontcolor=${textColor}:x=(w-tw)/2:y=${overlayY}:line_spacing=10:box=1:boxcolor=0x000000${isBrand ? '00' : '88'}:boxborderw=24`
           : '';
 
         const fade = `,fade=t=in:st=0:d=${REEL_TRANSITION_SEC},fade=t=out:st=${Math.max(0, s.scene.durationSec - REEL_TRANSITION_SEC)}:d=${REEL_TRANSITION_SEC}`;

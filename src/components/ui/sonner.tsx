@@ -7,15 +7,16 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from 'lucide-react';
-import { useTheme } from 'next-themes';
 import { Toaster as Sonner, type ToasterProps } from 'sonner';
 
+// Reachy is light-only by design (editorial palette, paper/ink). We pin the
+// Sonner theme to 'light' instead of reading next-themes — there's no
+// ThemeProvider in the tree, so useTheme() would always return 'system' and
+// emit a dark toast on dark-OS users, breaking the editorial look.
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = 'system' } = useTheme();
-
   return (
     <Sonner
-      theme={theme as ToasterProps['theme']}
+      theme="light"
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

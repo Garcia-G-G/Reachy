@@ -53,7 +53,7 @@ function ReelCard({ reel }: { reel: ReelLibraryRow }) {
               type="button"
               onClick={() => setOpenVideo(true)}
               className="block h-full w-full text-left"
-              aria-label={`Play reel: ${reel.tagline}`}
+              aria-label={`Play reel: ${reel.tagline || tplLabel}`}
             >
               <span className="flex h-full w-full items-center justify-center mono-eyebrow text-ink-3">
                 ▶ Play

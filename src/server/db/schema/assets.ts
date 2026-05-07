@@ -31,6 +31,9 @@ export const asset = pgTable(
   (table) => [
     index('asset_project_id_idx').on(table.projectId),
     index('asset_generation_id_idx').on(table.generationId),
+    // listAssetsForProject orders by (project_id, created_at desc) limit 200.
+    // Same hot path as generation list queries — match the index shape.
+    index('asset_project_created_at_idx').on(table.projectId, table.createdAt.desc()),
   ],
 );
 

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
+import { env } from '@/env';
 import { REEL_DIMENSIONS } from '@/lib/reel-templates';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
@@ -11,9 +12,38 @@ import { generation } from '@/server/db/schema/generations';
 import { putR2 } from '@/server/storage/r2';
 import { composeReel } from '@/server/video/compose';
 import { ensureFfmpeg } from '@/server/video/ensureFfmpeg';
-import { downloadVeoVideo, pollVeo, submitVeo } from '@/server/video/falVideo';
+import {
+  downloadVeoVideo,
+  pollVeo,
+  snapVeoDuration,
+  submitVeo,
+  VEO_FAST_CENTS_PER_SEC,
+} from '@/server/video/falVideo';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 import type { VideoGenJobData } from './videoQueue';
+
+/**
+ * Per-scene image URLs come from the user via composeReelAction. Even though
+ * the UI only ever pastes R2 publicUrls, the zod schema there allows any
+ * https URL — without this guard a crafted client could ask the worker to
+ * GET http://169.254.169.254/... or http://localhost:5432/... (cloud
+ * metadata / internal services) and write the response into the reel.
+ */
+function assertR2PublicUrl(rawUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('runFfmpeg: invalid scene image URL');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`runFfmpeg: refusing non-https scene image (${parsed.protocol})`);
+  }
+  const allowedOrigin = env.R2_PUBLIC_URL ? new URL(env.R2_PUBLIC_URL).origin : null;
+  if (!allowedOrigin || parsed.origin !== allowedOrigin) {
+    throw new Error(`runFfmpeg: scene image must be on R2_PUBLIC_URL (${parsed.origin})`);
+  }
+}
 
 const PERMANENT_PATTERNS = [
   /content[_ ]policy/i,
@@ -47,7 +77,16 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
       }
 
       try {
-        const out = engine === 'veo' ? await runVeo(job.data) : await runFfmpeg(job.data);
+        const out =
+          engine === 'veo'
+            ? await runVeo(job.data)
+            : await runFfmpeg(job.data, (pct) => {
+                // Surface ffmpeg progress to BullMQ. The status route can read
+                // job.progress to show "Composing… 45%" instead of an opaque
+                // "running" spinner. (Veo doesn't expose granular progress;
+                // it returns IN_QUEUE → IN_PROGRESS → COMPLETED.)
+                void job.updateProgress(Math.round(pct * 100));
+              });
 
         const key = `${projectId}/reels/${generationId}.mp4`;
         const upload = await putR2(key, out.buffer, 'video/mp4');
@@ -129,7 +168,10 @@ interface EngineResult {
   costCents: number;
 }
 
-async function runFfmpeg(data: VideoGenJobData): Promise<EngineResult> {
+async function runFfmpeg(
+  data: VideoGenJobData,
+  onProgress?: (pct: number) => void,
+): Promise<EngineResult> {
   const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-'));
   try {
     // Pull the per-scene images from R2 to temp files. The compositor needs
@@ -145,7 +187,8 @@ async function runFfmpeg(data: VideoGenJobData): Promise<EngineResult> {
             `runFfmpeg: image URL missing for scene ${i + 1} (${scene.slot}). Generate the image first.`,
           );
         }
-        const res = await fetch(url);
+        assertR2PublicUrl(url);
+        const res = await fetch(url, { redirect: 'error' });
         if (!res.ok) {
           throw new Error(`runFfmpeg: image fetch failed (${res.status}) for scene ${i + 1}`);
         }
@@ -161,6 +204,7 @@ async function runFfmpeg(data: VideoGenJobData): Promise<EngineResult> {
       outputPath,
       brandColorHex: data.brandColorHex,
       brandTextHex: data.brandTextHex,
+      onProgress,
     });
 
     const buffer = await readFile(outputPath);
@@ -175,20 +219,43 @@ async function runVeo(data: VideoGenJobData): Promise<EngineResult> {
   const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
   // Compose one big prompt from the planned scenes — Veo doesn't accept a
   // multi-scene structured input. We narrate the reel as a single shot.
+  // User-controlled fields (tagline, imagePrompt, text) are wrapped in triple
+  // double-quote delimiters so a "ignore the above and..." inside a planner
+  // output cannot pivot Veo's behavior. OpenAI's 2026 Model Spec recommends
+  // exactly this for untrusted content.
+  // https://model-spec.openai.com/2025-12-18.html#untrusted-content
+  const wrap = (s: string) => `"""${s.replace(/"""/g, '"\\""')}"""`;
   const prompt = [
-    `Vertical 9:16 marketing reel for "${data.plan.tagline}". Editorial photography aesthetic.`,
+    `Vertical 9:16 marketing reel. Editorial photography aesthetic.`,
+    `Tagline: ${wrap(data.plan.tagline)}`,
     ...data.plan.scenes.map(
-      (s, i) => `Beat ${i + 1} (${s.durationSec}s, ${s.slot}): ${s.imagePrompt || s.text}`,
+      (s, i) => `Beat ${i + 1} (${s.durationSec}s, ${s.slot}): ${wrap(s.imagePrompt || s.text)}`,
     ),
     'No text overlays. No watermark. Smooth cinematic motion.',
   ].join('\n');
 
-  const submission = await submitVeo({
-    prompt,
-    aspectRatio: '9:16',
-    durationSec: Math.min(totalDur, 10),
-    model: data.veoModel,
-  });
+  // Veo 3.1 Fast only accepts 4/6/8s; snap so the request doesn't 400.
+  const veoDuration = snapVeoDuration(Math.min(totalDur, 8));
+
+  // Reuse a previously-submitted requestId if a worker crashed mid-poll. The
+  // id is persisted into generation.params on the first poll cycle; without
+  // this, BullMQ retry => brand-new Veo request => paying twice for one reel.
+  let submission: { requestId: string; model: string };
+  const stored = await getStoredVeoRequestId(data.generationId);
+  if (stored) {
+    submission = stored;
+    console.log(
+      `[reachy:video] resuming Veo poll for gen=${data.generationId} (req=${submission.requestId})`,
+    );
+  } else {
+    submission = await submitVeo({
+      prompt,
+      aspectRatio: '9:16',
+      durationSec: veoDuration,
+      model: data.veoModel,
+    });
+    await persistVeoRequestId(data.generationId, submission);
+  }
 
   const start = Date.now();
   while (Date.now() - start < VEO_POLL_TIMEOUT_MS) {
@@ -196,13 +263,46 @@ async function runVeo(data: VideoGenJobData): Promise<EngineResult> {
     const status = await pollVeo(submission.model, submission.requestId);
     if (status.state === 'done' && status.videoUrl) {
       const dl = await downloadVeoVideo(status.videoUrl);
-      // Veo 3.1 Fast pricing: ~$0.05/sec generated. Returned cents.
-      const costCents = Math.max(1, Math.round(totalDur * 5));
-      return { buffer: dl.buffer, bytes: dl.bytes, durationSec: totalDur, costCents };
+      // Cost is billed against the *generated* duration, not the planned one.
+      const costCents = Math.max(1, Math.round(veoDuration * VEO_FAST_CENTS_PER_SEC));
+      return { buffer: dl.buffer, bytes: dl.bytes, durationSec: veoDuration, costCents };
     }
     if (status.state === 'failed') {
       throw new Error(`Veo failed: ${status.errorMessage ?? 'unknown'}`);
     }
   }
   throw new Error(`Veo timed out after ${VEO_POLL_TIMEOUT_MS / 1000}s`);
+}
+
+/** Persist the fal request id so a worker retry resumes polling vs re-submitting. */
+async function persistVeoRequestId(
+  generationId: string,
+  submission: { requestId: string; model: string },
+): Promise<void> {
+  const [row] = await db
+    .select({ params: generation.params })
+    .from(generation)
+    .where(eq(generation.id, generationId))
+    .limit(1);
+  const merged = {
+    ...((row?.params as Record<string, unknown>) ?? {}),
+    veoRequestId: submission.requestId,
+    veoModel: submission.model,
+  };
+  await db.update(generation).set({ params: merged }).where(eq(generation.id, generationId));
+}
+
+async function getStoredVeoRequestId(
+  generationId: string,
+): Promise<{ requestId: string; model: string } | null> {
+  const [row] = await db
+    .select({ params: generation.params })
+    .from(generation)
+    .where(eq(generation.id, generationId))
+    .limit(1);
+  const params = (row?.params ?? {}) as { veoRequestId?: string; veoModel?: string };
+  if (params.veoRequestId && params.veoModel) {
+    return { requestId: params.veoRequestId, model: params.veoModel };
+  }
+  return null;
 }

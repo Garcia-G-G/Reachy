@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -35,17 +36,17 @@ export function LibraryGrid({ assets }: { assets: LibraryAsset[] }) {
     <ul className="grid grid-cols-1 gap-12 sm:grid-cols-2 xl:grid-cols-3">
       {assets.map((asset) => (
         <li key={asset.id} className="space-y-3">
-          <div className="border border-ink">
+          <div className="relative aspect-square border border-ink">
             {asset.publicUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <Image
                 src={asset.publicUrl}
                 alt=""
-                className="block aspect-square h-full w-full object-cover"
-                loading="lazy"
+                fill
+                sizes="(min-width: 1280px) 33vw, (min-width: 640px) 50vw, 100vw"
+                className="object-cover"
               />
             ) : (
-              <div className="mono-eyebrow flex aspect-square items-center justify-center bg-paper-2 text-ink-3">
+              <div className="mono-eyebrow flex h-full w-full items-center justify-center bg-paper-2 text-ink-3">
                 no public url
               </div>
             )}

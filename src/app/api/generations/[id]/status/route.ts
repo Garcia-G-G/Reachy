@@ -6,6 +6,7 @@ import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
 import { getSession } from '@/server/getSession';
+import { rateLimit } from '@/server/lib/rateLimit';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -17,6 +18,28 @@ export async function GET(_req: Request, { params }: RouteContext) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+  }
+
+  // Per-user cap so a logged-in client running setInterval(50) can't hammer
+  // the DB. The form polls every 2-6s; 60/min/user covers ~10 simultaneous
+  // tabs polling at 1/sec with margin.
+  const limit = await rateLimit({
+    key: session.user.id,
+    bucket: 'gen-status',
+    max: 60,
+    windowSec: 60,
+  });
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: 'rate-limited' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(limit.resetSec),
+          'X-RateLimit-Remaining': '0',
+        },
+      },
+    );
   }
 
   const { id: rawId } = await params;

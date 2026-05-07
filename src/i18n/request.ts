@@ -1,12 +1,14 @@
 import 'server-only';
+import { hasLocale } from 'next-intl';
 import { getRequestConfig } from 'next-intl/server';
+import { type Locale, routing } from './routing';
 
-const SUPPORTED_LOCALES = ['en'] as const;
-type Locale = (typeof SUPPORTED_LOCALES)[number];
-const DEFAULT_LOCALE: Locale = 'en';
+export default getRequestConfig(async ({ requestLocale }) => {
+  // requestLocale comes from next-intl's middleware (cookie / URL prefix /
+  // Accept-Language). Fall back to the default if anything is off.
+  const requested = await requestLocale;
+  const locale: Locale = hasLocale(routing.locales, requested) ? requested : routing.defaultLocale;
 
-export default getRequestConfig(async () => {
-  const locale: Locale = DEFAULT_LOCALE;
   const messages = (await import(`../../messages/${locale}.json`)).default;
   return { locale, messages };
 });

@@ -1,14 +1,17 @@
 import { config as loadEnv } from 'dotenv';
-import { eq } from 'drizzle-orm';
-import { db } from '@/server/db/client';
-import { asset } from '@/server/db/schema/assets';
-import { generation } from '@/server/db/schema/generations';
-import { project } from '@/server/db/schema/projects';
-import { getImageQueue } from '@/server/jobs/queue';
 
 loadEnv({ path: '.env.local' });
 
+// Imports are dynamic so dotenv has loaded before @/env runs its zod schema
+// validation at module-init time. Mirrors smoke-copy.ts and smoke-reel.ts.
 async function main() {
+  const { eq } = await import('drizzle-orm');
+  const { db } = await import('@/server/db/client');
+  const { asset } = await import('@/server/db/schema/assets');
+  const { generation } = await import('@/server/db/schema/generations');
+  const { project } = await import('@/server/db/schema/projects');
+  const { getImageQueue } = await import('@/server/jobs/queue');
+
   const [proj] = await db.select().from(project).where(eq(project.slug, 'saas-tracker')).limit(1);
   if (!proj) {
     console.error('No project saas-tracker — create one first.');
@@ -35,15 +38,19 @@ async function main() {
   if (!gen) throw new Error('insert failed');
   console.log('generation queued:', gen.id);
 
-  await getImageQueue().add('generate', {
-    generationId: gen.id,
-    projectId: proj.id,
-    prompt,
-    format: 'square',
-    provider: 'openai',
-    model: 'gpt-image-1',
-    n: 1,
-  });
+  await getImageQueue().add(
+    'generate',
+    {
+      generationId: gen.id,
+      projectId: proj.id,
+      prompt,
+      format: 'square',
+      provider: 'openai',
+      model: 'gpt-image-1',
+      n: 1,
+    },
+    { jobId: gen.id },
+  );
   console.log('job added — polling for done...');
 
   const start = Date.now();

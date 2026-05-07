@@ -72,9 +72,8 @@ export function GenerateReelForm({
   const [pending, startTransition] = useTransition();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Cleanup is intentionally mount-once: pollRef is a ref, stopPolling closes
+  // Cleanup is intentionally mount-once: pollRef is a ref, the cleanup closes
   // over only the ref, so no stale-closure risk.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment
   useEffect(() => {
     return () => {
       if (pollRef.current) {

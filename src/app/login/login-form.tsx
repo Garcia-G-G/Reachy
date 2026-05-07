@@ -43,10 +43,11 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
     });
 
     if (error) {
-      setState({
-        kind: 'error',
-        message: error.message ?? t('errorSendFailed'),
-      });
+      // Show a generic localized message — never forward `error.message`
+      // verbatim. Better-auth surfaces details like "user not found" or
+      // "rate limit exceeded by 3" which leak account existence and let an
+      // attacker enumerate valid emails or fingerprint our limiter config.
+      setState({ kind: 'error', message: t('errorSendFailed') });
       return;
     }
     setState({ kind: 'sent', email: trimmed });
@@ -59,10 +60,8 @@ export function LoginForm({ googleEnabled, next }: LoginFormProps) {
       callbackURL: next,
     });
     if (error) {
-      setState({
-        kind: 'error',
-        message: error.message ?? t('errorGoogle'),
-      });
+      // Same reasoning as the magic-link branch: show a generic message.
+      setState({ kind: 'error', message: t('errorGoogle') });
       return;
     }
     setState({ kind: 'idle' });

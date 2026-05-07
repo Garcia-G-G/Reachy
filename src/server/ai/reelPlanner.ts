@@ -164,6 +164,20 @@ export async function planReel(args: PlanReelArgs): Promise<PlanReelResult> {
   if (!content) throw new Error('reelPlanner: empty response from OpenAI');
   const parsed = JSON.parse(content) as { tagline: string; scenes: PlannedScene[] };
 
+  // Strict-mode minItems/maxItems is enforced for most cases in 2026 but not
+  // 100% reliable per Pydantic AI #4438 and OpenAI community reports. Without
+  // a runtime check, a model returning 4 scenes for a 5-scene template would
+  // silently produce one empty-text scene at the end. Fail loud instead so
+  // the worker can surface a retryable error to the UI.
+  if (!Array.isArray(parsed.scenes) || parsed.scenes.length !== tpl.scenes.length) {
+    throw new Error(
+      `reelPlanner: model returned ${parsed.scenes?.length ?? 0} scenes, template requires ${tpl.scenes.length}`,
+    );
+  }
+  if (typeof parsed.tagline !== 'string' || parsed.tagline.trim().length === 0) {
+    throw new Error('reelPlanner: model returned empty tagline');
+  }
+
   // Always overwrite duration/textPosition/background/slot with the template
   // values — the model's JSON shape is a hint, but the source of truth is the
   // template (otherwise a hallucinated 12s scene breaks the xfade math).

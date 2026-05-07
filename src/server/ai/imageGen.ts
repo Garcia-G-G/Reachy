@@ -39,9 +39,17 @@ async function resizeToFormat(
   buf: Buffer,
   spec: ImageFormatSpec,
 ): Promise<{ buffer: Buffer; contentType: 'image/png' }> {
-  const out = await sharp(buf)
+  // compressionLevel:9 is 3-5× slower than the libvips default of 6 for ~5%
+  // smaller PNGs — bad trade for hot-path image generation. failOn:'none'
+  // prevents an arbitrary "warning" from upstream provider output (Apple
+  // ColorSync chunks, etc) from blowing up the entire generation.
+  // (Future: switch to .webp({ effort: 4, quality: 82 }) — 30-50% smaller R2
+  // bills than PNG with the same visual quality. Blocked on the public
+  // surface still typing contentType as 'image/png' across the workers.)
+  // Source: https://sharp.pixelplumbing.com/api-output#png
+  const out = await sharp(buf, { failOn: 'none' })
     .resize(spec.w, spec.h, { fit: 'cover', position: 'centre' })
-    .png({ compressionLevel: 9 })
+    .png({ compressionLevel: 6 })
     .toBuffer();
   return { buffer: out, contentType: 'image/png' };
 }

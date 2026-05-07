@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { asset } from './assets';
 import { project } from './projects';
@@ -29,7 +29,17 @@ export const generation = pgTable(
   },
   (table) => [
     index('generation_project_id_idx').on(table.projectId),
-    index('generation_status_idx').on(table.status),
+    // Composite (project, created_at desc) is the hot path for every list
+    // query: listGenerationsForProject, listCopyEditionsForProject (with
+    // type='copy' filter), listReelsForProject (with type='video' filter).
+    // Postgres can use this index for ORDER BY + WHERE without a sort step.
+    index('generation_project_created_at_idx').on(table.projectId, table.createdAt.desc()),
+    // Partial index: status is low-cardinality (4 values, mostly 'done').
+    // We only ever filter on 'queued'/'running' (stale-job sweepers, future
+    // dashboards). Keep the index small and skip dead leaves for 'done'/'failed'.
+    index('generation_inflight_idx')
+      .on(table.status)
+      .where(sql`${table.status} IN ('queued', 'running')`),
   ],
 );
 
