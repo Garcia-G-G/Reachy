@@ -1,9 +1,11 @@
 import { strict as assert } from 'node:assert';
 import { readFile } from 'node:fs/promises';
-import { escapeBriefText } from '@/server/ai/briefs/escape';
-import { parseBrief } from '@/server/ai/briefs/parseBrief';
 
 async function main() {
+  // Dynamic imports keep server-only modules from throwing at load time.
+  const { parseBrief } = await import('@/server/ai/briefs/parseBrief');
+  const { escapeBriefText } = await import('@/server/ai/briefs/escape');
+
   // 1. Pasted text round-trip.
   const pasted = await parseBrief({ pastedText: 'Hello world.', mime: 'text/plain' });
   assert.equal(pasted.ok, true, 'pasted text should parse');

@@ -9,7 +9,7 @@ export interface ParseBriefOk {
 }
 export interface ParseBriefErr {
   ok: false;
-  error: 'unsupported-mime' | 'empty-extraction' | 'parse-failed' | 'too-large';
+  error: 'unsupported-mime' | 'empty-extraction' | 'parse-failed';
   message: string;
 }
 export type ParseBriefResult = ParseBriefOk | ParseBriefErr;
