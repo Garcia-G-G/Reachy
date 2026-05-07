@@ -81,7 +81,7 @@ export function ProjectBriefSection({ projectId, initial }: ProjectBriefSectionP
           base64,
         });
         if (!result.ok) {
-          setError(translateError(t, result.error));
+          setError(translateError(t, result.error, mime));
           return;
         }
         setSummary({
@@ -243,14 +243,20 @@ export function ProjectBriefSection({ projectId, initial }: ProjectBriefSectionP
   );
 }
 
-function translateError(t: ReturnType<typeof useTranslations<'Identity'>>, raw: string): string {
+function translateError(
+  t: ReturnType<typeof useTranslations<'Identity'>>,
+  raw: string,
+  mime?: string,
+): string {
   switch (raw) {
     case 'unsupported-mime':
       return t('briefErrorMime');
     case 'too-large':
       return t('briefErrorSize');
     case 'parse-failed':
-      return t('briefErrorParsePdf');
+      return mime?.includes('wordprocessingml')
+        ? t('briefErrorParseDocx')
+        : t('briefErrorParsePdf');
     case 'empty-extraction':
       return t('briefErrorEmpty');
     case 'r2-not-configured':
