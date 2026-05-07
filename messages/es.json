@@ -152,10 +152,12 @@
     "briefNone": "sin resumen",
     "briefChange": "cambiar",
     "briefOptionUseProject": "Usar el resumen del proyecto (por defecto)",
-    "briefOptionUploadOneShot": "Subir un documento solo para este post",
+    "briefOptionUploadOneShot": "Subir un .txt o .md solo para este post",
     "briefOptionSkip": "Saltarse el resumen",
     "briefOneShotApplied": "Usando un resumen subido solo para este post",
     "briefOneShotClear": "Quitar",
+    "briefOneShotErrorFormat": "Las subidas one-shot solo soportan .txt y .md. Para .pdf o .docx, configura el resumen en los ajustes del proyecto.",
+    "briefOneShotErrorRead": "No pude leer el archivo. Intenta de nuevo.",
     "briefAngleLabel": "ÁNGULO",
     "briefAnglePlaceholder": "Opcional. Déjalo en blanco para que Reachy elija el ángulo más fuerte del resumen.",
     "formats": {

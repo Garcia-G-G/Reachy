@@ -16,7 +16,7 @@ interface CopyFormBriefIndicatorProps {
   disabled: boolean;
 }
 
-const ACCEPT = '.pdf,.docx,.md,.txt';
+const ACCEPT = '.txt,.md,text/plain,text/markdown';
 
 function bytesLabel(bytes: number | null): string {
   if (!bytes) return '';
@@ -73,8 +73,12 @@ export function CopyFormBriefIndicator({
       onChange({ kind: 'one-shot', text, filename: file.name });
       setOpen(false);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'error';
-      setError(msg);
+      const code = err instanceof Error ? err.message : 'unknown';
+      setError(
+        code === 'one-shot-format-limited'
+          ? t('briefOneShotErrorFormat')
+          : t('briefOneShotErrorRead'),
+      );
     }
   }
 
