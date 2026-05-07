@@ -11,7 +11,9 @@ export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations('Login');
   return {
     title: t('metaTitle'),
-    description: t('title'),
+    // `subtitle` is a plain string; `title` carries an <em> tag and would
+    // throw FORMATTING_ERROR if passed to t() without a rich-text provider.
+    description: t('subtitle'),
   };
 }
 

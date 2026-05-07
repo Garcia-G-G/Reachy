@@ -30,6 +30,13 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // /login is intentionally NOT under the [locale] tree (its strings already
+  // come from useTranslations), so skip the intl middleware to avoid having
+  // it rewritten to `/es/login` / `/en/login`.
+  if (pathname === '/login' || pathname.startsWith('/login/')) {
+    return NextResponse.next();
+  }
+
   // Public/marketing surface — let next-intl handle locale routing.
   return intlMiddleware(req);
 }

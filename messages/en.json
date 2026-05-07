@@ -254,5 +254,76 @@
     "languageSpanish": "Spanish",
     "logoPending": "Logo upload is coming soon — for now, your header is set in initials.",
     "previewLabel": "Live preview"
+  },
+  "Landing": {
+    "metaTitle": "Reachy — your app's well-edited magazine",
+    "metaDescription": "Reachy turns every launch into a small edition — images, copy and reels with the coherence of a well-edited magazine. Multi-project, bilingual ES/EN, with your brand.",
+    "ogTagline": "Your app deserves more than a 3 a.m. post.",
+    "masthead": {
+      "volume": "Vol. 01 · No. 04 · 2026",
+      "navProduct": "Product",
+      "navSubscription": "Subscription",
+      "navSignIn": "Sign in",
+      "switcherEs": "ES",
+      "switcherEn": "EN"
+    },
+    "cover": {
+      "eyebrow": "№ 01<accent>—</accent>Welcome edition",
+      "headline": "Your app deserves more than a <em>3 a.m.</em> post.",
+      "lede": "Reachy turns every launch into a <em>small edition</em> — images, copy and reels with the coherence of a well-edited magazine. Multi-project, bilingual ES/EN, with your brand.",
+      "cta": "Start your first edition",
+      "meta": "Open beta · no card · from $0/mo"
+    },
+    "index": {
+      "label": "— What each<br/>edition produces",
+      "imagesNum": "№ 01 — Images",
+      "imagesTitle": "Hero, OG, posts, <em>covers.</em>",
+      "imagesBody": "Generated with OpenAI gpt-image-1 and fal.ai (FLUX, Recraft). Every format in the exact size you need.",
+      "copyNum": "№ 02 — Copy",
+      "copyTitle": "Tweets, threads, <em>captions.</em>",
+      "copyBody": "Each piece in Spanish and English, side by side, in your brand kit's tone. No generic clichés.",
+      "reelsNum": "№ 03 — Reels",
+      "reelsTitle": "Vertical 9:16, <em>ready.</em>",
+      "reelsBody": "Composed with FFmpeg from your images and text, or generated with Veo 3.1 when the moment calls for it."
+    },
+    "spread": {
+      "h2": "The <em>workshop</em>.",
+      "meta": "— spread 02",
+      "editorBarTitle": "SaaS Tracker — May launch",
+      "editorBarStat": "12 pieces · 2 in queue",
+      "sidebarHeaders": "— Headers",
+      "sidebarThisEdition": "— This edition",
+      "canvasEdition": "Edition № 12",
+      "canvasDate": "04 · 05 · 2026",
+      "pieceCover": "Cover",
+      "pieceCoverSub": "Hero · landing",
+      "pieceCarousel": "Carousel",
+      "pieceCarouselSub": "Instagram",
+      "pieceReel": "Reel",
+      "pieceReelSub": "30 seconds"
+    },
+    "colophon": {
+      "copy": "© Reachy 2026",
+      "made": "Made with Inter, Fraunces, Instrument Serif",
+      "linkContact": "Contact",
+      "linkSelfHosting": "Self-hosting"
+    }
+  },
+  "Welcome": {
+    "metaTitle": "Welcome to Reachy",
+    "eyebrow": "№ 01 — First edition",
+    "title": "Step into your <em>editor's desk</em>.",
+    "lede": "Three steps and you're shipping. Each header is one app; each edition is one campaign; each piece is one asset.",
+    "stepProject": "Create your first header",
+    "stepProjectBody": "Name your app. We'll set up its identity next.",
+    "stepProjectCta": "+ New header",
+    "stepIdentity": "Set the identity",
+    "stepIdentityBody": "Brand colors, fonts, voice. Reachy uses these on every piece.",
+    "stepIdentityCta": "Open identity →",
+    "stepGenerate": "Generate the first piece",
+    "stepGenerateBody": "Image, copy or reel — pick one to ship.",
+    "stepGenerateImage": "Generate image →",
+    "stepGenerateCopy": "Generate copy →",
+    "stepGenerateReel": "Plan a reel →"
   }
 }
