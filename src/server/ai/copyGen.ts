@@ -23,6 +23,8 @@ export interface GenerateCopyArgs {
   /** 0.7 for first attempts, 0.9 for variants. */
   temperature?: number;
   model?: string;
+  /** Raw brief text from project.briefText. Empty/undefined = no brief block. */
+  briefText?: string;
 }
 
 export interface GenerateCopyResult {
@@ -86,6 +88,7 @@ export async function generateCopy(args: GenerateCopyArgs): Promise<GenerateCopy
     idea: args.idea,
     project: args.project,
     promptLanguage,
+    briefText: args.briefText,
   });
 
   const schema = copySchemas[args.format];
