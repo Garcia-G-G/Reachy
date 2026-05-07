@@ -6,6 +6,7 @@ import { GenerateCopyForm } from '@/components/app/generate-copy-form';
 import { MonoEyebrow } from '@/components/editorial';
 import { getBrandKitForProject } from '@/server/actions/brandKits';
 import { getProjectBySlug } from '@/server/actions/projects';
+import { getProjectBriefSummary } from '@/server/ai/briefs';
 import { isOpenAIConfigured } from '@/server/ai/openai';
 
 interface GenerateCopyPageProps {
@@ -25,12 +26,14 @@ export default async function GenerateCopyPage({ params }: GenerateCopyPageProps
   if (!project) notFound();
 
   const bundle = await getBrandKitForProject(project.id);
+  const briefSummary = await getProjectBriefSummary(project.id);
 
   return (
     <Content
       projectId={project.id}
       hasBrandKit={Boolean(bundle?.brandKit)}
       openaiConfigured={isOpenAIConfigured()}
+      briefSummary={briefSummary}
     />
   );
 }
@@ -39,10 +42,12 @@ function Content({
   projectId,
   hasBrandKit,
   openaiConfigured,
+  briefSummary,
 }: {
   projectId: string;
   hasBrandKit: boolean;
   openaiConfigured: boolean;
+  briefSummary: import('@/server/ai/briefs').BriefSummary | null;
 }) {
   const t = useTranslations('Copy');
 
@@ -70,7 +75,11 @@ function Content({
         {!hasBrandKit && <p className="mono-eyebrow mt-6 text-ink-3">{t('noBrandKitNote')}</p>}
       </div>
 
-      <GenerateCopyForm projectId={projectId} openaiConfigured={openaiConfigured} />
+      <GenerateCopyForm
+        projectId={projectId}
+        openaiConfigured={openaiConfigured}
+        briefSummary={briefSummary}
+      />
     </div>
   );
 }

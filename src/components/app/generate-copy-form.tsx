@@ -10,11 +10,14 @@ import {
   type CopyPayload,
 } from '@/lib/copy-formats';
 import { generateCopyAction, regenerateCopyVariant } from '@/server/actions/copy';
+import type { BriefSummary } from '@/server/ai/briefs';
+import { type BriefMode, CopyFormBriefIndicator } from './copy-form-brief-indicator';
 import { CopyResult } from './copy-result';
 
 interface GenerateCopyFormProps {
   projectId: string;
   openaiConfigured: boolean;
+  briefSummary: BriefSummary | null;
 }
 
 interface VariantState {
@@ -30,7 +33,11 @@ type RunState =
   | { kind: 'failed'; message: string }
   | { kind: 'done'; variants: VariantState[] };
 
-export function GenerateCopyForm({ projectId, openaiConfigured }: GenerateCopyFormProps) {
+export function GenerateCopyForm({
+  projectId,
+  openaiConfigured,
+  briefSummary,
+}: GenerateCopyFormProps) {
   const t = useTranslations('Copy');
   const tCommon = useTranslations('common');
 
@@ -39,6 +46,10 @@ export function GenerateCopyForm({ projectId, openaiConfigured }: GenerateCopyFo
   const [promptLanguage, setPromptLanguage] = useState<'en' | 'es'>('en');
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
+
+  const [briefMode, setBriefMode] = useState<BriefMode>(
+    briefSummary?.hasText ? { kind: 'project' } : { kind: 'skip' },
+  );
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -53,6 +64,8 @@ export function GenerateCopyForm({ projectId, openaiConfigured }: GenerateCopyFo
         format,
         idea: idea.trim(),
         promptLanguage,
+        oneShotBriefText: briefMode.kind === 'one-shot' ? briefMode.text : undefined,
+        skipBrief: briefMode.kind === 'skip',
       });
       if (!result.ok) {
         setRun({ kind: 'failed', message: result.error });
@@ -102,11 +115,23 @@ export function GenerateCopyForm({ projectId, openaiConfigured }: GenerateCopyFo
   }
 
   const formDisabled = pending || run.kind === 'running';
-  const submitDisabled = formDisabled || !openaiConfigured || idea.trim().length < 3;
+
+  const hasBriefForGen =
+    briefMode.kind === 'project' ? Boolean(briefSummary?.hasText) : briefMode.kind === 'one-shot';
+
+  const submitDisabled =
+    formDisabled || !openaiConfigured || (!hasBriefForGen && idea.trim().length < 3);
 
   return (
     <div className="space-y-12">
       <form onSubmit={onSubmit} className="space-y-10" noValidate>
+        <CopyFormBriefIndicator
+          summary={briefSummary}
+          mode={briefMode}
+          onChange={setBriefMode}
+          disabled={formDisabled}
+        />
+
         <div>
           <label htmlFor="copy-format" className="mono-eyebrow mb-3 block">
             {t('fieldFormat')}
@@ -129,7 +154,7 @@ export function GenerateCopyForm({ projectId, openaiConfigured }: GenerateCopyFo
 
         <div>
           <label htmlFor="copy-idea" className="mono-eyebrow mb-3 block">
-            {t('fieldIdea')}
+            {hasBriefForGen ? t('briefAngleLabel') : t('fieldIdea')}
           </label>
           <textarea
             id="copy-idea"
@@ -137,10 +162,10 @@ export function GenerateCopyForm({ projectId, openaiConfigured }: GenerateCopyFo
             value={idea}
             onChange={(e) => setIdea(e.target.value)}
             disabled={formDisabled}
-            placeholder={t('fieldIdeaPlaceholder')}
+            placeholder={hasBriefForGen ? t('briefAnglePlaceholder') : t('fieldIdeaPlaceholder')}
             className="field resize-y placeholder:text-ink-3"
             maxLength={600}
-            required
+            required={!hasBriefForGen}
           />
         </div>
 
