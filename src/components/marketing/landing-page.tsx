@@ -116,7 +116,12 @@ export function LandingPage() {
               {t('colophon.linkContact')}
             </a>{' '}
             ·{' '}
-            <a href="/docs" className="transition-colors hover:text-accent">
+            <a
+              href="https://github.com/Garcia-G-G/Reachy#getting-started"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition-colors hover:text-accent"
+            >
               {t('colophon.linkSelfHosting')}
             </a>
           </span>
