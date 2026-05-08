@@ -212,10 +212,16 @@
 
   .pieces { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 18px; }
   .piece { border: 1px solid var(--ink); display: flex; flex-direction: column; }
-  .piece-img { aspect-ratio: 4 / 5; }
-  .p1 { background: linear-gradient(135deg, #d8cfbb, var(--accent)); }
-  .p2 { background: linear-gradient(150deg, #c8c2b1, var(--ink)); }
-  .p3 { background: linear-gradient(160deg, #1f3a2f, var(--accent)); }
+  .piece-img {
+    aspect-ratio: 4 / 5;
+    background-color: var(--paper-2);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  .p1 { background-image: url('../public/edition-12/cover.jpg'); }
+  .p2 { background-image: url('../public/edition-12/carousel.jpg'); }
+  .p3 { background-image: url('../public/edition-12/reel.jpg'); }
   .piece-cap {
     padding: 12px 14px; border-top: 1px solid var(--ink);
     display: flex; justify-content: space-between; align-items: baseline;

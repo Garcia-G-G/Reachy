@@ -152,21 +152,21 @@ function EditorMock() {
       title: t('pieceCover'),
       sub: t('pieceCoverSub'),
       px: '1920×1080',
-      gradient: 'linear-gradient(135deg, #d8cfbb, var(--accent))',
+      image: '/edition-12/cover.jpg',
     },
     {
       key: 'carousel',
       title: t('pieceCarousel'),
       sub: t('pieceCarouselSub'),
       px: '1080×1350',
-      gradient: 'linear-gradient(150deg, #c8c2b1, var(--ink))',
+      image: '/edition-12/carousel.jpg',
     },
     {
       key: 'reel',
       title: t('pieceReel'),
       sub: t('pieceReelSub'),
       px: '1080×1920',
-      gradient: 'linear-gradient(160deg, #1f3a2f, var(--accent))',
+      image: '/edition-12/reel.jpg',
     },
   ];
   const piecesInEdition = ['cover', 'carousel', 'thread', 'reel', 'email'] as const;
@@ -231,8 +231,8 @@ function EditorMock() {
             {pieces.map((p) => (
               <article key={p.key} className="flex flex-col border border-ink">
                 <div
-                  className="aspect-[4/5]"
-                  style={{ background: p.gradient }}
+                  className="aspect-[4/5] bg-paper-2 bg-cover bg-center bg-no-repeat"
+                  style={{ backgroundImage: `url(${p.image})` }}
                   aria-hidden="true"
                 />
                 <div className="flex items-baseline justify-between border-t border-ink px-[14px] py-3">
