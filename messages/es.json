@@ -300,7 +300,9 @@
       "pieceCarousel": "Carrusel",
       "pieceCarouselSub": "Instagram",
       "pieceReel": "Reel",
-      "pieceReelSub": "30 segundos"
+      "pieceReelSub": "30 segundos",
+      "ctaLede": "Un escritorio, todos los <em>activos</em>. Tres toques y tu edición está lista.",
+      "ctaButton": "Comenzar tu primera edición"
     },
     "colophon": {
       "copy": "© Reachy 2026",

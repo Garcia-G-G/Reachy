@@ -2,6 +2,10 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Fragment, type ReactNode } from 'react';
 import { MonoEyebrow } from '@/components/editorial';
+import { CarouselMockup } from './carousel-mockup';
+import { CoverMockup } from './cover-mockup';
+import { ReelMockup } from './reel-mockup';
+import { Reveal } from './reveal';
 
 /**
  * Editorial landing — replicates docs/design-editorial.html.
@@ -15,14 +19,14 @@ export function LandingPage() {
     <>
       {/* ────── COVER ────── */}
       <section className="mx-auto max-w-[1200px] px-6 pt-20 pb-24 text-center md:px-10 md:pt-[140px] md:pb-[160px]">
-        <p className="mb-14 font-mono text-[11px] uppercase tracking-[0.18em] text-ink-3">
+        <p className="cover-eyebrow mb-14 font-mono text-[11px] uppercase tracking-[0.18em] text-ink-3">
           {t.rich('cover.eyebrow', {
             accent: (chunks) => <span className="mx-[6px] text-accent">{chunks}</span>,
           })}
         </p>
 
         <h1
-          className="display mx-auto"
+          className="display cover-headline mx-auto"
           style={{
             fontSize: 'clamp(56px, 9vw, 128px)',
             letterSpacing: '-0.035em',
@@ -36,7 +40,7 @@ export function LandingPage() {
         </h1>
 
         <p
-          className="mx-auto mt-14 text-ink-2"
+          className="cover-lede mx-auto mt-14 text-ink-2"
           style={{
             fontFamily: 'var(--font-fraunces), Georgia, serif',
             fontWeight: 300,
@@ -49,9 +53,9 @@ export function LandingPage() {
           {t.rich('cover.lede', { em: (chunks) => <em className="it">{chunks}</em> })}
         </p>
 
-        <div className="mt-16 inline-flex flex-col items-center gap-[18px]">
-          <Link href="/login" className="btn-ink">
-            {t('cover.cta')}
+        <div className="cover-cta mt-16 inline-flex flex-col items-center gap-[18px]">
+          <Link href="/login" className="btn-ink btn-ink--fancy">
+            <span>{t('cover.cta')}</span>
           </Link>
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">
             {t('cover.meta')}
@@ -67,27 +71,33 @@ export function LandingPage() {
           </MonoEyebrow>
 
           <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-            <IndexItem
-              num={t('index.imagesNum')}
-              title={t.rich('index.imagesTitle', {
-                em: (chunks) => <span className="it">{chunks}</span>,
-              })}
-              body={t('index.imagesBody')}
-            />
-            <IndexItem
-              num={t('index.copyNum')}
-              title={t.rich('index.copyTitle', {
-                em: (chunks) => <span className="it">{chunks}</span>,
-              })}
-              body={t('index.copyBody')}
-            />
-            <IndexItem
-              num={t('index.reelsNum')}
-              title={t.rich('index.reelsTitle', {
-                em: (chunks) => <span className="it">{chunks}</span>,
-              })}
-              body={t('index.reelsBody')}
-            />
+            <Reveal delay={0}>
+              <IndexItem
+                num={t('index.imagesNum')}
+                title={t.rich('index.imagesTitle', {
+                  em: (chunks) => <span className="it">{chunks}</span>,
+                })}
+                body={t('index.imagesBody')}
+              />
+            </Reveal>
+            <Reveal delay={120}>
+              <IndexItem
+                num={t('index.copyNum')}
+                title={t.rich('index.copyTitle', {
+                  em: (chunks) => <span className="it">{chunks}</span>,
+                })}
+                body={t('index.copyBody')}
+              />
+            </Reveal>
+            <Reveal delay={240}>
+              <IndexItem
+                num={t('index.reelsNum')}
+                title={t.rich('index.reelsTitle', {
+                  em: (chunks) => <span className="it">{chunks}</span>,
+                })}
+                body={t('index.reelsBody')}
+              />
+            </Reveal>
           </div>
         </div>
       </section>
@@ -95,14 +105,40 @@ export function LandingPage() {
       {/* ────── SPREAD — workshop preview ────── */}
       <section id="spread" className="bg-paper-2">
         <div className="mx-auto max-w-[1200px] px-6 pt-20 pb-24 md:px-10 md:pt-24 md:pb-28">
-          <div className="mb-14 flex flex-col items-baseline justify-between gap-2 border-b border-rule pb-[18px] md:flex-row">
-            <h2 className="display text-[32px] leading-none md:text-[44px]">
-              {t.rich('spread.h2', { em: (chunks) => <span className="it">{chunks}</span> })}
-            </h2>
-            <MonoEyebrow>{t('spread.meta')}</MonoEyebrow>
-          </div>
+          <Reveal>
+            <div className="spread-head mb-14 flex flex-col items-baseline justify-between gap-2 border-b border-rule pb-[18px] md:flex-row">
+              <h2 className="display text-[32px] leading-none md:text-[44px]">
+                {t.rich('spread.h2', { em: (chunks) => <span className="it">{chunks}</span> })}
+              </h2>
+              <MonoEyebrow>{t('spread.meta')}</MonoEyebrow>
+            </div>
+          </Reveal>
 
-          <EditorMock />
+          <Reveal delay={120}>
+            <EditorMock />
+          </Reveal>
+
+          <Reveal delay={240}>
+            <div className="mt-16 flex flex-col items-center gap-4 border-t border-rule pt-10 md:mt-20 md:flex-row md:justify-between md:gap-6 md:pt-12">
+              <p
+                className="text-center text-ink-2 md:max-w-[36ch] md:text-left"
+                style={{
+                  fontFamily: 'var(--font-fraunces), Georgia, serif',
+                  fontWeight: 300,
+                  fontSize: 19,
+                  lineHeight: 1.4,
+                  fontVariationSettings: "'opsz' 36",
+                }}
+              >
+                {t.rich('spread.ctaLede', {
+                  em: (chunks) => <em className="it">{chunks}</em>,
+                })}
+              </p>
+              <Link href="/login" className="btn-ink btn-ink--fancy">
+                <span>{t('spread.ctaButton')}</span>
+              </Link>
+            </div>
+          </Reveal>
         </div>
       </section>
 
@@ -116,7 +152,12 @@ export function LandingPage() {
               {t('colophon.linkContact')}
             </a>{' '}
             ·{' '}
-            <a href="/docs" className="transition-colors hover:text-accent">
+            <a
+              href="https://github.com/Garcia-G-G/Reachy"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="transition-colors hover:text-accent"
+            >
               {t('colophon.linkSelfHosting')}
             </a>
           </span>
@@ -147,27 +188,9 @@ const HEADERS = [
 function EditorMock() {
   const t = useTranslations('Landing.spread');
   const pieces = [
-    {
-      key: 'cover',
-      title: t('pieceCover'),
-      sub: t('pieceCoverSub'),
-      px: '1920×1080',
-      image: '/edition-12/cover.jpg',
-    },
-    {
-      key: 'carousel',
-      title: t('pieceCarousel'),
-      sub: t('pieceCarouselSub'),
-      px: '1080×1350',
-      image: '/edition-12/carousel.jpg',
-    },
-    {
-      key: 'reel',
-      title: t('pieceReel'),
-      sub: t('pieceReelSub'),
-      px: '1080×1920',
-      image: '/edition-12/reel.jpg',
-    },
+    { key: 'cover', title: t('pieceCover'), sub: t('pieceCoverSub'), px: '1920×1080' },
+    { key: 'carousel', title: t('pieceCarousel'), sub: t('pieceCarouselSub'), px: '1080×1350' },
+    { key: 'reel', title: t('pieceReel'), sub: t('pieceReelSub'), px: '1080×1920' },
   ];
   const piecesInEdition = ['cover', 'carousel', 'thread', 'reel', 'email'] as const;
   const piecesInEditionLabels: Record<(typeof piecesInEdition)[number], string> = {
@@ -214,8 +237,9 @@ function EditorMock() {
           <div className="mono-eyebrow mt-7 mb-3 text-[9px]!">{t('sidebarThisEdition')}</div>
           {piecesInEdition.map((p) => (
             <Fragment key={p}>
-              <div className="display py-[6px] text-[15px] text-ink-2 transition-colors hover:text-accent">
-                › {piecesInEditionLabels[p]}
+              <div className="sidebar-item display py-[6px] text-[15px] text-ink-2">
+                <span className="sidebar-item__chev">›</span>
+                <span className="sidebar-item__label">{piecesInEditionLabels[p]}</span>
               </div>
             </Fragment>
           ))}
@@ -228,13 +252,21 @@ function EditorMock() {
           </div>
 
           <div className="grid grid-cols-1 gap-[18px] md:grid-cols-[1.3fr_1fr_1fr]">
-            {pieces.map((p) => (
-              <article key={p.key} className="flex flex-col border border-ink">
-                <div
-                  className="aspect-[4/5] bg-paper-2 bg-cover bg-center bg-no-repeat"
-                  style={{ backgroundImage: `url(${p.image})` }}
-                  aria-hidden="true"
-                />
+            {pieces.map((p, i) => (
+              <article
+                key={p.key}
+                className="piece-card flex flex-col border border-ink"
+                style={{ animationDelay: `${180 + i * 90}ms` }}
+              >
+                <div className="aspect-[4/5] overflow-hidden bg-paper-2">
+                  {p.key === 'cover' ? (
+                    <CoverMockup />
+                  ) : p.key === 'carousel' ? (
+                    <CarouselMockup />
+                  ) : (
+                    <ReelMockup />
+                  )}
+                </div>
                 <div className="flex items-baseline justify-between border-t border-ink px-[14px] py-3">
                   <div className="display text-[14px] font-medium">
                     {p.title}
