@@ -110,10 +110,12 @@ export const REEL_TEMPLATES: Record<ReelTemplateKey, ReelTemplate> = {
     ],
   },
   'visual-12s': {
-    label: 'Visual · 12s — Mood / Mood / Logo',
-    description: 'Aesthetic-first. Imagery leads, captions whisper. Best for brand reels.',
-    durationSec: 12,
+    label: 'Visual · 16s — Mood reel',
+    description:
+      'Four cinematic frames with Ken Burns motion. Captions whisper, imagery leads. Best for brand reels.',
+    durationSec: 16,
     scenes: [
+      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
       { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
       { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
       { durationSec: 4, textPosition: 'center', slot: 'logo', background: 'brand' },
@@ -180,7 +182,10 @@ export const TYPE_DEFAULT_ENGINE: Record<ReelTemplateKey, ReelEngine> = {
   'feature-15s': 'ffmpeg',
   'launch-20s': 'ffmpeg',
   'informative-25s': 'ffmpeg',
-  'visual-12s': 'veo',
+  // Visual was Veo, but Veo Fast snaps to 8s max — too short for a mood
+  // reel. Switched to FFmpeg multi-scene with Ken Burns motion (zoompan)
+  // for cinematic feel at the 16s duration Garcia wants. ~5¢ vs $0.80.
+  'visual-12s': 'ffmpeg',
   'tutorial-30s': 'ffmpeg',
   'testimonial-20s': 'ffmpeg',
 };

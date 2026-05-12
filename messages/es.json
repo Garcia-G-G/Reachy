@@ -219,8 +219,8 @@
         "description": "Ritmo de explicación. Enseñar, no vender. Un insight por escena."
       },
       "visual-12s": {
-        "label": "Visual · 8s — Un plano cinemático",
-        "description": "Estética primero. Veo 3.1 genera un clip de ambiente desde un prompt. Ideal para reels de marca."
+        "label": "Visual · 16s — Reel de ambiente",
+        "description": "Cuatro planos cinemáticos con movimiento Ken Burns. Las leyendas susurran, la imagen lidera. Ideal para reels de marca."
       },
       "tutorial-30s": {
         "label": "Tutorial · 30s — Intro / Paso / Paso / Paso / Resultado",

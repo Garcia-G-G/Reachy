@@ -47,12 +47,18 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
 
   try {
     // Pre-write each scene's overlay text to its own file so drawtext can
-    // load them via textfile= without us having to escape the string.
+    // load them via textfile= without us having to escape the string. We
+    // also pre-wrap by character count: drawtext does NOT auto-wrap, so a
+    // long single-line caption overflows horizontally and gets clipped at
+    // the 1080px frame edge. Width budgets are tuned empirically against
+    // Helvetica at our font sizes (see overlayFontSize) within a 60px
+    // safe-area margin on each side.
     const textFiles = await Promise.all(
       scenes.map(async (s, i) => {
         if (!s.text) return null;
         const path = join(tmp, `scene-${i}.txt`);
-        await writeFile(path, s.text, 'utf8');
+        const wrapped = wrapForDrawtext(s.text, s.scene.textPosition);
+        await writeFile(path, wrapped, 'utf8');
         return path;
       }),
     );
@@ -205,7 +211,44 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 
 function overlayFontSize(pos: 'top' | 'bottom' | 'center'): number {
   // Center text gets the editorial-display treatment; corner text is smaller.
-  return pos === 'center' ? 96 : 64;
+  return pos === 'center' ? 88 : 56;
+}
+
+/**
+ * Pre-wrap text to fit within the 1080px reel frame (minus a 60px safe
+ * margin on each side = 960px usable). drawtext does not auto-wrap, so an
+ * unconstrained 12-word caption would render as a single line that runs
+ * off both edges.
+ *
+ * Budgets are character counts at our fontfile (Helvetica/DejaVu) sizes,
+ * tuned with a comfortable buffer:
+ *   - center @88pt   → ~16 chars / line, max 3 lines
+ *   - top/bot @56pt  → ~26 chars / line, max 3 lines
+ * Words longer than the budget are kept on their own line (overflow is
+ * acceptable for rare long words, e.g. a hashtag, vs. silently dropping).
+ */
+export function wrapForDrawtext(text: string, pos: 'top' | 'bottom' | 'center'): string {
+  const trimmed = text.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return '';
+  const maxChars = pos === 'center' ? 16 : 26;
+  const maxLines = 3;
+  const words = trimmed.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = word;
+    if (lines.length >= maxLines) break;
+  }
+
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines.slice(0, maxLines).join('\n');
 }
 
 /** Strip leading '#' and pass through to ffmpeg's color parser. */

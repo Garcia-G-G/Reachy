@@ -219,8 +219,8 @@
         "description": "Calm explainer pace. Teach, not sell. One insight per scene."
       },
       "visual-12s": {
-        "label": "Visual · 8s — One cinematic shot",
-        "description": "Aesthetic-first. Veo 3.1 generates a single mood clip from one prompt. Best for brand reels."
+        "label": "Visual · 16s — Mood reel",
+        "description": "Four cinematic frames with Ken Burns motion. Captions whisper, imagery leads. Best for brand reels."
       },
       "tutorial-30s": {
         "label": "Tutorial · 30s — Intro / Step / Step / Step / Result",
