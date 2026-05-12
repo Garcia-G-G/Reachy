@@ -208,22 +208,22 @@ async function runFfmpeg(
             'Subject sits in the central third; top 20% and bottom 25% remain visually quiet (no faces, no key product detail there).',
             'Modern editorial photography, no text, no watermark.',
           ].join(' ');
-          // Inline scene images use fal.ai FLUX/dev instead of OpenAI's
-          // gpt-image-1: ~5-10s per image vs 30-90s+, and ~1¢ vs ~7¢ each.
-          // The reel compositor applies Ken Burns motion + a dark caption
-          // box, so peak photorealism isn't critical for scene backgrounds.
-          // Garcia's first informative-25s reel took 13m43s waiting on
-          // three gpt-image-1 medium-quality calls; FLUX brings the same
-          // four scenes under ~30s total wall-clock.
+          // Inline scene images: fal.ai FLUX.2 [pro] — state-of-the-art
+          // text-to-image as of May 2026 ($0.03/MP, ~10-15s per call).
+          // Previously we used flux/dev (1¢) which produced acceptable
+          // backgrounds; flux-2-pro lifts editorial fidelity — natural light,
+          // mid depth-of-field, consistent character/lighting — which matters
+          // more now that Visual uses Veo and these images appear in the
+          // other six types as the reel's primary visual.
           console.log(
-            `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} → generating image (fal flux/dev)…`,
+            `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} → generating image (fal flux-2-pro)…`,
           );
           const sceneStart = Date.now();
           const gen = await generateImage({
             prompt: composedPrompt,
             format: 'reel-cover',
             provider: 'fal',
-            model: 'fal-ai/flux/dev',
+            model: 'fal-ai/flux-2-pro',
             n: 1,
           });
           console.log(

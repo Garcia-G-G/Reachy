@@ -2,20 +2,25 @@ import 'server-only';
 import { getFal } from '@/server/ai/fal';
 
 /**
- * Default fal.ai model for text-to-video reels in 9:16. Veo 3.1 Fast as of
- * May 2026: 720p, 24fps. Pricing: $0.10/sec without audio, $0.15/sec with
- * audio (text-to-video). Supported durations are 4 / 6 / 8 seconds — passing
- * any other value to `submitVeo` is rejected by the fal API. See:
- *   https://fal.ai/models/fal-ai/veo3.1/fast/api
- *   https://fal.ai/models/fal-ai/veo3.1/fast (pricing)
+ * Default fal.ai model for text-to-video reels in 9:16. Veo 3.1 Standard
+ * (not Fast) as of May 2026: 720p/1080p, 24fps, native synced audio
+ * (dialogue, SFX, ambient). Pricing for text-to-video with audio is
+ * $0.40/sec at 720p/1080p — see
+ *   https://fal.ai/models/fal-ai/veo3.1/api
+ *   https://fal.ai/models/fal-ai/veo3.1 (pricing)
+ * Supported durations are 4 / 6 / 8 seconds; passing anything else gets
+ * rejected by the fal API, so submitVeo snaps via snapVeoDuration.
  */
-export const DEFAULT_VEO_MODEL = 'fal-ai/veo3.1/fast';
+export const DEFAULT_VEO_MODEL = 'fal-ai/veo3.1';
 
-/** Veo 3.1 Fast valid duration steps. submitVeo snaps to the nearest one. */
+/** Veo 3.1 valid duration steps. submitVeo snaps to the nearest one. */
 export const VEO_VALID_DURATIONS = [4, 6, 8] as const;
 
-/** Cost in USD cents per generated second (without audio). */
-export const VEO_FAST_CENTS_PER_SEC = 10;
+/** Cost in USD cents per generated second (with audio, Standard tier). */
+export const VEO_CENTS_PER_SEC = 40;
+
+/** Legacy alias — pre-2026-05-12 code referenced VEO_FAST_CENTS_PER_SEC. */
+export const VEO_FAST_CENTS_PER_SEC = VEO_CENTS_PER_SEC;
 
 /** Snap an arbitrary duration to the nearest fal-supported Veo step. */
 export function snapVeoDuration(seconds: number): 4 | 6 | 8 {
@@ -92,6 +97,10 @@ export async function submitVeo(args: VeoSubmitArgs): Promise<VeoSubmitOk> {
       prompt: args.prompt,
       aspect_ratio: args.aspectRatio,
       duration: args.durationSec,
+      // Veo 3.1 Standard generates synchronized dialogue/SFX/ambient. Without
+      // this flag fal returns a silent clip — losing the headline reason for
+      // picking Veo over FFmpeg + TTS in the first place.
+      generate_audio: true,
     },
   });
   return { requestId: request_id, model };

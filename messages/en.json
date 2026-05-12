@@ -199,8 +199,8 @@
     "planCostNote": "Plan: ${cents} ¢",
     "costNote": "Approx. cost: ${cents} ¢",
     "engineHint": "Engine: {engine} · {cost}",
-    "engineCostFfmpeg": "≈ free",
-    "engineCostVeo": "≈ $0.80 / 8s",
+    "engineCostFfmpeg": "≈ $0.20",
+    "engineCostVeo": "≈ $3.20 / 8s",
     "types": {
       "pitch-30s": {
         "label": "Pitch · 30s — Problem / Solution / CTA",
@@ -219,8 +219,8 @@
         "description": "Calm explainer pace. Teach, not sell. One insight per scene."
       },
       "visual-12s": {
-        "label": "Visual · 16s — Mood reel",
-        "description": "Four cinematic frames with Ken Burns motion. Captions whisper, imagery leads. Best for brand reels."
+        "label": "Visual · 8s — Veo 3.1 cinematic",
+        "description": "Single 8s shot from Veo 3.1 Standard with synchronized audio (dialogue, ambient, SFX). Top-tier cinematic feel."
       },
       "tutorial-30s": {
         "label": "Tutorial · 30s — Intro / Step / Step / Step / Result",
