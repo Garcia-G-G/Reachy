@@ -5,12 +5,12 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 import {
   type PlannedScene,
-  REEL_ENGINES,
   REEL_TEMPLATE_KEYS,
   REEL_TEMPLATES,
   type ReelEngine,
   type ReelPlan,
   type ReelTemplateKey,
+  TYPE_DEFAULT_ENGINE,
 } from '@/lib/reel-templates';
 import { composeReelAction, planReelAction } from '@/server/actions/reels';
 
@@ -67,7 +67,10 @@ export function GenerateReelForm({
   const [template, setTemplate] = useState<ReelTemplateKey>('pitch-30s');
   const [idea, setIdea] = useState('');
   const [language, setLanguage] = useState<'en' | 'es'>('en');
-  const [engine, setEngine] = useState<ReelEngine>('ffmpeg');
+  // Engine is auto-derived from the chosen type — the user no longer picks
+  // it. Visual maps to Veo (single cinematic shot); everything multi-scene
+  // maps to FFmpeg composition.
+  const engine: ReelEngine = TYPE_DEFAULT_ENGINE[template];
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -196,7 +199,6 @@ export function GenerateReelForm({
             <legend className="mono-eyebrow mb-3 block">{t('fieldTemplate')}</legend>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {REEL_TEMPLATE_KEYS.map((k) => {
-                const tpl = REEL_TEMPLATES[k];
                 const checked = template === k;
                 return (
                   <label
@@ -222,14 +224,20 @@ export function GenerateReelForm({
                           fontSize: 18,
                         }}
                       >
-                        {tpl.label}
+                        {t(`types.${k}.label`)}
                       </span>
-                      <span className="mono-eyebrow text-ink-3">{tpl.description}</span>
+                      <span className="mono-eyebrow text-ink-3">{t(`types.${k}.description`)}</span>
                     </span>
                   </label>
                 );
               })}
             </div>
+            <p className="mono-eyebrow mt-2 text-ink-3">
+              {t('engineHint', {
+                engine: t(`engines.${engine}.label`),
+                cost: engine === 'veo' ? t('engineCostVeo') : t('engineCostFfmpeg'),
+              })}
+            </p>
           </fieldset>
 
           <div>
@@ -270,43 +278,6 @@ export function GenerateReelForm({
                   </span>
                 </label>
               ))}
-            </div>
-          </fieldset>
-
-          <fieldset className="space-y-3">
-            <legend className="mono-eyebrow mb-3 block">{t('fieldEngine')}</legend>
-            <div className="space-y-3">
-              {REEL_ENGINES.map((e) => {
-                const disabled = e.id === 'veo' && !falConfigured;
-                return (
-                  <label
-                    key={e.id}
-                    className={`flex cursor-pointer gap-3 border border-rule p-4 ${disabled ? 'opacity-50' : ''}`}
-                  >
-                    <input
-                      type="radio"
-                      name="reelEngine"
-                      value={e.id}
-                      checked={engine === e.id}
-                      onChange={() => setEngine(e.id)}
-                      disabled={planningDisabled || disabled}
-                      className="mt-1 accent-ink"
-                    />
-                    <span>
-                      <span
-                        className="block"
-                        style={{
-                          fontFamily: 'var(--font-fraunces), Georgia, serif',
-                          fontSize: 18,
-                        }}
-                      >
-                        {e.label}
-                      </span>
-                      <span className="mono-eyebrow text-ink-3">{e.tagline}</span>
-                    </span>
-                  </label>
-                );
-              })}
             </div>
           </fieldset>
 

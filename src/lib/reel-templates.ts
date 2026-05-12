@@ -158,6 +158,24 @@ export const REEL_ENGINES: ReadonlyArray<{ id: ReelEngine; label: string; taglin
   },
 ];
 
+/**
+ * Engine auto-pick per type. Visual is the only Veo candidate — its
+ * single-mood-shot framing matches Veo's "one prompt → one 8s clip"
+ * behavior. Everything else has multi-scene structure with text overlays
+ * that FFmpeg composition renders crisply (Veo snaps duration to 8s max
+ * and ignores per-scene overlays, so a multi-beat reel under Veo loses
+ * most of its choreography).
+ */
+export const TYPE_DEFAULT_ENGINE: Record<ReelTemplateKey, ReelEngine> = {
+  'pitch-30s': 'ffmpeg',
+  'feature-15s': 'ffmpeg',
+  'launch-20s': 'ffmpeg',
+  'informative-25s': 'ffmpeg',
+  'visual-12s': 'veo',
+  'tutorial-30s': 'ffmpeg',
+  'testimonial-20s': 'ffmpeg',
+};
+
 /** Shape the LLM scene planner returns. One entry per template scene, in order. */
 export interface PlannedScene {
   slot: SceneSlot;

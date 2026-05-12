@@ -197,7 +197,50 @@
     "errorNoR2": "El almacenamiento R2 no está configurado — los reels no se pueden subir.",
     "noBrandKitNote": "No hay identidad configurada. La escena CTA usa por defecto colores ink+paper.",
     "planCostNote": "Plan: ${cents} ¢",
-    "costNote": "Costo aprox.: ${cents} ¢"
+    "costNote": "Costo aprox.: ${cents} ¢",
+    "engineHint": "Motor: {engine} · {cost}",
+    "engineCostFfmpeg": "≈ gratis",
+    "engineCostVeo": "≈ $0.80 / 8s",
+    "types": {
+      "pitch-30s": {
+        "label": "Pitch · 30s — Problema / Solución / CTA",
+        "description": "Cinco escenas: duele el problema, gira el cuchillo, presenta la solución, muestra el beneficio, cierra con la llamada."
+      },
+      "feature-15s": {
+        "label": "Feature · 15s — Gancho / Función / Beneficio / CTA",
+        "description": "Loop ajustado de cuatro escenas para destacar una sola función."
+      },
+      "launch-20s": {
+        "label": "Lanzamiento · 20s — Anuncio / Demo / CTA",
+        "description": "Anuncia un release: titular, muestra el cambio, mueve a la acción."
+      },
+      "informative-25s": {
+        "label": "Informativo · 25s — Gancho / Insight / Insight / Conclusión",
+        "description": "Ritmo de explicación. Enseñar, no vender. Un insight por escena."
+      },
+      "visual-12s": {
+        "label": "Visual · 8s — Un plano cinemático",
+        "description": "Estética primero. Veo 3.1 genera un clip de ambiente desde un prompt. Ideal para reels de marca."
+      },
+      "tutorial-30s": {
+        "label": "Tutorial · 30s — Intro / Paso / Paso / Paso / Resultado",
+        "description": "How-to paso a paso. Captions numeradas, progresión clara."
+      },
+      "testimonial-20s": {
+        "label": "Testimonial · 20s — Contexto / Cita / Cita / Marca",
+        "description": "Prueba social en citas. Abre con cita, cierra con marca."
+      }
+    },
+    "engines": {
+      "ffmpeg": {
+        "label": "Composición FFmpeg",
+        "tagline": "Une tus imágenes generadas con texto encima. Barato y rápido."
+      },
+      "veo": {
+        "label": "Veo 3.1 Fast",
+        "tagline": "Genera el reel completo desde un solo prompt. Más lento (~3 min), más impactante."
+      }
+    }
   },
   "Library": {
     "metaTitle": "Archivo",

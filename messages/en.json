@@ -197,7 +197,50 @@
     "errorNoR2": "R2 storage is not configured — reels can't be uploaded.",
     "noBrandKitNote": "No identity set yet. The CTA scene falls back to ink+paper colors.",
     "planCostNote": "Plan: ${cents} ¢",
-    "costNote": "Approx. cost: ${cents} ¢"
+    "costNote": "Approx. cost: ${cents} ¢",
+    "engineHint": "Engine: {engine} · {cost}",
+    "engineCostFfmpeg": "≈ free",
+    "engineCostVeo": "≈ $0.80 / 8s",
+    "types": {
+      "pitch-30s": {
+        "label": "Pitch · 30s — Problem / Solution / CTA",
+        "description": "Five scenes: ache the problem, twist the knife, present the solution, show the benefit, end on the call."
+      },
+      "feature-15s": {
+        "label": "Feature · 15s — Hook / Feature / Benefit / CTA",
+        "description": "Four-scene tight loop for a single feature highlight."
+      },
+      "launch-20s": {
+        "label": "Launch · 20s — Announcement / Demo / CTA",
+        "description": "Announce a new release: headline, show the change, drive action."
+      },
+      "informative-25s": {
+        "label": "Informative · 25s — Hook / Insight / Insight / Takeaway",
+        "description": "Calm explainer pace. Teach, not sell. One insight per scene."
+      },
+      "visual-12s": {
+        "label": "Visual · 8s — One cinematic shot",
+        "description": "Aesthetic-first. Veo 3.1 generates a single mood clip from one prompt. Best for brand reels."
+      },
+      "tutorial-30s": {
+        "label": "Tutorial · 30s — Intro / Step / Step / Step / Result",
+        "description": "Step-by-step how-to. Numbered captions, clear progression."
+      },
+      "testimonial-20s": {
+        "label": "Testimonial · 20s — Setup / Quote / Quote / Brand",
+        "description": "Quote-driven social proof. Open quotes, close with brand."
+      }
+    },
+    "engines": {
+      "ffmpeg": {
+        "label": "FFmpeg composition",
+        "tagline": "Stitches your generated images with text overlays. Cheap and fast."
+      },
+      "veo": {
+        "label": "Veo 3.1 Fast",
+        "tagline": "Generates the entire reel from one prompt. Slower (~3 min), more impactful."
+      }
+    }
   },
   "Library": {
     "metaTitle": "Archive",
