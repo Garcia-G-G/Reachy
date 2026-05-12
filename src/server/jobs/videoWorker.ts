@@ -208,22 +208,21 @@ async function runFfmpeg(
             'Subject sits in the central third; top 20% and bottom 25% remain visually quiet (no faces, no key product detail there).',
             'Modern editorial photography, no text, no watermark.',
           ].join(' ');
-          // Inline scene images: fal.ai FLUX.2 [pro] — state-of-the-art
-          // text-to-image as of May 2026 ($0.03/MP, ~10-15s per call).
-          // Previously we used flux/dev (1¢) which produced acceptable
-          // backgrounds; flux-2-pro lifts editorial fidelity — natural light,
-          // mid depth-of-field, consistent character/lighting — which matters
-          // more now that Visual uses Veo and these images appear in the
-          // other six types as the reel's primary visual.
+          // Inline scene images: fal.ai FLUX/dev — 1¢ each, ~5-10s per call.
+          // We briefly used flux-2-pro (4¢) for better editorial fidelity
+          // but reverted at Garcia's request: the per-scene Ken Burns motion
+          // plus the dark caption box already blur most quality difference,
+          // and at 4 scenes per reel that's the difference between ~6¢ and
+          // ~20¢ per generation — meaningful for someone iterating.
           console.log(
-            `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} → generating image (fal flux-2-pro)…`,
+            `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} → generating image (fal flux/dev)…`,
           );
           const sceneStart = Date.now();
           const gen = await generateImage({
             prompt: composedPrompt,
             format: 'reel-cover',
             provider: 'fal',
-            model: 'fal-ai/flux-2-pro',
+            model: 'fal-ai/flux/dev',
             n: 1,
           });
           console.log(

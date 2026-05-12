@@ -182,12 +182,11 @@ export const TYPE_DEFAULT_ENGINE: Record<ReelTemplateKey, ReelEngine> = {
   'feature-15s': 'ffmpeg',
   'launch-20s': 'ffmpeg',
   'informative-25s': 'ffmpeg',
-  // Visual goes back to Veo: now using Veo 3.1 Standard (not Fast) which
-  // generates synchronized dialogue/SFX/ambient natively — the closest
-  // thing to a polished cinematic reel without an editor. Locked at 8s
-  // (Veo's max single-shot duration); the 4-scene template still drives
-  // a richer prompt construction in runVeo.
-  'visual-12s': 'veo',
+  // Visual stays on FFmpeg multi-scene for cost reasons: Veo even at Fast
+  // tier with audio is $1.20 per 8s clip, vs ~6¢ for a 16s FFmpeg reel
+  // with Flux/dev stills + Ken Burns motion + per-scene TTS. Cinematic
+  // feel comes from the zoompan + xfade pacing, not Veo specifically.
+  'visual-12s': 'ffmpeg',
   'tutorial-30s': 'ffmpeg',
   'testimonial-20s': 'ffmpeg',
 };

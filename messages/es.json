@@ -199,8 +199,8 @@
     "planCostNote": "Plan: ${cents} ¢",
     "costNote": "Costo aprox.: ${cents} ¢",
     "engineHint": "Motor: {engine} · {cost}",
-    "engineCostFfmpeg": "≈ $0.20",
-    "engineCostVeo": "≈ $3.20 / 8s",
+    "engineCostFfmpeg": "≈ $0.06",
+    "engineCostVeo": "≈ $1.20 / 8s",
     "types": {
       "pitch-30s": {
         "label": "Pitch · 30s — Problema / Solución / CTA",
@@ -219,8 +219,8 @@
         "description": "Ritmo de explicación. Enseñar, no vender. Un insight por escena."
       },
       "visual-12s": {
-        "label": "Visual · 8s — Veo 3.1 cinemático",
-        "description": "Un plano de 8s con Veo 3.1 Standard y audio sincronizado (diálogo, ambiente, FX). Calidad cinemática top."
+        "label": "Visual · 16s — Reel de ambiente",
+        "description": "Cuatro planos cinemáticos con movimiento Ken Burns y locución TTS. Las leyendas susurran, la imagen lidera. Ideal para reels de marca."
       },
       "tutorial-30s": {
         "label": "Tutorial · 30s — Intro / Paso / Paso / Paso / Resultado",

@@ -2,24 +2,26 @@ import 'server-only';
 import { getFal } from '@/server/ai/fal';
 
 /**
- * Default fal.ai model for text-to-video reels in 9:16. Veo 3.1 Standard
- * (not Fast) as of May 2026: 720p/1080p, 24fps, native synced audio
- * (dialogue, SFX, ambient). Pricing for text-to-video with audio is
- * $0.40/sec at 720p/1080p — see
- *   https://fal.ai/models/fal-ai/veo3.1/api
- *   https://fal.ai/models/fal-ai/veo3.1 (pricing)
- * Supported durations are 4 / 6 / 8 seconds; passing anything else gets
- * rejected by the fal API, so submitVeo snaps via snapVeoDuration.
+ * Default fal.ai model for text-to-video reels in 9:16. Veo 3.1 Fast as of
+ * May 2026: 720p, 24fps. Pricing with audio is $0.15/sec (text-to-video).
+ * Supported durations are 4 / 6 / 8 seconds — passing any other value to
+ * submitVeo is rejected by the fal API. See:
+ *   https://fal.ai/models/fal-ai/veo3.1/fast/api
+ *   https://fal.ai/models/fal-ai/veo3.1/fast (pricing)
+ *
+ * We picked Fast over Standard because Standard's $0.40/sec made every
+ * Visual reel cost $3.20 — too expensive for indie iteration. Quality
+ * difference is noticeable but acceptable.
  */
-export const DEFAULT_VEO_MODEL = 'fal-ai/veo3.1';
+export const DEFAULT_VEO_MODEL = 'fal-ai/veo3.1/fast';
 
-/** Veo 3.1 valid duration steps. submitVeo snaps to the nearest one. */
+/** Veo 3.1 Fast valid duration steps. submitVeo snaps to the nearest one. */
 export const VEO_VALID_DURATIONS = [4, 6, 8] as const;
 
-/** Cost in USD cents per generated second (with audio, Standard tier). */
-export const VEO_CENTS_PER_SEC = 40;
+/** Cost in USD cents per generated second (Fast tier, with audio). */
+export const VEO_CENTS_PER_SEC = 15;
 
-/** Legacy alias — pre-2026-05-12 code referenced VEO_FAST_CENTS_PER_SEC. */
+/** Legacy alias — older call sites reference VEO_FAST_CENTS_PER_SEC. */
 export const VEO_FAST_CENTS_PER_SEC = VEO_CENTS_PER_SEC;
 
 /** Snap an arbitrary duration to the nearest fal-supported Veo step. */
