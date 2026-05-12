@@ -208,21 +208,21 @@ async function runFfmpeg(
             'Subject sits in the central third; top 20% and bottom 25% remain visually quiet (no faces, no key product detail there).',
             'Modern editorial photography, no text, no watermark.',
           ].join(' ');
-          // Inline scene images: fal.ai FLUX/dev — 1¢ each, ~5-10s per call.
-          // We briefly used flux-2-pro (4¢) for better editorial fidelity
-          // but reverted at Garcia's request: the per-scene Ken Burns motion
-          // plus the dark caption box already blur most quality difference,
-          // and at 4 scenes per reel that's the difference between ~6¢ and
-          // ~20¢ per generation — meaningful for someone iterating.
+          // Inline scene images: fal.ai FLUX.2 [flex] — the "cheap but good"
+          // tier between flux/dev (1¢, basic) and flux-2-pro (4¢, SOTA).
+          // At 3¢ per image, four scenes cost 12¢ vs 4¢ on dev — Garcia gets
+          // a clear quality bump (better natural light, more consistent
+          // composition, sharper detail) without paying premium for
+          // marginal improvements that get blurred under Ken Burns + box.
           console.log(
-            `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} → generating image (fal flux/dev)…`,
+            `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} → generating image (fal flux-2-flex)…`,
           );
           const sceneStart = Date.now();
           const gen = await generateImage({
             prompt: composedPrompt,
             format: 'reel-cover',
             provider: 'fal',
-            model: 'fal-ai/flux/dev',
+            model: 'fal-ai/flux-2-flex',
             n: 1,
           });
           console.log(
