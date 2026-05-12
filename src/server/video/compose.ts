@@ -20,12 +20,13 @@ export interface ComposeReelArgs {
   /** Final output path on disk; the caller uploads the result to R2. */
   outputPath: string;
   /**
-   * Optional MP3/WAV with a narration or background track. If supplied, the
-   * audio is mixed into the output as an AAC stream truncated to the visual
-   * length via `-shortest`. Caller is responsible for any sync — usually
-   * a TTS pass over the joined scene captions.
+   * Per-scene narration audio paths. Index aligns with `scenes`. A null
+   * entry produces silence of the scene's duration so timing stays aligned.
+   * Each clip is padded with silence to fill its scene duration, then
+   * concatenated, so caption audio plays while its scene is on screen.
+   * Pass `undefined` (or omit) to drop audio entirely.
    */
-  audioPath?: string;
+  sceneAudios?: Array<string | null>;
   /** Brand background hex used by `background: 'brand'` CTA scenes. */
   brandColorHex: string;
   /** Brand text color hex used on top of the brand bg. */
@@ -46,7 +47,7 @@ export interface ComposeReelArgs {
  * Source: https://ffmpeg.org/ffmpeg-filters.html#drawtext-1
  */
 export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: string }> {
-  const { scenes, outputPath, brandColorHex, brandTextHex, audioPath } = args;
+  const { scenes, outputPath, brandColorHex, brandTextHex, sceneAudios } = args;
   if (scenes.length === 0) throw new Error('composeReel: at least one scene required');
 
   const fontFile = await resolveDrawtextFont();
@@ -96,9 +97,22 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         if (!inputPath) continue; // unreachable after the validation above
         cmd.input(inputPath).inputOptions(['-loop', '1', '-t', String(s.scene.durationSec)]);
       }
-      // Audio narration / soundtrack is the LAST input. Its filter stream
-      // index will be scenes.length when referenced in the output map.
-      if (audioPath) cmd.input(audioPath);
+      // Per-scene audio inputs follow the video inputs. We add one ffmpeg
+      // input per non-null entry; null slots later get anullsrc silence
+      // injected into the filter graph instead. Track which video-scene
+      // index maps to which ffmpeg input index so we can reference it.
+      const audioInputIdx: Array<number | null> = (sceneAudios ?? []).map(() => null);
+      if (sceneAudios) {
+        let nextIdx = scenes.length;
+        for (let i = 0; i < sceneAudios.length; i++) {
+          const p = sceneAudios[i];
+          if (p) {
+            cmd.input(p);
+            audioInputIdx[i] = nextIdx;
+            nextIdx += 1;
+          }
+        }
+      }
 
       // Per-scene filter: scale → crop → zoompan (Ken Burns) → drawtext (if any) → fade
       const filters: string[] = [];
@@ -168,18 +182,37 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         cumulative += sceneDur - REEL_TRANSITION_SEC;
       }
 
-      // Audio track is the last input. Pad it with silence (apad) so its
-      // stream is at least as long as the video, then `-shortest` clips
-      // BOTH to the video length. Without apad, a 5s TTS clip over an 11s
-      // reel would make `-shortest` truncate the video down to 5s.
-      const audioMapIdx = scenes.length;
+      // Build per-scene audio: each scene gets either its TTS clip padded
+      // to scene.durationSec, or a generated silence of the same length.
+      // Concatenated together they line up with the visual timeline (the
+      // small xfade overlap at scene boundaries means audio runs slightly
+      // longer than video — `-shortest` trims the tail to match).
       let audioLabel: string | undefined;
-      if (audioPath) {
-        filters.push(`[${audioMapIdx}:a]apad[afinal]`);
+      if (sceneAudios) {
+        const audioSubLabels: string[] = [];
+        for (let i = 0; i < scenes.length; i++) {
+          const dur = scenes[i]?.scene.durationSec ?? 0;
+          const inIdx = audioInputIdx[i];
+          const sub = `as${i}`;
+          if (inIdx !== null) {
+            // Pad real TTS with trailing silence to exactly the scene length.
+            filters.push(
+              `[${inIdx}:a]apad=whole_dur=${dur},atrim=0:${dur},asetpts=PTS-STARTPTS[${sub}]`,
+            );
+          } else {
+            // No caption / no TTS — fill the scene with silence so the
+            // concat chain keeps its alignment.
+            filters.push(
+              `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=0:${dur},asetpts=PTS-STARTPTS[${sub}]`,
+            );
+          }
+          audioSubLabels.push(`[${sub}]`);
+        }
+        filters.push(`${audioSubLabels.join('')}concat=n=${scenes.length}:v=0:a=1[afinal]`);
         audioLabel = 'afinal';
       }
       const outputs = audioLabel ? [lastLabel, audioLabel] : [lastLabel];
-      const audioOpts = audioPath ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : ['-an'];
+      const audioOpts = sceneAudios ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : ['-an'];
 
       cmd
         .complexFilter(filters, outputs)

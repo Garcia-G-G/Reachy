@@ -45,6 +45,9 @@ const planSchema = z.object({
   template: z.enum(TEMPLATE_VALUES),
   tagline: z.string().trim().min(1).max(160),
   scenes: z.array(plannedSceneSchema).min(1).max(10),
+  // Optional so plans serialized before the worker started reading it still
+  // parse cleanly. New plans set it from the form's language picker.
+  language: z.enum(['en', 'es']).optional(),
 });
 
 // Tighten URL validation: z.string().url() accepts file://, javascript:, data:,
@@ -115,7 +118,15 @@ export async function planReelAction(
       },
       brandKit: kit ?? null,
     });
-    return { ok: true, data: { plan: result.plan, costCents: result.costCents } };
+    // Attach the chosen language to the plan so the compose worker can
+    // pick a matching TTS voice (en→alloy, es→nova).
+    return {
+      ok: true,
+      data: {
+        plan: { ...result.plan, language: parsed.data.language },
+        costCents: result.costCents,
+      },
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'plan failed' };
   }

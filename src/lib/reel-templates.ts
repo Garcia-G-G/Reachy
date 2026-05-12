@@ -207,4 +207,10 @@ export interface ReelPlan {
   /** Optional one-line tagline for the export label. */
   tagline: string;
   scenes: PlannedScene[];
+  /**
+   * Caption language. Set at plan time; the video worker uses it to pick
+   * the TTS narration voice (Spanish → nova, English → alloy).
+   * Defaults to 'en' on plans created before this field existed.
+   */
+  language?: 'en' | 'es';
 }

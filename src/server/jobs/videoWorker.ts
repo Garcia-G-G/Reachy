@@ -255,47 +255,56 @@ async function runFfmpeg(
       }),
     );
 
-    // Generate a TTS narration covering all captions so the reel isn't
-    // silent. Best-effort: if TTS fails (rate limit, API hiccup), we fall
-    // back to the no-audio path instead of failing the whole reel.
-    // OpenAI tts-1 costs ~$0.015 per 1k chars — a reel has ~50-200 chars
-    // of captions total, so ~$0.001 per reel.
-    let audioPath: string | undefined;
+    // Per-scene TTS: each scene's caption is rendered to its own MP3 so
+    // the narration syncs with what's on screen. The previous single-TTS
+    // approach read everything from t=0 and drifted out of sync within
+    // the first scene. Best-effort: if any TTS call fails we drop the
+    // whole audio track rather than ship a partial one.
+    let sceneAudios: Array<string | null> | undefined;
     let ttsCostCents = 0;
-    const captionTexts = data.plan.scenes
-      .map((s) => s.text?.trim())
-      .filter((t): t is string => Boolean(t));
-    if (captionTexts.length > 0) {
-      try {
-        const narrationScript = captionTexts.join('. ');
-        const ttsStart = Date.now();
-        const speech = await getOpenAI().audio.speech.create({
-          model: 'tts-1',
-          voice: 'alloy',
-          input: narrationScript,
-          response_format: 'mp3',
-          speed: 0.95,
-        });
-        const audioBuf = Buffer.from(await speech.arrayBuffer());
-        audioPath = join(tmp, 'narration.mp3');
-        await writeFile(audioPath, audioBuf);
-        ttsCostCents = Math.max(1, Math.round((narrationScript.length / 1000) * 1.5));
-        console.log(
-          `[reachy:video] gen ${data.generationId} TTS ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${audioBuf.length}B, ${ttsCostCents}¢)`,
-        );
-      } catch (err) {
-        console.warn(
-          `[reachy:video] gen ${data.generationId} TTS failed, continuing silent:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
+    // Voice picked by caption language so reels don't have an English-leaning
+    // narrator reading Spanish copy (or vice versa). `alloy` is the neutral
+    // default we ship for English; `nova` is the warmer feminine voice that
+    // handles Spanish phonemes cleanly. Both are tts-1 voices.
+    const ttsVoice = data.plan.language === 'es' ? 'nova' : 'alloy';
+    try {
+      const openai = getOpenAI();
+      const ttsStart = Date.now();
+      sceneAudios = await Promise.all(
+        data.plan.scenes.map(async (scene, i) => {
+          const text = scene.text?.trim();
+          if (!text) return null; // composeReel will fill silence for this scene
+          const speech = await openai.audio.speech.create({
+            model: 'tts-1',
+            voice: ttsVoice,
+            input: text,
+            response_format: 'mp3',
+            speed: 0.95,
+          });
+          const buf = Buffer.from(await speech.arrayBuffer());
+          const path = join(tmp, `scene-tts-${i}.mp3`);
+          await writeFile(path, buf);
+          ttsCostCents += Math.max(1, Math.round((text.length / 1000) * 1.5));
+          return path;
+        }),
+      );
+      console.log(
+        `[reachy:video] gen ${data.generationId} TTS x${sceneAudios.filter(Boolean).length} ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${ttsCostCents}¢, voice=${ttsVoice})`,
+      );
+    } catch (err) {
+      console.warn(
+        `[reachy:video] gen ${data.generationId} TTS failed, continuing silent:`,
+        err instanceof Error ? err.message : err,
+      );
+      sceneAudios = undefined;
+      ttsCostCents = 0;
     }
 
     const outputPath = join(tmp, 'out.mp4');
     await composeReel({
       scenes,
       outputPath,
-      audioPath,
+      sceneAudios,
       brandColorHex: data.brandColorHex,
       brandTextHex: data.brandTextHex,
       onProgress,
