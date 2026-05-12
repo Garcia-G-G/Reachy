@@ -199,7 +199,7 @@
     "planCostNote": "Plan: ${cents} ¢",
     "costNote": "Costo aprox.: ${cents} ¢",
     "engineHint": "Motor: {engine} · {cost}",
-    "engineCostFfmpeg": "≈ $0.14",
+    "engineCostFfmpeg": "≈ $0.18",
     "engineCostVeo": "≈ $1.20 / 8s",
     "types": {
       "pitch-30s": {
