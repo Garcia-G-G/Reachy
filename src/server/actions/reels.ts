@@ -157,17 +157,14 @@ export async function composeReelAction(input: ComposeReelInput): Promise<Action
   const brandColorHex = kit?.primaryColor ?? '#14110D';
   const brandTextHex = kit?.bgColor ?? '#F1EBDF';
 
-  // For ffmpeg we need one image URL per image-backed scene. The UI is in
-  // charge of generating those upstream and passing them in. Validate now.
-  if (parsed.data.engine === 'ffmpeg') {
-    const urls = parsed.data.sceneImageUrls ?? [];
-    if (urls.length !== parsed.data.plan.scenes.length) {
+  // sceneImageUrls is now optional. When omitted (or holes), the worker
+  // auto-generates the missing scenes from each scene's imagePrompt via
+  // OpenAI gpt-image-1 + R2 (see runFfmpeg in src/server/jobs/videoWorker.ts).
+  // Validate length only when the caller does pass URLs so a stale client
+  // can't desync the array with the plan.
+  if (parsed.data.engine === 'ffmpeg' && parsed.data.sceneImageUrls) {
+    if (parsed.data.sceneImageUrls.length !== parsed.data.plan.scenes.length) {
       return { ok: false, error: 'sceneImageUrls length mismatch' };
-    }
-    for (const [i, scene] of parsed.data.plan.scenes.entries()) {
-      if (scene.background === 'image' && !urls[i]) {
-        return { ok: false, error: `image url missing for scene ${i + 1}` };
-      }
     }
   }
 

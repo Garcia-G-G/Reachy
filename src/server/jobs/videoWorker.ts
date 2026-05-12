@@ -6,6 +6,7 @@ import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { env } from '@/env';
 import { REEL_DIMENSIONS } from '@/lib/reel-templates';
+import { generateImage } from '@/server/ai/imageGen';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
@@ -176,17 +177,48 @@ async function runFfmpeg(
   try {
     // Pull the per-scene images from R2 to temp files. The compositor needs
     // local paths because fluent-ffmpeg passes them straight to the binary.
+    //
+    // If the caller didn't paste a URL for an image-backed scene, generate
+    // one inline now (OpenAI gpt-image-1 → R2). This is the auto-fulfill
+    // path so the UI doesn't have to bounce the user to the Images tab to
+    // populate every scene by hand. Costs are accounted for as part of the
+    // overall reel cost via the OpenAI usage returned by generateImage.
+    let autoImageCostCents = 0;
     const scenes = await Promise.all(
       data.plan.scenes.map(async (scene, i) => {
         if (scene.background === 'brand') {
           return { imagePath: undefined, text: scene.text, scene };
         }
-        const url = data.sceneImageUrls?.[i];
+        let url = data.sceneImageUrls?.[i] ?? null;
+
         if (!url) {
-          throw new Error(
-            `runFfmpeg: image URL missing for scene ${i + 1} (${scene.slot}). Generate the image first.`,
-          );
+          if (!scene.imagePrompt) {
+            throw new Error(
+              `runFfmpeg: scene ${i + 1} (${scene.slot}) has no imagePrompt to auto-generate from`,
+            );
+          }
+          const gen = await generateImage({
+            prompt: scene.imagePrompt,
+            format: 'reel-cover',
+            provider: 'openai',
+            model: 'gpt-image-1',
+            n: 1,
+          });
+          const buf = gen.buffers[0];
+          if (!buf) {
+            throw new Error(`runFfmpeg: image-gen returned no buffer for scene ${i + 1}`);
+          }
+          const key = `reels/${data.generationId}/scene-${i}.png`;
+          const put = await putR2(key, buf, 'image/png');
+          if (!put.publicUrl) {
+            throw new Error(
+              `runFfmpeg: R2_PUBLIC_URL not configured — scene image has no public URL`,
+            );
+          }
+          url = put.publicUrl;
+          autoImageCostCents += gen.costCents;
         }
+
         assertR2PublicUrl(url);
         const res = await fetch(url, { redirect: 'error' });
         if (!res.ok) {
@@ -209,7 +241,13 @@ async function runFfmpeg(
 
     const buffer = await readFile(outputPath);
     const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
-    return { buffer, bytes: buffer.length, durationSec: totalDur, costCents: 1 };
+    // 1 cent floor for the compose itself; any inline image gen is added on top.
+    return {
+      buffer,
+      bytes: buffer.length,
+      durationSec: totalDur,
+      costCents: 1 + autoImageCostCents,
+    };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }

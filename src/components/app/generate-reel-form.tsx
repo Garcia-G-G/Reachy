@@ -151,7 +151,7 @@ export function GenerateReelForm({
     });
   }
 
-  function onCompose(plan: ReelPlan, sceneImageUrls: Array<string | null>) {
+  function onCompose(plan: ReelPlan) {
     if (engine === 'veo' && !falConfigured) {
       toast.error(t('errorNoFal'));
       return;
@@ -166,7 +166,6 @@ export function GenerateReelForm({
         projectId,
         engine,
         plan,
-        sceneImageUrls: engine === 'ffmpeg' ? sceneImageUrls : undefined,
       });
       if (!result.ok) {
         setPhase({ kind: 'failed', message: result.error });
@@ -307,7 +306,6 @@ export function GenerateReelForm({
         <PlanEditor
           plan={phase.plan}
           planCostCents={phase.planCostCents}
-          engine={engine}
           onCompose={onCompose}
           onCancel={onReset}
           composing={pending}
@@ -331,33 +329,22 @@ export function GenerateReelForm({
 function PlanEditor({
   plan,
   planCostCents,
-  engine,
   onCompose,
   onCancel,
   composing,
 }: {
   plan: ReelPlan;
   planCostCents: number;
-  engine: ReelEngine;
-  onCompose: (plan: ReelPlan, sceneImageUrls: Array<string | null>) => void;
+  onCompose: (plan: ReelPlan) => void;
   onCancel: () => void;
   composing: boolean;
 }) {
   const t = useTranslations('Reels');
   const [scenes, setScenes] = useState<PlannedScene[]>(plan.scenes);
-  const [imageUrls, setImageUrls] = useState<Array<string | null>>(plan.scenes.map(() => null));
 
   function updateScene(index: number, patch: Partial<PlannedScene>) {
     setScenes((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   }
-
-  function updateUrl(index: number, url: string) {
-    setImageUrls((prev) => prev.map((u, i) => (i === index ? url.trim() || null : u)));
-  }
-
-  const allImagesProvided =
-    engine !== 'ffmpeg' ||
-    scenes.every((s, i) => s.background === 'brand' || Boolean(imageUrls[i]));
 
   return (
     <div className="space-y-8">
@@ -421,34 +408,16 @@ function PlanEditor({
                   />
                 </div>
               )}
-              {engine === 'ffmpeg' && scene.background === 'image' && (
-                <div>
-                  <label htmlFor={`scene-url-${i}`} className="mono-eyebrow mb-2 block">
-                    {t('sceneImageUrl')}
-                  </label>
-                  <input
-                    id={`scene-url-${i}`}
-                    type="url"
-                    value={imageUrls[i] ?? ''}
-                    onChange={(e) => updateUrl(i, e.target.value)}
-                    placeholder={t('sceneImageUrlPlaceholder')}
-                    className="field"
-                  />
-                  <p className="mono-eyebrow mt-1 text-ink-3">{t('sceneImageUrlHint')}</p>
-                </div>
-              )}
             </div>
           </article>
         ))}
       </div>
 
-      {!allImagesProvided && <p className="mono-eyebrow text-accent">{t('errorMissingImages')}</p>}
-
       <div className="flex flex-wrap gap-4">
         <button
           type="button"
-          onClick={() => onCompose({ ...plan, scenes }, imageUrls)}
-          disabled={composing || !allImagesProvided}
+          onClick={() => onCompose({ ...plan, scenes })}
+          disabled={composing}
           className="btn-ink disabled:opacity-50"
         >
           {composing ? t('composing') : t('compose')}
