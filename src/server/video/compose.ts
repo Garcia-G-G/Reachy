@@ -101,13 +101,22 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         // For image scenes we run the full pipeline. Brand-bg scenes only
         // need to be scaled to the final dims and have yuv420p applied — no
         // Ken Burns on a flat color.
+        //
+        // zoompan duration trap: without an explicit `:fps=N`, zoompan
+        // emits `d` frames PER INPUT FRAME. With `-loop 1 -t 5` the input
+        // is already 5 seconds of looped frames (~125 frames at the loop's
+        // default rate) and zoompan multiplies that by d=150 → 18,750
+        // output frames per scene → ~24-minute reels. Pinning `:fps=30`
+        // makes zoompan output exactly `d` frames at 30 Hz, i.e. the
+        // intended scene duration.
+        // Source: https://ffmpeg.org/ffmpeg-filters.html#zoompan
         const baseChain = isBrand
           ? `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},format=yuv420p`
           : [
               `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase`,
               `crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}`,
-              // Slow zoom-in over the scene duration. d= is in frames at 30fps.
-              `zoompan=z='min(zoom+0.0008,1.15)':d=${s.scene.durationSec * REEL_DIMENSIONS.fps}:s=${REEL_DIMENSIONS.width}x${REEL_DIMENSIONS.height}`,
+              // Slow zoom-in over the scene duration. d= is in frames at fps.
+              `zoompan=z='min(zoom+0.0008,1.15)':d=${s.scene.durationSec * REEL_DIMENSIONS.fps}:s=${REEL_DIMENSIONS.width}x${REEL_DIMENSIONS.height}:fps=${REEL_DIMENSIONS.fps}`,
               `format=yuv420p`,
             ].join(',');
 

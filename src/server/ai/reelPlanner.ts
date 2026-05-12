@@ -51,15 +51,26 @@ function buildSystemPrompt(args: PlanReelArgs): string {
   const keywords = (args.brandKit?.keywords ?? []).slice(0, 12).join(', ');
   const audience = args.project.audience?.trim() || 'indie hackers and technical founders';
 
+  // Caption safe zones (drawtext y= positions in compose.ts):
+  //   top    → y=160, 3-line max ~200px high → top 19% of frame
+  //   bottom → y=h-th-220, 3-line max ~200px → bottom 22% of frame
+  //   center → 3-line max ~290px → middle 15%
+  // Image prompts must keep subjects/faces OUT of those zones, otherwise
+  // the caption box (opaque black) covers them like in the May 12 test.
   if (args.language === 'es') {
     return [
-      'Eres un guionista de vídeos verticales (9:16) para apps SaaS.',
+      'Eres un guionista de vídeos verticales (9:16, 1080×1920) para apps SaaS.',
       `Tono: ${tone || 'directo, claro, sin jerga'}`,
       dontSay && `NO uses: ${dontSay}`,
       keywords && `Palabras clave del producto: ${keywords}`,
       `Audiencia: ${audience}`,
-      'Texto sobre vídeo: máximo 12 palabras por escena, frases que se lean en 2 segundos.',
-      'Prompts de imagen: visuales editoriales modernos, sin marca de agua, sin texto en la imagen.',
+      'Texto sobre vídeo: máximo 6 palabras por escena, una frase corta que se lea en 2 segundos.',
+      'Prompts de imagen (críticos):',
+      '  • Composición vertical 9:16 — el sujeto debe ocupar el TERCIO CENTRAL del encuadre.',
+      '  • Deja el 20% superior y el 25% inferior limpios (ahí va la leyenda con caja oscura).',
+      '  • Encuadre medio o cuerpo entero, NUNCA primer plano de cara cortada por arriba o abajo.',
+      '  • Estilo editorial moderno: paleta cálida, luz natural, profundidad de campo media.',
+      '  • Sin marca de agua, sin texto, sin logos, sin caracteres legibles en pantallas.',
       'Cumple el JSON Schema entregado. No inventes campos. Mantén el orden de las escenas.',
     ]
       .filter(Boolean)
@@ -67,13 +78,18 @@ function buildSystemPrompt(args: PlanReelArgs): string {
   }
 
   return [
-    'You are a screenwriter for vertical (9:16) video reels for SaaS apps.',
+    'You are a screenwriter for vertical (9:16, 1080×1920) video reels for SaaS apps.',
     `Tone: ${tone || 'direct, clear, no jargon'}`,
     dontSay && `DO NOT use: ${dontSay}`,
     keywords && `Product keywords: ${keywords}`,
     `Audience: ${audience}`,
-    'Overlay text: max 12 words per scene, readable in 2 seconds.',
-    'Image prompts: modern editorial visuals, no watermark, no text on the image.',
+    'Overlay text: max 6 words per scene, one short line readable in 2 seconds.',
+    'Image prompts (critical):',
+    '  • Vertical 9:16 composition — subject must sit in the CENTRAL THIRD of the frame.',
+    '  • Keep the top 20% and bottom 25% clean (that is where the dark caption box lands).',
+    '  • Medium or full-body shot, NEVER a tight face crop that gets clipped at the top or bottom.',
+    '  • Modern editorial style: warm palette, natural light, mid depth-of-field.',
+    '  • No watermark, no text, no logos, no readable characters on any screen in frame.',
     'Respect the provided JSON schema. Do not invent fields. Keep scene order.',
   ]
     .filter(Boolean)

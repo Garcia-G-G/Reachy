@@ -197,8 +197,21 @@ async function runFfmpeg(
               `runFfmpeg: scene ${i + 1} (${scene.slot}) has no imagePrompt to auto-generate from`,
             );
           }
+          // The reel planner's system prompt already tells the LLM to write
+          // 9:16-safe prompts, but we re-state the composition guarantee at
+          // the image model level — gpt-image-1 only sees the prompt string
+          // and weight composition cues from the tail more strongly than
+          // the head (Anthropic + OpenAI both document this for diffusion
+          // models). Without these the model occasionally crops faces into
+          // the top 20% where the caption box lands.
+          const composedPrompt = [
+            scene.imagePrompt,
+            'Vertical 9:16 composition (1080×1920).',
+            'Subject sits in the central third; top 20% and bottom 25% remain visually quiet (no faces, no key product detail there).',
+            'Modern editorial photography, no text, no watermark.',
+          ].join(' ');
           const gen = await generateImage({
-            prompt: scene.imagePrompt,
+            prompt: composedPrompt,
             format: 'reel-cover',
             provider: 'openai',
             model: 'gpt-image-1',
