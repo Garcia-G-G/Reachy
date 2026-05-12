@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import {
   type PlannedScene,
   REEL_TEMPLATE_KEYS,
-  REEL_TEMPLATES,
   type ReelEngine,
   type ReelPlan,
   type ReelTemplateKey,

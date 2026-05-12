@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { env } from '@/env';
 import { REEL_DIMENSIONS } from '@/lib/reel-templates';
 import { generateImage } from '@/server/ai/imageGen';
+import { getOpenAI } from '@/server/ai/openai';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
@@ -197,26 +198,37 @@ async function runFfmpeg(
               `runFfmpeg: scene ${i + 1} (${scene.slot}) has no imagePrompt to auto-generate from`,
             );
           }
-          // The reel planner's system prompt already tells the LLM to write
-          // 9:16-safe prompts, but we re-state the composition guarantee at
-          // the image model level — gpt-image-1 only sees the prompt string
-          // and weight composition cues from the tail more strongly than
-          // the head (Anthropic + OpenAI both document this for diffusion
-          // models). Without these the model occasionally crops faces into
-          // the top 20% where the caption box lands.
+          // Re-state the composition guarantee at the image model level —
+          // diffusion models weight tail tokens more strongly than head, so
+          // without these constraints the model occasionally crops faces
+          // into the top 20% where the caption box lands.
           const composedPrompt = [
             scene.imagePrompt,
             'Vertical 9:16 composition (1080×1920).',
             'Subject sits in the central third; top 20% and bottom 25% remain visually quiet (no faces, no key product detail there).',
             'Modern editorial photography, no text, no watermark.',
           ].join(' ');
+          // Inline scene images use fal.ai FLUX/dev instead of OpenAI's
+          // gpt-image-1: ~5-10s per image vs 30-90s+, and ~1¢ vs ~7¢ each.
+          // The reel compositor applies Ken Burns motion + a dark caption
+          // box, so peak photorealism isn't critical for scene backgrounds.
+          // Garcia's first informative-25s reel took 13m43s waiting on
+          // three gpt-image-1 medium-quality calls; FLUX brings the same
+          // four scenes under ~30s total wall-clock.
+          console.log(
+            `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} → generating image (fal flux/dev)…`,
+          );
+          const sceneStart = Date.now();
           const gen = await generateImage({
             prompt: composedPrompt,
             format: 'reel-cover',
-            provider: 'openai',
-            model: 'gpt-image-1',
+            provider: 'fal',
+            model: 'fal-ai/flux/dev',
             n: 1,
           });
+          console.log(
+            `[reachy:video] gen ${data.generationId} scene ${i + 1} image ready in ${Math.round((Date.now() - sceneStart) / 1000)}s`,
+          );
           const buf = gen.buffers[0];
           if (!buf) {
             throw new Error(`runFfmpeg: image-gen returned no buffer for scene ${i + 1}`);
@@ -243,10 +255,47 @@ async function runFfmpeg(
       }),
     );
 
+    // Generate a TTS narration covering all captions so the reel isn't
+    // silent. Best-effort: if TTS fails (rate limit, API hiccup), we fall
+    // back to the no-audio path instead of failing the whole reel.
+    // OpenAI tts-1 costs ~$0.015 per 1k chars — a reel has ~50-200 chars
+    // of captions total, so ~$0.001 per reel.
+    let audioPath: string | undefined;
+    let ttsCostCents = 0;
+    const captionTexts = data.plan.scenes
+      .map((s) => s.text?.trim())
+      .filter((t): t is string => Boolean(t));
+    if (captionTexts.length > 0) {
+      try {
+        const narrationScript = captionTexts.join('. ');
+        const ttsStart = Date.now();
+        const speech = await getOpenAI().audio.speech.create({
+          model: 'tts-1',
+          voice: 'alloy',
+          input: narrationScript,
+          response_format: 'mp3',
+          speed: 0.95,
+        });
+        const audioBuf = Buffer.from(await speech.arrayBuffer());
+        audioPath = join(tmp, 'narration.mp3');
+        await writeFile(audioPath, audioBuf);
+        ttsCostCents = Math.max(1, Math.round((narrationScript.length / 1000) * 1.5));
+        console.log(
+          `[reachy:video] gen ${data.generationId} TTS ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${audioBuf.length}B, ${ttsCostCents}¢)`,
+        );
+      } catch (err) {
+        console.warn(
+          `[reachy:video] gen ${data.generationId} TTS failed, continuing silent:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
     const outputPath = join(tmp, 'out.mp4');
     await composeReel({
       scenes,
       outputPath,
+      audioPath,
       brandColorHex: data.brandColorHex,
       brandTextHex: data.brandTextHex,
       onProgress,
@@ -254,12 +303,11 @@ async function runFfmpeg(
 
     const buffer = await readFile(outputPath);
     const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
-    // 1 cent floor for the compose itself; any inline image gen is added on top.
     return {
       buffer,
       bytes: buffer.length,
       durationSec: totalDur,
-      costCents: 1 + autoImageCostCents,
+      costCents: 1 + autoImageCostCents + ttsCostCents,
     };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});

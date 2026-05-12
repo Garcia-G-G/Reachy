@@ -19,6 +19,13 @@ export interface ComposeReelArgs {
   scenes: ComposeSceneInput[];
   /** Final output path on disk; the caller uploads the result to R2. */
   outputPath: string;
+  /**
+   * Optional MP3/WAV with a narration or background track. If supplied, the
+   * audio is mixed into the output as an AAC stream truncated to the visual
+   * length via `-shortest`. Caller is responsible for any sync — usually
+   * a TTS pass over the joined scene captions.
+   */
+  audioPath?: string;
   /** Brand background hex used by `background: 'brand'` CTA scenes. */
   brandColorHex: string;
   /** Brand text color hex used on top of the brand bg. */
@@ -39,7 +46,7 @@ export interface ComposeReelArgs {
  * Source: https://ffmpeg.org/ffmpeg-filters.html#drawtext-1
  */
 export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: string }> {
-  const { scenes, outputPath, brandColorHex, brandTextHex } = args;
+  const { scenes, outputPath, brandColorHex, brandTextHex, audioPath } = args;
   if (scenes.length === 0) throw new Error('composeReel: at least one scene required');
 
   const fontFile = await resolveDrawtextFont();
@@ -89,6 +96,9 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         if (!inputPath) continue; // unreachable after the validation above
         cmd.input(inputPath).inputOptions(['-loop', '1', '-t', String(s.scene.durationSec)]);
       }
+      // Audio narration / soundtrack is the LAST input. Its filter stream
+      // index will be scenes.length when referenced in the output map.
+      if (audioPath) cmd.input(audioPath);
 
       // Per-scene filter: scale → crop → zoompan (Ken Burns) → drawtext (if any) → fade
       const filters: string[] = [];
@@ -158,8 +168,21 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         cumulative += sceneDur - REEL_TRANSITION_SEC;
       }
 
+      // Audio track is the last input. Pad it with silence (apad) so its
+      // stream is at least as long as the video, then `-shortest` clips
+      // BOTH to the video length. Without apad, a 5s TTS clip over an 11s
+      // reel would make `-shortest` truncate the video down to 5s.
+      const audioMapIdx = scenes.length;
+      let audioLabel: string | undefined;
+      if (audioPath) {
+        filters.push(`[${audioMapIdx}:a]apad[afinal]`);
+        audioLabel = 'afinal';
+      }
+      const outputs = audioLabel ? [lastLabel, audioLabel] : [lastLabel];
+      const audioOpts = audioPath ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : ['-an'];
+
       cmd
-        .complexFilter(filters, [lastLabel])
+        .complexFilter(filters, outputs)
         .outputOptions([
           '-c:v',
           'libx264',
@@ -173,7 +196,7 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
           String(REEL_DIMENSIONS.fps),
           '-movflags',
           '+faststart',
-          '-an', // strip audio (templates are silent for v1)
+          ...audioOpts,
         ])
         .output(outputPath)
         .on('progress', (info) => {
