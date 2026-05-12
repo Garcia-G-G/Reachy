@@ -8,6 +8,7 @@ import {
   type ReelEngine,
   type ReelPlan,
   type ReelTemplateKey,
+  SCENE_SLOTS,
   type SceneSlot,
 } from '@/lib/reel-templates';
 import { planReel } from '@/server/ai/reelPlanner';
@@ -29,20 +30,10 @@ const planInput = z.object({
   language: z.enum(['en', 'es']).default('en'),
 });
 
-const SCENE_SLOTS: [SceneSlot, ...SceneSlot[]] = [
-  'problem',
-  'problem_amplified',
-  'solution',
-  'benefit',
-  'cta',
-  'hook',
-  'feature',
-  'announcement',
-  'detail',
-];
+const SCENE_SLOT_VALUES = SCENE_SLOTS as unknown as [SceneSlot, ...SceneSlot[]];
 
 const plannedSceneSchema = z.object({
-  slot: z.enum(SCENE_SLOTS),
+  slot: z.enum(SCENE_SLOT_VALUES),
   durationSec: z.number().positive().max(30),
   text: z.string().trim().max(160),
   textPosition: z.enum(['top', 'bottom', 'center']),

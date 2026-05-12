@@ -10,30 +10,39 @@ export type ReelTemplateKey =
   | 'tutorial-30s'
   | 'testimonial-20s';
 
-export type SceneSlot =
-  | 'problem'
-  | 'problem_amplified'
-  | 'solution'
-  | 'benefit'
-  | 'cta'
-  | 'hook'
-  | 'feature'
-  | 'announcement'
-  | 'detail'
+// Runtime list of every valid scene-slot name. The TS union below is derived
+// from this so adding a slot in one place stays in sync everywhere (zod
+// schema in the compose action, planner prompts, future analytics).
+export const SCENE_SLOTS = [
+  // pitch
+  'problem',
+  'problem_amplified',
+  'solution',
+  'benefit',
+  'cta',
+  // feature
+  'hook',
+  'feature',
+  // launch
+  'announcement',
+  'detail',
   // informative
-  | 'insight'
-  | 'takeaway'
+  'insight',
+  'takeaway',
   // visual
-  | 'mood'
-  | 'logo'
+  'mood',
+  'logo',
   // tutorial
-  | 'intro'
-  | 'step'
-  | 'result'
+  'intro',
+  'step',
+  'result',
   // testimonial
-  | 'setup'
-  | 'quote'
-  | 'brand';
+  'setup',
+  'quote',
+  'brand',
+] as const;
+
+export type SceneSlot = (typeof SCENE_SLOTS)[number];
 
 export interface ReelSceneTemplate {
   /** Seconds this scene is on screen. xfade reuses the last 0.4s. */
