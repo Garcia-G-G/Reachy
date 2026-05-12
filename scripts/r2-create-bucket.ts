@@ -57,7 +57,9 @@ async function main() {
       return;
     }
     if (err instanceof BucketAlreadyExists) {
-      throw new Error(`Bucket name "${bucket}" is taken by another account — pick a different R2_BUCKET.`);
+      throw new Error(
+        `Bucket name "${bucket}" is taken by another account — pick a different R2_BUCKET.`,
+      );
     }
     throw err;
   }

@@ -192,25 +192,45 @@ export function GenerateReelForm({
     <div className="space-y-12">
       {(phase.kind === 'idle' || phase.kind === 'planning' || phase.kind === 'failed') && (
         <form onSubmit={onPlan} className="space-y-10" noValidate>
-          <div>
-            <label htmlFor="reel-template" className="mono-eyebrow mb-3 block">
-              {t('fieldTemplate')}
-            </label>
-            <select
-              id="reel-template"
-              value={template}
-              onChange={(e) => setTemplate(e.target.value as ReelTemplateKey)}
-              disabled={planningDisabled}
-              className="field cursor-pointer"
-            >
-              {REEL_TEMPLATE_KEYS.map((k) => (
-                <option key={k} value={k}>
-                  {REEL_TEMPLATES[k].label}
-                </option>
-              ))}
-            </select>
-            <p className="mono-eyebrow mt-2 text-ink-3">{REEL_TEMPLATES[template].description}</p>
-          </div>
+          <fieldset className="space-y-3">
+            <legend className="mono-eyebrow mb-3 block">{t('fieldTemplate')}</legend>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {REEL_TEMPLATE_KEYS.map((k) => {
+                const tpl = REEL_TEMPLATES[k];
+                const checked = template === k;
+                return (
+                  <label
+                    key={k}
+                    className={`flex cursor-pointer gap-3 border p-4 transition-colors ${
+                      checked ? 'border-ink bg-paper-2' : 'border-rule hover:border-ink'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reelTemplate"
+                      value={k}
+                      checked={checked}
+                      onChange={() => setTemplate(k)}
+                      disabled={planningDisabled}
+                      className="mt-1 accent-ink"
+                    />
+                    <span>
+                      <span
+                        className="block"
+                        style={{
+                          fontFamily: 'var(--font-fraunces), Georgia, serif',
+                          fontSize: 18,
+                        }}
+                      >
+                        {tpl.label}
+                      </span>
+                      <span className="mono-eyebrow text-ink-3">{tpl.description}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
 
           <div>
             <label htmlFor="reel-idea" className="mono-eyebrow mb-3 block">

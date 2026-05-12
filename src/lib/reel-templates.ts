@@ -1,7 +1,14 @@
 // Client-safe constants for reel templates. No 'server-only' here so the form
 // can use these directly. Mirrors src/lib/copy-formats.ts and image-formats.ts.
 
-export type ReelTemplateKey = 'pitch-30s' | 'feature-15s' | 'launch-20s';
+export type ReelTemplateKey =
+  | 'pitch-30s'
+  | 'feature-15s'
+  | 'launch-20s'
+  | 'informative-25s'
+  | 'visual-12s'
+  | 'tutorial-30s'
+  | 'testimonial-20s';
 
 export type SceneSlot =
   | 'problem'
@@ -12,7 +19,21 @@ export type SceneSlot =
   | 'hook'
   | 'feature'
   | 'announcement'
-  | 'detail';
+  | 'detail'
+  // informative
+  | 'insight'
+  | 'takeaway'
+  // visual
+  | 'mood'
+  | 'logo'
+  // tutorial
+  | 'intro'
+  | 'step'
+  | 'result'
+  // testimonial
+  | 'setup'
+  | 'quote'
+  | 'brand';
 
 export interface ReelSceneTemplate {
   /** Seconds this scene is on screen. xfade reuses the last 0.4s. */
@@ -66,6 +87,50 @@ export const REEL_TEMPLATES: Record<ReelTemplateKey, ReelTemplate> = {
       { durationSec: 6, textPosition: 'bottom', slot: 'detail' },
       { durationSec: 6, textPosition: 'bottom', slot: 'benefit' },
       { durationSec: 4, textPosition: 'center', slot: 'cta', background: 'brand' },
+    ],
+  },
+  'informative-25s': {
+    label: 'Informative · 25s — Hook / Insight / Insight / Takeaway',
+    description: 'Calm explainer pace. Teach, not sell. One insight per scene.',
+    durationSec: 25,
+    scenes: [
+      { durationSec: 5, textPosition: 'top', slot: 'hook' },
+      { durationSec: 7, textPosition: 'bottom', slot: 'insight' },
+      { durationSec: 7, textPosition: 'bottom', slot: 'insight' },
+      { durationSec: 6, textPosition: 'center', slot: 'takeaway', background: 'brand' },
+    ],
+  },
+  'visual-12s': {
+    label: 'Visual · 12s — Mood / Mood / Logo',
+    description: 'Aesthetic-first. Imagery leads, captions whisper. Best for brand reels.',
+    durationSec: 12,
+    scenes: [
+      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
+      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
+      { durationSec: 4, textPosition: 'center', slot: 'logo', background: 'brand' },
+    ],
+  },
+  'tutorial-30s': {
+    label: 'Tutorial · 30s — Intro / Step / Step / Step / Result',
+    description: 'Step-by-step how-to. Numbered captions, clear progression.',
+    durationSec: 30,
+    scenes: [
+      { durationSec: 5, textPosition: 'top', slot: 'intro' },
+      { durationSec: 6, textPosition: 'bottom', slot: 'step' },
+      { durationSec: 6, textPosition: 'bottom', slot: 'step' },
+      { durationSec: 6, textPosition: 'bottom', slot: 'step' },
+      { durationSec: 7, textPosition: 'center', slot: 'result' },
+    ],
+  },
+  'testimonial-20s': {
+    label: 'Testimonial · 20s — Setup / Quote / Quote / Brand',
+    description: 'Quote-driven social proof. Open quotes, close with brand.',
+    durationSec: 20,
+    scenes: [
+      { durationSec: 4, textPosition: 'top', slot: 'setup' },
+      { durationSec: 6, textPosition: 'center', slot: 'quote' },
+      { durationSec: 6, textPosition: 'center', slot: 'quote' },
+      { durationSec: 4, textPosition: 'center', slot: 'brand', background: 'brand' },
     ],
   },
 };
