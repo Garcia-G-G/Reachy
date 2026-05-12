@@ -109,9 +109,17 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         // output frames per scene → ~24-minute reels. Pinning `:fps=30`
         // makes zoompan output exactly `d` frames at 30 Hz, i.e. the
         // intended scene duration.
+        //
+        // Brand-bg chain must ALSO declare fps=30 explicitly — without it
+        // the image chain ends up on timebase 1/30 (from zoompan:fps=30)
+        // and the brand chain on timebase 1/25 (the input loop default),
+        // and xfade refuses to blend mismatched timebases with:
+        //   "First input link main timebase (1/30) do not match the
+        //    corresponding second input link xfade timebase (1/25)"
+        //
         // Source: https://ffmpeg.org/ffmpeg-filters.html#zoompan
         const baseChain = isBrand
-          ? `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},format=yuv420p`
+          ? `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},fps=${REEL_DIMENSIONS.fps},format=yuv420p`
           : [
               `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase`,
               `crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}`,
@@ -174,7 +182,15 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
           }
         })
         .on('end', () => resolve({ outputPath }))
-        .on('error', (err) => reject(err))
+        .on('error', (err, _stdout, stderr) => {
+          // fluent-ffmpeg's err.message truncates to the last stderr chunk
+          // (often just "Conversion failed!"), which hides the actual filter
+          // graph parse error. Surface the tail of stderr in the rejection so
+          // worker logs show what really broke.
+          const tail = (stderr ?? '').split('\n').slice(-12).join('\n');
+          const message = `${err.message}${tail ? `\n--- ffmpeg stderr (tail) ---\n${tail}` : ''}`;
+          reject(new Error(message));
+        })
         .run();
     });
   } finally {
