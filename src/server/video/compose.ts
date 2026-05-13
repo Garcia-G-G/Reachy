@@ -54,20 +54,26 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
   const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-'));
 
   try {
-    // Pre-write each scene's overlay text to its own file so drawtext can
-    // load them via textfile= without us having to escape the string. We
-    // also pre-wrap by character count: drawtext does NOT auto-wrap, so a
-    // long single-line caption overflows horizontally and gets clipped at
-    // the 1080px frame edge. Width budgets are tuned empirically against
-    // Helvetica at our font sizes (see overlayFontSize) within a 60px
-    // safe-area margin on each side.
-    const textFiles = await Promise.all(
+    // Pre-write each scene's overlay text as a SEQUENCE of cumulative
+    // snapshots (one .txt per snapshot) so drawtext can reveal the caption
+    // word-by-word with `enable='between(t,...)'`. The single-snapshot
+    // case (1-word or 0-word captions) collapses to the old behavior.
+    //
+    // drawtext does NOT auto-wrap, so each snapshot is pre-wrapped by
+    // character count against the 1080px frame minus a 60px safe margin
+    // — same budgets as wrapForDrawtext.
+    const sceneSnapshots = await Promise.all(
       scenes.map(async (s, i) => {
         if (!s.text) return null;
-        const path = join(tmp, `scene-${i}.txt`);
-        const wrapped = wrapForDrawtext(s.text, s.scene.textPosition);
-        await writeFile(path, wrapped, 'utf8');
-        return path;
+        const plan = planSceneCaption(s.text, s.scene.durationSec, s.scene.textPosition);
+        if (plan.length === 0) return null;
+        return await Promise.all(
+          plan.map(async (snap, k) => {
+            const path = join(tmp, `scene-${i}-w${k}.txt`);
+            await writeFile(path, snap.wrapped, 'utf8');
+            return { path, startSec: snap.startSec, endSec: snap.endSec };
+          }),
+        );
       }),
     );
 
@@ -117,10 +123,12 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
       // Per-scene filter: scale → crop → zoompan (Ken Burns) → drawtext (if any) → fade
       const filters: string[] = [];
       scenes.forEach((s, i) => {
-        const safeText = textFiles[i];
+        const snapshots = sceneSnapshots[i];
         const isBrand = s.scene.background === 'brand';
         const textColor = isBrand ? normalizeHex(brandTextHex) : 'white';
         const overlayY = drawtextY(s.scene.textPosition);
+        const fontSize = overlayFontSize(s.scene.textPosition);
+        const boxAlpha = isBrand ? '00' : '88';
 
         // For image scenes we run the full pipeline. Brand-bg scenes only
         // need to be scaled to the final dims and have yuv420p applied — no
@@ -157,9 +165,26 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         // "Try %{eif:1/0:d}" would be parsed as a filter expression instead
         // of rendered verbatim. ffmpeg's default is "normal" expansion.
         // https://ffmpeg.org/ffmpeg-filters.html#drawtext-1 ("expansion")
-        const draw = safeText
-          ? `,drawtext=fontfile='${fontFile}':textfile='${safeText}':expansion=none:fontsize=${overlayFontSize(s.scene.textPosition)}:fontcolor=${textColor}:x=(w-tw)/2:y=${overlayY}:line_spacing=10:box=1:boxcolor=0x000000${isBrand ? '00' : '88'}:boxborderw=24`
-          : '';
+        //
+        // Word-by-word reveal: at any moment in the scene exactly ONE of
+        // the cumulative snapshots is visible, selected by `enable=
+        // between(t,startSec,endSec)`. The first snapshot covers t=0; each
+        // subsequent snapshot adds more words. The box is rendered with the
+        // text, so it grows along with the cumulative line — visually
+        // matches an editorial typewriter reveal. Single-snapshot scenes
+        // (1-word captions, very short durations) emit one drawtext, same
+        // as the previous static behavior.
+        let draw = '';
+        if (snapshots && snapshots.length > 0) {
+          const parts = snapshots.map((snap) => {
+            const enable =
+              snapshots.length === 1
+                ? ''
+                : `:enable='between(t,${snap.startSec.toFixed(3)},${snap.endSec.toFixed(3)})'`;
+            return `drawtext=fontfile='${fontFile}':textfile='${snap.path}':expansion=none:fontsize=${fontSize}:fontcolor=${textColor}:x=(w-tw)/2:y=${overlayY}:line_spacing=10:box=1:boxcolor=0x000000${boxAlpha}:boxborderw=24${enable}`;
+          });
+          draw = `,${parts.join(',')}`;
+        }
 
         const fade = `,fade=t=in:st=0:d=${REEL_TRANSITION_SEC},fade=t=out:st=${Math.max(0, s.scene.durationSec - REEL_TRANSITION_SEC)}:d=${REEL_TRANSITION_SEC}`;
 
@@ -330,6 +355,74 @@ export function wrapForDrawtext(text: string, pos: 'top' | 'bottom' | 'center'):
 
   if (current && lines.length < maxLines) lines.push(current);
   return lines.slice(0, maxLines).join('\n');
+}
+
+export interface CaptionSnapshot {
+  /** Pre-wrapped cumulative caption text written verbatim to textfile=. */
+  wrapped: string;
+  /** Scene-relative second at which this snapshot becomes visible. */
+  startSec: number;
+  /** Scene-relative second at which this snapshot stops being visible. */
+  endSec: number;
+}
+
+/**
+ * Split a scene's caption into a sequence of cumulative "reveal" snapshots
+ * so drawtext can animate the line word by word with
+ * `enable='between(t,startSec,endSec)'`. At any frame of the scene, exactly
+ * one snapshot is on screen; later snapshots include all earlier words plus
+ * the next one.
+ *
+ *   "Marketing real para apps reales." → 5 snapshots, ~0.4s apart:
+ *      0.000s  "Marketing"
+ *      0.400s  "Marketing real"
+ *      0.800s  "Marketing real para"
+ *      1.200s  "Marketing real para apps"
+ *      1.600s  "Marketing real para apps reales."
+ *
+ * Cadence is ~2.5 words/sec; very short scenes (<3s) collapse to at most
+ * two snapshots so the full line lands before the scene ends. 0-word and
+ * 1-word captions degrade gracefully to the previous static behavior.
+ */
+export function planSceneCaption(
+  rawText: string,
+  sceneDur: number,
+  pos: 'top' | 'bottom' | 'center',
+): CaptionSnapshot[] {
+  const words = rawText.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (words.length === 0) return [];
+
+  // Reserve ~0.4s of head-room so the last word lands and lingers; the
+  // last snapshot's end always equals sceneDur regardless.
+  const usableDur = Math.max(0.2, sceneDur - 0.4);
+  const cadenceWps = 2.5;
+  // Short scenes (<3s) max out at two reveal steps so the line still lands.
+  // Otherwise we aim for one snapshot per word, capped at what the duration
+  // physically allows at the target cadence.
+  const wantSteps =
+    sceneDur < 3
+      ? Math.min(2, words.length)
+      : Math.min(words.length, Math.max(1, Math.round(usableDur * cadenceWps)));
+
+  const stepCount = Math.max(1, wantSteps);
+  const snapshots: CaptionSnapshot[] = [];
+  for (let i = 0; i < stepCount; i++) {
+    // Last step always reveals every remaining word so the full caption
+    // is on screen by the time the scene ends.
+    const wordsToShow =
+      i === stepCount - 1
+        ? words.length
+        : Math.max(1, Math.ceil(((i + 1) / stepCount) * words.length));
+    const startSec = stepCount === 1 ? 0 : (i / stepCount) * usableDur;
+    const endSec = i === stepCount - 1 ? sceneDur : ((i + 1) / stepCount) * usableDur;
+    const cumulative = words.slice(0, wordsToShow).join(' ');
+    snapshots.push({
+      wrapped: wrapForDrawtext(cumulative, pos),
+      startSec,
+      endSec,
+    });
+  }
+  return snapshots;
 }
 
 /** Strip leading '#' and pass through to ffmpeg's color parser. */

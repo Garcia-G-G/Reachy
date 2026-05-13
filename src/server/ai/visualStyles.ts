@@ -30,9 +30,12 @@ export interface VisualStyleEntry {
   /**
    * Prompt fragment appended to every Veo / image prompt. Must:
    *  • forbid real people (Veo defaults to photorealism otherwise)
-   *  • describe the subject in concrete visual language (icons, shapes, type)
-   *  • lock the camera to static or slow push (no handheld, no swoop)
-   *  • leave the top 20% and bottom 25% clean for the caption box
+   *  • forbid text/letters/numbers in the image — every reel rendered before
+   *    this rule landed had gibberish typography ("NNST INGBIL"), because the
+   *    overlay system handles all text and the image model can't render type
+   *    cleanly anyway
+   *  • describe ONE or AT MOST 2-3 visual elements (not a busy collage)
+   *  • lock the camera to fully static — Ken Burns adds the motion later
    */
   prompt: string;
 }
@@ -42,74 +45,68 @@ export const DEFAULT_VISUAL_STYLE: VisualStyleKey = 'editorial';
 export const VISUAL_STYLES: Record<VisualStyleKey, VisualStyleEntry> = {
   editorial: {
     label: 'Editorial motion',
-    tagline: 'Big serif type, thin rules, paper-and-ink. Matches the Reachy landing 1:1.',
+    tagline: 'Warm paper background, single accent shape, all type via overlay.',
     prompt: [
-      'STYLE: animated editorial print magazine in motion. NO real people. NO stock photography. NO photorealism.',
-      'Subject: large serif display typography (Fraunces-style) animating in line by line, italic accents, thin horizontal rules drawing themselves, oversized display numbers counting up.',
-      'Palette: warm off-white paper (#f1ebdf), deep ink (#14110d), burnt sienna accent (#b6481a) used sparingly.',
-      'Camera: static frame or very slow push-in. NO handheld, NO swooping, NO dolly.',
-      'Composition: keep the top 20% and bottom 25% of the frame clean for the caption box.',
-      'No watermark, no logos, no readable UI screens.',
+      'STYLE: warm cream paper background with subtle paper grain texture.',
+      'Subject: ONE simple geometric mark — either a thin horizontal rule, a single oversized punctuation mark in deep ink, or a small burnt-sienna rectangle. ONLY ONE element on the frame.',
+      'Palette: warm off-white paper (#f1ebdf) background, deep ink (#14110d) for the mark, burnt sienna (#b6481a) accent only if needed.',
+      'Camera: completely static. NO zoom, NO pan.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography of any kind in the image. NO real people, NO faces, NO photographs, NO UI screens, NO logos. The frame is intentionally minimal — text is added later by the renderer.',
     ].join(' '),
   },
   'paper-cutout': {
     label: 'Paper cutout',
-    tagline: 'Layered cut-paper shapes with hard shadows. Headway / Fable feel.',
+    tagline: 'Two or three flat colored paper shapes layered on cream.',
     prompt: [
-      'STYLE: paper cutout collage in motion. NO real people. NO photorealism.',
-      'Subject: hard-edge geometric paper shapes layered with subtle drop shadows, slow rotation and overlap. Warm cream and pastel paper textures, hand-cut feel.',
-      'Palette: cream (#fde9d8), deep ink (#14110d), forest green (#1f3a2f), burnt sienna (#b6481a).',
-      'Camera: static frame, occasional slow zoom on a single shape. NO handheld.',
-      'Composition: keep the top 20% and bottom 25% clean for the caption box.',
-      'No watermark, no logos, no readable text within the artwork.',
+      'STYLE: flat paper cutout collage on warm cream background.',
+      'Subject: TWO or THREE simple geometric paper shapes (circles, rectangles, half-moons) in solid brand colors, layered with subtle hard drop shadows. NO illustration detail inside the shapes.',
+      'Palette: cream (#fde9d8) background, deep ink (#14110d), forest green (#1f3a2f), burnt sienna (#b6481a) for the shapes.',
+      'Camera: completely static.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography. NO real people, NO faces, NO photographs, NO realistic illustration. Just clean cutout shapes on paper.',
     ].join(' '),
   },
   'flat-2d': {
     label: 'Flat 2D explainer',
-    tagline: 'Bold geometric characters, thick outlines. Duolingo / Mailchimp.',
+    tagline: 'One simple cartoon icon centered on solid color background.',
     prompt: [
-      'STYLE: flat 2D animated illustration. NO real people. NO photorealism.',
-      'Subject: bold geometric cartoon characters with thick black outlines, saturated solid fill colors (no gradients), Lottie/Rive aesthetic, friendly and approachable. Subjects are illustrated icons or cartoon mascots, never photorealistic humans.',
-      'Palette: high-contrast brand color on solid background, with one secondary accent.',
-      'Camera: static frame, characters move with springy easing.',
-      'Composition: keep the top 20% and bottom 25% clean for the caption box.',
-      'No watermark, no logos, no readable UI screens.',
+      'STYLE: flat 2D vector illustration, Lottie/Rive aesthetic.',
+      'Subject: ONE single simple cartoon icon (a heart, a star, a check mark, a speech bubble, a thumbs-up — pick the one most relevant to the scene) with thick black outlines and solid fill. Centered.',
+      'Palette: one saturated brand color as solid background, white or black for the icon outline.',
+      'Camera: completely static.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO faces. Just one clean iconic shape.',
     ].join(' '),
   },
   infographic: {
     label: 'Animated infographic',
-    tagline: 'Numbers counting up, bars growing, lines drawing. Data leads.',
+    tagline: 'One simple chart shape on clean background.',
     prompt: [
-      'STYLE: animated data visualization. NO real people. NO product shots. NO photorealism.',
-      'Subject: large display numbers counting up with spring physics, bars growing from a baseline, line charts drawing themselves stroke by stroke, minimalist icons appearing one by one. The data is the protagonist.',
-      'Palette: clean off-white background, one strong brand color for primary marks, neutral grey for secondary.',
-      'Camera: static frame, no parallax.',
-      'Composition: keep the top 20% and bottom 25% clean for the caption box.',
-      'No watermark, no logos, no readable text within the chart labels.',
+      'STYLE: minimalist data visualization on clean off-white background.',
+      'Subject: ONE simple chart element — either three solid color bars of varying heights, or one upward-trending line with dots at inflection points, or a single donut/ring chart. NO numbers, NO labels.',
+      'Palette: off-white (#f7f4ed) background, deep ink (#14110d) for primary marks, one brand accent color for the highlighted data point.',
+      'Camera: completely static.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers in the image. NO real people. Pure shape and color.',
     ].join(' '),
   },
   isometric: {
     label: 'Isometric mini',
-    tagline: 'Floating 3D blocks, tiny figures, pastel gradients. Notion / Linear.',
+    tagline: 'One floating 3D card or block, soft pastel.',
     prompt: [
-      'STYLE: isometric 3D illustration. NO real people. NO photorealism.',
-      'Subject: floating isometric cards, dashboards, small simplified figures (3-color silhouettes, never realistic faces) interacting with the cards. Soft pastel gradients on each surface.',
-      'Palette: pastel pink, sky blue, cream, deep navy outlines.',
-      'Camera: static isometric perspective, very slow drift.',
-      'Composition: keep the top 20% and bottom 25% clean for the caption box.',
-      'No watermark, no logos, no readable UI screens within the mock dashboards.',
+      'STYLE: isometric 3D illustration, soft and clean.',
+      'Subject: ONE single floating isometric card (a rectangle in 3D perspective with a subtle drop shadow). Optionally one tiny abstract figure beside it (3-color silhouette, no facial features). NO UI inside the card.',
+      'Palette: soft pastel pink, sky blue, or cream background, with deep navy outlines.',
+      'Camera: static isometric perspective.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO realistic faces. NO readable UI. The card is intentionally blank.',
     ].join(' '),
   },
   abstract: {
     label: 'Abstract shapes',
-    tagline: 'Soft color blobs morphing. Premium and ambient. Apple / Stripe.',
+    tagline: 'One soft color blob on warm background.',
     prompt: [
-      'STYLE: premium abstract motion graphics. NO real people. NO objects. NO UI. NO photorealism.',
-      'Subject: large soft color blobs morphing slowly, smooth gradient transitions between them, the only typography is a single line of large display text appearing centered.',
-      'Palette: rich gradients (pink → purple → blue) on near-black background, or warm cream with a single accent color.',
-      'Camera: static frame, blobs move on their own.',
-      'Composition: keep the top 20% and bottom 25% clean for the caption box.',
-      'No watermark, no logos.',
+      'STYLE: premium abstract motion graphics, single-shape composition.',
+      'Subject: ONE single large soft color blob with smooth gradient (pink to purple, or warm cream to sienna), centered or off-center. NO secondary shapes.',
+      'Palette: rich gradient on warm cream or near-black background.',
+      'Camera: completely static.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO objects, NO UI. Pure form and color.',
     ].join(' '),
   },
 };

@@ -261,11 +261,17 @@ async function runFfmpeg(
     // whole audio track rather than ship a partial one.
     let sceneAudios: Array<string | null> | undefined;
     let ttsCostCents = 0;
-    // Voice picked by caption language so reels don't have an English-leaning
-    // narrator reading Spanish copy (or vice versa). `alloy` is the neutral
-    // default we ship for English; `nova` is the warmer feminine voice that
-    // handles Spanish phonemes cleanly. Both are tts-1 voices.
-    const ttsVoice = data.plan.language === 'es' ? 'nova' : 'alloy';
+    // gpt-4o-mini-tts (March 2025) replaces tts-1. Same OpenAI SDK shape
+    // with an added `instructions` parameter for natural-language steering
+    // of tone, pace, and accent. `sage` is the editorial-warm voice that
+    // handles Spanish phonemes natively — no English-leaning vowels like
+    // the previous `nova` track. Pace is set via instructions rather than
+    // the deprecated `speed` knob.
+    const isEs = data.plan.language === 'es';
+    const ttsVoice = 'sage' as const;
+    const ttsInstructions = isEs
+      ? 'Voz de narrador editorial cálido. Calmado, claro, con pausas naturales. NO comercial, NO efusivo. Tono de revista impresa hablada. Acentúa correctamente las palabras en español.'
+      : 'Warm editorial narrator. Calm, clear, with natural pauses. NOT commercial, NOT effusive. Spoken-magazine tone.';
     try {
       const openai = getOpenAI();
       const ttsStart = Date.now();
@@ -274,21 +280,26 @@ async function runFfmpeg(
           const text = scene.text?.trim();
           if (!text) return null; // composeReel will fill silence for this scene
           const speech = await openai.audio.speech.create({
-            model: 'tts-1',
+            model: 'gpt-4o-mini-tts',
             voice: ttsVoice,
             input: text,
+            instructions: ttsInstructions,
             response_format: 'mp3',
-            speed: 0.95,
           });
           const buf = Buffer.from(await speech.arrayBuffer());
           const path = join(tmp, `scene-tts-${i}.mp3`);
           await writeFile(path, buf);
-          ttsCostCents += Math.max(1, Math.round((text.length / 1000) * 1.5));
+          // gpt-4o-mini-tts pricing: $0.60/1M text-input tokens + $12/1M
+          // audio output tokens (~$0.015/min audio). Audio dominates; for
+          // a typical 50-char caption (~3-4s of audio) the real cost lands
+          // near 0.2¢. Per-scene min 1¢ keeps reporting granularity aligned
+          // with the rest of the cost ledger.
+          ttsCostCents += Math.max(1, Math.round((text.length / 1000) * 4));
           return path;
         }),
       );
       console.log(
-        `[reachy:video] gen ${data.generationId} TTS x${sceneAudios.filter(Boolean).length} ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${ttsCostCents}¢, voice=${ttsVoice})`,
+        `[reachy:video] gen ${data.generationId} TTS x${sceneAudios.filter(Boolean).length} ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${ttsCostCents}¢, voice=${ttsVoice}, lang=${isEs ? 'es' : 'en'})`,
       );
     } catch (err) {
       console.warn(
