@@ -12,7 +12,7 @@ import {
   SCENE_SLOTS,
   type SceneSlot,
 } from '@/lib/reel-templates';
-import { planReel } from '@/server/ai/reelPlanner';
+import { MAX_IMAGE_PROMPT_CHARS, planReel } from '@/server/ai/reelPlanner';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { brandKit } from '@/server/db/schema/brandKits';
@@ -66,7 +66,7 @@ const plannedSceneSchema = z.object({
   durationSec: z.number().positive().max(30),
   text: z.string().trim().max(160),
   textPosition: z.enum(['top', 'bottom', 'center']),
-  imagePrompt: z.string().trim().max(600),
+  imagePrompt: z.string().trim().max(MAX_IMAGE_PROMPT_CHARS),
   background: z.enum(['image', 'brand']),
 });
 

@@ -527,7 +527,7 @@ function PlanEditor({
                     value={scene.imagePrompt}
                     onChange={(e) => updateScene(i, { imagePrompt: e.target.value })}
                     className="field resize-y"
-                    maxLength={600}
+                    maxLength={2000}
                   />
                 </div>
               )}

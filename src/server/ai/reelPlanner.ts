@@ -10,6 +10,15 @@ import type { Project } from '@/server/actions/projects';
 import { getOpenAI } from './openai';
 import { resolveVisualStyle } from './visualStyles';
 
+// Each visualStyle prompt fragment in src/server/ai/visualStyles.ts is
+// ~600 chars on its own, and the planner concatenates it with scene-specific
+// subject text — locked-style imagePrompts routinely land at 800–1200 chars.
+// The original 600-char cap predates visualStyles and was rejecting every
+// styled plan at compose time with "Too big: expected string to have <=600
+// characters". `composeReelAction` validates against this; the planner also
+// clamps its own output here so a runaway model can never break the form.
+export const MAX_IMAGE_PROMPT_CHARS = 2000;
+
 /**
  * Default text model for scene planning. Schema-bound JSON, no chain of
  * thought needed — same gpt-5.5 + reasoning_effort=none we use for copy.
@@ -277,12 +286,13 @@ export async function planReel(args: PlanReelArgs): Promise<PlanReelResult> {
     const sceneText = scriptMode
       ? (args.customScript?.[i]?.trim() ?? '')
       : (planned?.text?.trim() ?? '');
+    const rawPrompt = slot.background === 'brand' ? '' : (planned?.imagePrompt?.trim() ?? '');
     return {
       slot: slot.slot,
       durationSec: slot.durationSec,
       text: sceneText,
       textPosition: slot.textPosition,
-      imagePrompt: slot.background === 'brand' ? '' : (planned?.imagePrompt?.trim() ?? ''),
+      imagePrompt: rawPrompt.slice(0, MAX_IMAGE_PROMPT_CHARS),
       background: slot.background ?? 'image',
     };
   });
