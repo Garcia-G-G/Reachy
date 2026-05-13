@@ -62,7 +62,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  // We deploy via Kamal with one image serving both web (`next start`) and
+  // worker (`tsx src/server/jobs/worker.ts`) roles. `output: 'standalone'`
+  // tree-shakes everything the worker loads dynamically through tsx, so we
+  // keep the regular Next build and bundle full source + node_modules in
+  // the Docker image instead.
   poweredByHeader: false,
   reactStrictMode: true,
   images: {

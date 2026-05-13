@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run Drizzle migrations BEFORE rolling out the new image, against the
+# currently-deployed primary web container. The new image is already on
+# the host (built + pushed in the previous deploy step) but not yet
+# accepting traffic, so we still have a one-version skew between this
+# migration and the running code.
+#
+# Safe migrations (additive: ADD COLUMN, CREATE INDEX, etc.) are fine.
+# Destructive migrations (DROP COLUMN, breaking RENAME) need a two-step
+# deploy: ship the read-tolerant code first, then drop the column.
+#
+# To enable this hook: rename to `pre-deploy` (no .sample suffix).
+#
+set -euo pipefail
+echo "[kamal:pre-deploy] running drizzle migrations…"
+kamal app exec --primary --reuse "node --conditions=react-server --import tsx src/server/db/migrate.ts"
+echo "[kamal:pre-deploy] migrations done."

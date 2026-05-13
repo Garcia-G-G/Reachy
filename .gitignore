@@ -24,6 +24,15 @@
 .DS_Store
 *.pem
 
+# SSH keys + deploy secrets — never commit
+/keys/
+*.id_rsa
+*.id_ed25519
+id_rsa
+id_ed25519
+.kamal/.deploy-lock
+.kamal/secrets.local
+
 # debug
 npm-debug.log*
 yarn-debug.log*

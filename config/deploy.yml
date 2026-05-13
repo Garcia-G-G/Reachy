@@ -1,0 +1,129 @@
+# Kamal 2 deploy config for Reachy.
+#
+# Usage:
+#   kamal setup        # first time only
+#   kamal deploy       # subsequent deploys
+#
+# Garcia fills in:
+#   • SERVER_IP — the Hetzner CX22 public IP
+#   • DOMAIN    — once DNS is wired (then flip `proxy.ssl` to true)
+#
+# Secrets are read from .kamal/secrets at deploy time. That file sources
+# .env.production.local on Garcia's machine (gitignored) so real values
+# never land in the repo.
+
+service: reachy
+
+# GHCR image — pushed by `kamal deploy` from the local builder.
+image: garcia-g-g/reachy
+
+# ---- Servers --------------------------------------------------------
+servers:
+  web:
+    hosts:
+      - <SERVER_IP>
+  worker:
+    hosts:
+      - <SERVER_IP>
+    # The worker uses tsx at runtime (devDep promoted via the unified
+    # image). `--conditions=react-server` matches the local `pnpm worker`
+    # script so server-only modules resolve correctly.
+    cmd: node --conditions=react-server --enable-source-maps --import tsx src/server/jobs/worker.ts
+
+# ---- Registry -------------------------------------------------------
+# GHCR auth: username = your GitHub login, password = a Personal Access
+# Token with `write:packages` scope. Token lives in $KAMAL_REGISTRY_PASSWORD.
+registry:
+  server: ghcr.io
+  username: Garcia-G-G
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# ---- Builder --------------------------------------------------------
+# Garcia builds on Mac (likely ARM64). Hetzner CX22 is AMD64. buildx
+# cross-compiles. Adds ~30-60s to the first build; subsequent builds
+# are cached.
+builder:
+  arch: amd64
+
+# ---- Proxy (kamal-proxy = Traefik replacement) ----------------------
+# SSL OFF for now (deploying to a raw IP). Once a domain is pointed at
+# the Hetzner IP, flip `ssl: true` and set `host` to the domain. Magic-
+# link auth + Google OAuth both require HTTPS, so sign-in won't work
+# until that flip.
+proxy:
+  app_port: 3000
+  healthcheck:
+    path: /api/health
+    interval: 30
+    timeout: 5
+  ssl: false
+  # host: app.example.com  ← uncomment + set when DNS is ready
+  # buffering:
+  #   max_request_body: 10000000
+
+# ---- App env (all roles inherit this) -------------------------------
+env:
+  clear:
+    NODE_ENV: production
+    NEXT_TELEMETRY_DISABLED: 1
+    PORT: 3000
+    HOSTNAME: 0.0.0.0
+    # Accessory hostnames are <service>-<accessory> on the Kamal docker network.
+    DATABASE_URL: postgres://reachy:$POSTGRES_PASSWORD@reachy-postgres:5432/reachy
+    REDIS_URL: redis://reachy-redis:6379
+    # Swap to https://<your-domain> when DNS lands.
+    BETTER_AUTH_URL: http://<SERVER_IP>:3000
+    R2_BUCKET: reachy-assets
+    EMAIL_FROM: onboarding@resend.dev
+  secret:
+    - BETTER_AUTH_SECRET
+    - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+    - POSTGRES_PASSWORD
+    - GOOGLE_CLIENT_ID
+    - GOOGLE_CLIENT_SECRET
+    - OPENAI_API_KEY
+    - FAL_KEY
+    - RESEND_API_KEY
+    - R2_ACCOUNT_ID
+    - R2_ACCESS_KEY_ID
+    - R2_SECRET_ACCESS_KEY
+    - R2_PUBLIC_URL
+
+# ---- Accessories ----------------------------------------------------
+accessories:
+  postgres:
+    image: postgres:16-alpine
+    host: <SERVER_IP>
+    # Bind only to localhost on the host so the DB isn't world-reachable.
+    # The Kamal network reaches it via the container hostname `reachy-postgres`.
+    port: "127.0.0.1:5433:5432"
+    env:
+      clear:
+        POSTGRES_DB: reachy
+        POSTGRES_USER: reachy
+      secret:
+        - POSTGRES_PASSWORD
+    directories:
+      # Persistent volume on the host. `kamal accessory remove postgres`
+      # does NOT delete this — backups + restore are still your job.
+      - data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    host: <SERVER_IP>
+    port: "127.0.0.1:6379:6379"
+    cmd: redis-server --save 60 1 --appendonly yes
+    directories:
+      - data:/data
+
+# ---- Asset bridging (assets handled by R2) --------------------------
+# We don't need Kamal's asset_path because every user-generated file
+# lives on Cloudflare R2; the Next.js app serves no static assets that
+# need to survive between releases.
+
+# ---- Deploy hooks ---------------------------------------------------
+# pre-deploy / post-deploy scripts live under .kamal/hooks/. The
+# pre-deploy hook runs DB migrations against the currently-deployed
+# container before the new image is rolled in. Disabled by default —
+# rename .kamal/hooks/pre-deploy.sample to pre-deploy to enable.

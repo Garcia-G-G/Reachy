@@ -8,9 +8,16 @@ yarn-debug.log
 yarn-error.log
 pnpm-debug.log
 
-# Local env — Dokploy injects production env vars at runtime
+# Local env — Kamal injects production env vars at deploy time via
+# .kamal/secrets. Never copy real env into the image.
 .env*
 !.env.production.example
+
+# Kamal config + secrets reference (not needed at runtime inside the
+# container — they live on Garcia's machine and the server's docker
+# host, not in the image itself).
+.kamal
+config/deploy.yml
 
 # Editor / OS
 .DS_Store
