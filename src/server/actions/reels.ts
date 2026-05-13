@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import {
   REEL_TEMPLATE_KEYS,
+  REEL_TEMPLATES,
   type ReelEngine,
   type ReelPlan,
   type ReelTemplateKey,
@@ -23,12 +24,40 @@ import { checkDailyUsage } from '@/server/lib/usage-cap';
 
 const TEMPLATE_VALUES = REEL_TEMPLATE_KEYS as [ReelTemplateKey, ...ReelTemplateKey[]];
 
-const planInput = z.object({
-  projectId: z.string().uuid(),
-  template: z.enum(TEMPLATE_VALUES),
-  idea: z.string().trim().min(3).max(600),
-  language: z.enum(['en', 'es']).default('en'),
-});
+const planInput = z
+  .object({
+    projectId: z.string().uuid(),
+    template: z.enum(TEMPLATE_VALUES),
+    /** Required in AI mode. When customScript is provided, this is ignored. */
+    idea: z.string().trim().max(600).optional(),
+    language: z.enum(['en', 'es']).default('en'),
+    /**
+     * Script mode: one literal overlay line per scene, in template order.
+     * Length must match REEL_TEMPLATES[template].scenes.length. Each line
+     * is also fed to TTS, so we cap at 160 chars (same as plannedScene.text).
+     */
+    customScript: z.array(z.string().trim().min(1).max(160)).min(1).max(10).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.customScript === undefined) {
+      if (!v.idea || v.idea.length < 3) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['idea'],
+          message: 'idea required when customScript is not provided',
+        });
+      }
+      return;
+    }
+    const expected = REEL_TEMPLATES[v.template].scenes.length;
+    if (v.customScript.length !== expected) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['customScript'],
+        message: `customScript has ${v.customScript.length} lines, template ${v.template} needs ${expected}`,
+      });
+    }
+  });
 
 const SCENE_SLOT_VALUES = SCENE_SLOTS as unknown as [SceneSlot, ...SceneSlot[]];
 
@@ -107,7 +136,9 @@ export async function planReelAction(
   try {
     const result = await planReel({
       template: parsed.data.template,
-      idea: parsed.data.idea,
+      // idea is ignored in script mode but planReel requires the field;
+      // pass an empty string rather than undefined.
+      idea: parsed.data.idea ?? '',
       language: parsed.data.language,
       project: {
         name: proj.name,
@@ -117,6 +148,7 @@ export async function planReelAction(
         websiteUrl: proj.websiteUrl,
       },
       brandKit: kit ?? null,
+      customScript: parsed.data.customScript,
     });
     // Attach the chosen language to the plan so the compose worker can
     // pick a matching TTS voice (en→alloy, es→nova).

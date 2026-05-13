@@ -6,12 +6,24 @@ import { toast } from 'sonner';
 import {
   type PlannedScene,
   REEL_TEMPLATE_KEYS,
+  REEL_TEMPLATES,
   type ReelEngine,
   type ReelPlan,
   type ReelTemplateKey,
   TYPE_DEFAULT_ENGINE,
 } from '@/lib/reel-templates';
 import { composeReelAction, planReelAction } from '@/server/actions/reels';
+
+type ReelMode = 'ai' | 'script';
+
+const MODE_OPTIONS: ReadonlyArray<{
+  value: ReelMode;
+  labelKey: 'modeAi' | 'modeScript';
+  bodyKey: 'modeAiBody' | 'modeScriptBody';
+}> = [
+  { value: 'ai', labelKey: 'modeAi', bodyKey: 'modeAiBody' },
+  { value: 'script', labelKey: 'modeScript', bodyKey: 'modeScriptBody' },
+];
 
 interface GenerateReelFormProps {
   projectId: string;
@@ -63,9 +75,27 @@ export function GenerateReelForm({
 }: GenerateReelFormProps) {
   const t = useTranslations('Reels');
 
-  const [template, setTemplate] = useState<ReelTemplateKey>('pitch-30s');
+  const [template, setTemplate] = useState<ReelTemplateKey>('informative-25s');
   const [idea, setIdea] = useState('');
   const [language, setLanguage] = useState<'en' | 'es'>('en');
+  const [mode, setMode] = useState<ReelMode>('ai');
+  // One textarea per template scene. Resized on template change so the array
+  // length always matches REEL_TEMPLATES[template].scenes.length — the server
+  // action validates that invariant strictly.
+  const [customScript, setCustomScript] = useState<string[]>(() =>
+    new Array(REEL_TEMPLATES['informative-25s'].scenes.length).fill(''),
+  );
+
+  useEffect(() => {
+    const count = REEL_TEMPLATES[template].scenes.length;
+    setCustomScript((prev) => {
+      if (prev.length === count) return prev;
+      const next = new Array<string>(count).fill('');
+      for (let i = 0; i < Math.min(prev.length, count); i++) next[i] = prev[i] ?? '';
+      return next;
+    });
+  }, [template]);
+
   // Engine is auto-derived from the chosen type — the user no longer picks
   // it. Visual maps to Veo (single cinematic shot); everything multi-scene
   // maps to FFmpeg composition.
@@ -133,13 +163,28 @@ export function GenerateReelForm({
       toast.error(t('errorNoOpenAI'));
       return;
     }
+
+    const sceneCount = REEL_TEMPLATES[template].scenes.length;
+    if (mode === 'script') {
+      if (customScript.length !== sceneCount) {
+        toast.error(t('scriptLengthError', { got: customScript.length, need: sceneCount }));
+        return;
+      }
+      if (customScript.some((line) => line.trim().length === 0)) {
+        toast.error(t('scriptEmpty'));
+        return;
+      }
+    }
+
     setPhase({ kind: 'planning' });
     startTransition(async () => {
       const result = await planReelAction({
         projectId,
         template,
-        idea: idea.trim(),
         language,
+        ...(mode === 'script'
+          ? { customScript: customScript.map((line) => line.trim()) }
+          : { idea: idea.trim() }),
       });
       if (!result.ok) {
         setPhase({ kind: 'failed', message: result.error });
@@ -187,7 +232,12 @@ export function GenerateReelForm({
   }
 
   const planningDisabled = pending || phase.kind === 'planning' || phase.kind === 'composing';
-  const submitDisabled = planningDisabled || !openaiConfigured || idea.trim().length < 3;
+  const scriptReady =
+    mode !== 'script' ||
+    (customScript.length === REEL_TEMPLATES[template].scenes.length &&
+      customScript.every((line) => line.trim().length > 0));
+  const ideaReady = mode !== 'ai' || idea.trim().length >= 3;
+  const submitDisabled = planningDisabled || !openaiConfigured || !ideaReady || !scriptReady;
 
   return (
     <div className="space-y-12">
@@ -238,22 +288,96 @@ export function GenerateReelForm({
             </p>
           </fieldset>
 
-          <div>
-            <label htmlFor="reel-idea" className="mono-eyebrow mb-3 block">
-              {t('fieldIdea')}
-            </label>
-            <textarea
-              id="reel-idea"
-              rows={4}
-              value={idea}
-              onChange={(e) => setIdea(e.target.value)}
-              disabled={planningDisabled}
-              placeholder={t('fieldIdeaPlaceholder')}
-              className="field resize-y placeholder:text-ink-3"
-              maxLength={600}
-              required
-            />
-          </div>
+          <fieldset className="space-y-3">
+            <legend className="mono-eyebrow mb-3 block">{t('fieldMode')}</legend>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {MODE_OPTIONS.map((opt) => {
+                const checked = mode === opt.value;
+                return (
+                  <label
+                    key={opt.value}
+                    className={`flex cursor-pointer gap-3 border p-4 transition-colors ${
+                      checked ? 'border-ink bg-paper-2' : 'border-rule hover:border-ink'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reelMode"
+                      value={opt.value}
+                      checked={checked}
+                      onChange={() => setMode(opt.value)}
+                      disabled={planningDisabled}
+                      className="mt-1 accent-ink"
+                    />
+                    <span>
+                      <span
+                        className="block"
+                        style={{
+                          fontFamily: 'var(--font-fraunces), Georgia, serif',
+                          fontSize: 18,
+                        }}
+                      >
+                        {t(opt.labelKey)}
+                      </span>
+                      <span className="mono-eyebrow text-ink-3">{t(opt.bodyKey)}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          {mode === 'ai' ? (
+            <div>
+              <label htmlFor="reel-idea" className="mono-eyebrow mb-3 block">
+                {t('fieldIdea')}
+              </label>
+              <textarea
+                id="reel-idea"
+                rows={4}
+                value={idea}
+                onChange={(e) => setIdea(e.target.value)}
+                disabled={planningDisabled}
+                placeholder={t('fieldIdeaPlaceholder')}
+                className="field resize-y placeholder:text-ink-3"
+                maxLength={600}
+                required
+              />
+            </div>
+          ) : (
+            <fieldset className="space-y-4">
+              <legend className="mono-eyebrow mb-3 block">{t('fieldIdea')}</legend>
+              <div className="space-y-4">
+                {REEL_TEMPLATES[template].scenes.map((scene, i) => {
+                  const inputId = `reel-script-${i}`;
+                  const num = String(i + 1).padStart(2, '0');
+                  return (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: scene count is template-locked; index is the natural stable id
+                    <div key={`${scene.slot}-${i}`} className="space-y-2">
+                      <label htmlFor={inputId} className="mono-eyebrow block text-ink-3">
+                        {t('scriptScenePrefix', { n: num, slot: scene.slot.toUpperCase() })}
+                        {' · '}
+                        {t('scriptSceneHint', { seconds: scene.durationSec })}
+                      </label>
+                      <textarea
+                        id={inputId}
+                        rows={2}
+                        value={customScript[i] ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setCustomScript((prev) => prev.map((v, j) => (j === i ? value : v)));
+                        }}
+                        disabled={planningDisabled}
+                        className="field resize-y placeholder:text-ink-3"
+                        maxLength={160}
+                        required
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </fieldset>
+          )}
 
           <fieldset className="space-y-3">
             <legend className="mono-eyebrow mb-3 block">{t('fieldLanguage')}</legend>

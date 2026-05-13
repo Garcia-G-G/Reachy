@@ -18,11 +18,20 @@ export const DEFAULT_PLANNER_MODEL = 'gpt-5.5';
 
 export interface PlanReelArgs {
   template: ReelTemplateKey;
+  /** Required in AI mode (mode='ai'). Ignored when customScript is provided. */
   idea: string;
   language: 'en' | 'es';
   project: Pick<Project, 'name' | 'audience' | 'tone' | 'description' | 'websiteUrl'>;
   brandKit: BrandKit | null;
   model?: string;
+  /**
+   * Script mode: when present, the planner does NOT generate scene text.
+   * Each entry is the literal overlay line for the matching scene index. The
+   * model only fills in `imagePrompt` (under the locked visual style) and a
+   * `tagline`. Length must equal REEL_TEMPLATES[template].scenes.length —
+   * the action validates this before calling, and we re-assert here.
+   */
+  customScript?: string[];
 }
 
 export interface PlanReelResult {
@@ -63,7 +72,27 @@ function buildSystemPrompt(args: PlanReelArgs): string {
   //   center → 3-line max ~290px → middle 15%
   // Image prompts must keep subjects OUT of those zones, otherwise the
   // caption box (opaque black) covers them.
+  const scriptMode = Array.isArray(args.customScript) && args.customScript.length > 0;
+
   if (args.language === 'es') {
+    if (scriptMode) {
+      return [
+        'Eres director de arte de un reel vertical (9:16, 1080×1920) educativo.',
+        `Audiencia: ${audience}`,
+        keywords && `Palabras clave del producto: ${keywords}`,
+        '',
+        'El usuario ya escribió la línea exacta de cada escena — NO la cambies y NO la repitas en tu salida.',
+        'Tu única tarea: redactar el `imagePrompt` de cada escena (qué se ve en pantalla detrás del texto) y un `tagline` corto para el reel.',
+        '',
+        `ESTILO VISUAL FIJO (${style.label}):`,
+        `  ${style.prompt}`,
+        '',
+        'Cada `imagePrompt` debe respetar ese estilo al pie de la letra y dejar libres los safe-zones (20% superior, 25% inferior) para los subtítulos.',
+        'Cumple el JSON Schema entregado. No inventes campos. Mantén el orden de las escenas.',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
     return [
       'Eres un guionista de vídeos verticales (9:16, 1080×1920) educativos para apps SaaS.',
       `Tono: ${tone || 'directo, claro, sin jerga'}`,
@@ -78,6 +107,25 @@ function buildSystemPrompt(args: PlanReelArgs): string {
       '',
       'Cada `imagePrompt` que generes debe respetar ese estilo al pie de la letra.',
       'Cumple el JSON Schema entregado. No inventes campos. Mantén el orden de las escenas.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  if (scriptMode) {
+    return [
+      'You are the art director for a vertical (9:16, 1080×1920) educational reel.',
+      `Audience: ${audience}`,
+      keywords && `Product keywords: ${keywords}`,
+      '',
+      'The user has already written the exact line for each scene — do NOT change it and do NOT echo it back in your output.',
+      'Your only job: write the `imagePrompt` for each scene (what appears on screen behind the text) and one short `tagline` for the reel.',
+      '',
+      `LOCKED VISUAL STYLE (${style.label}):`,
+      `  ${style.prompt}`,
+      '',
+      'Every `imagePrompt` must follow that style exactly and keep the safe zones (top 20%, bottom 25%) clear for captions.',
+      'Respect the provided JSON schema. Do not invent fields. Keep scene order.',
     ]
       .filter(Boolean)
       .join('\n');
@@ -104,11 +152,15 @@ function buildSystemPrompt(args: PlanReelArgs): string {
 
 function buildUserPrompt(args: PlanReelArgs): string {
   const tpl = REEL_TEMPLATES[args.template];
+  const scriptMode = Array.isArray(args.customScript) && args.customScript.length > 0;
+
   const slots = tpl.scenes
-    .map(
-      (s, i) =>
-        `  ${i + 1}. slot=${s.slot} duration=${s.durationSec}s position=${s.textPosition} background=${s.background ?? 'image'}`,
-    )
+    .map((s, i) => {
+      const base = `  ${i + 1}. slot=${s.slot} duration=${s.durationSec}s position=${s.textPosition} background=${s.background ?? 'image'}`;
+      if (!scriptMode) return base;
+      const line = args.customScript?.[i]?.trim() ?? '';
+      return `${base}\n     line: ${JSON.stringify(line)}`;
+    })
     .join('\n');
 
   return [
@@ -116,15 +168,17 @@ function buildUserPrompt(args: PlanReelArgs): string {
     args.project.description?.trim() && args.project.description.trim(),
     args.project.websiteUrl?.trim() && `Site: ${args.project.websiteUrl.trim()}`,
     '',
-    `Idea: ${args.idea.trim()}`,
-    '',
+    scriptMode ? null : `Idea: ${args.idea.trim()}`,
+    scriptMode ? '' : null,
     `Template: ${args.template} — ${tpl.label}`,
     `Total: ${tpl.durationSec}s, ${tpl.scenes.length} scenes:`,
     slots,
     '',
-    'Return JSON. Set `imagePrompt: ""` for any scene whose `background` is "brand".',
+    scriptMode
+      ? 'For each scene, write an `imagePrompt` that visualizes the user\'s line in the locked style. Set `imagePrompt: ""` for any scene whose `background` is "brand". Echo each scene\'s line back verbatim in its `text` field — do not paraphrase.'
+      : 'Return JSON. Set `imagePrompt: ""` for any scene whose `background` is "brand".',
   ]
-    .filter(Boolean)
+    .filter((line): line is string => typeof line === 'string')
     .join('\n');
 }
 
@@ -165,6 +219,18 @@ export async function planReel(args: PlanReelArgs): Promise<PlanReelResult> {
   const openai = getOpenAI();
   const isGpt5 = /^gpt-5(\.|-|$)/.test(model);
 
+  const scriptMode = Array.isArray(args.customScript) && args.customScript.length > 0;
+  if (scriptMode && args.customScript) {
+    if (args.customScript.length !== tpl.scenes.length) {
+      throw new Error(
+        `reelPlanner: customScript has ${args.customScript.length} lines, template requires ${tpl.scenes.length}`,
+      );
+    }
+    if (args.customScript.some((line) => line.trim().length === 0)) {
+      throw new Error('reelPlanner: customScript lines cannot be empty');
+    }
+  }
+
   const completion = await openai.chat.completions.create({
     model,
     messages: [
@@ -203,12 +269,18 @@ export async function planReel(args: PlanReelArgs): Promise<PlanReelResult> {
   // Always overwrite duration/textPosition/background/slot with the template
   // values — the model's JSON shape is a hint, but the source of truth is the
   // template (otherwise a hallucinated 12s scene breaks the xfade math).
+  // In script mode the user's literal line is the source of truth for `text`,
+  // even if the model paraphrased; the visualStyle locking only applies to
+  // `imagePrompt`.
   const scenes: PlannedScene[] = tpl.scenes.map((slot, i) => {
     const planned = parsed.scenes[i];
+    const sceneText = scriptMode
+      ? (args.customScript?.[i]?.trim() ?? '')
+      : (planned?.text?.trim() ?? '');
     return {
       slot: slot.slot,
       durationSec: slot.durationSec,
-      text: planned?.text?.trim() ?? '',
+      text: sceneText,
       textPosition: slot.textPosition,
       imagePrompt: slot.background === 'brand' ? '' : (planned?.imagePrompt?.trim() ?? ''),
       background: slot.background ?? 'image',

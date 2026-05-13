@@ -201,6 +201,15 @@
     "engineHint": "Engine: {engine} · {cost}",
     "engineCostFfmpeg": "≈ $0.18",
     "engineCostVeo": "≈ $1.20 / 8s",
+    "fieldMode": "Mode",
+    "modeAi": "AI drafts the scenes",
+    "modeAiBody": "You give an angle; Reachy writes the lines and image prompts.",
+    "modeScript": "I write the script",
+    "modeScriptBody": "You write the exact lines. Reachy only generates the visuals around them.",
+    "scriptScenePrefix": "№ {n} — {slot}",
+    "scriptSceneHint": "{seconds}s · max ~12 words for overlay",
+    "scriptLengthError": "Your script has {got} lines but this shape needs {need}.",
+    "scriptEmpty": "All scene lines must have text.",
     "types": {
       "informative-25s": {
         "label": "Explainer · 25s — Hook / Insight / Insight / Takeaway",

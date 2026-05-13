@@ -201,6 +201,15 @@
     "engineHint": "Motor: {engine} · {cost}",
     "engineCostFfmpeg": "≈ $0.18",
     "engineCostVeo": "≈ $1.20 / 8s",
+    "fieldMode": "Modo",
+    "modeAi": "Que la IA redacte las escenas",
+    "modeAiBody": "Tú das el ángulo; Reachy escribe las líneas y los prompts de imagen.",
+    "modeScript": "Yo escribo el guion",
+    "modeScriptBody": "Tú escribes las líneas exactas. Reachy solo genera el visual alrededor.",
+    "scriptScenePrefix": "№ {n} — {slot}",
+    "scriptSceneHint": "{seconds}s · máx ~12 palabras para el overlay",
+    "scriptLengthError": "Tu guion tiene {got} líneas pero esta forma necesita {need}.",
+    "scriptEmpty": "Todas las escenas deben tener texto.",
     "types": {
       "informative-25s": {
         "label": "Explainer · 25s — Gancho / Insight / Insight / Cierre",
