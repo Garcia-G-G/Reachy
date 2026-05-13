@@ -159,20 +159,20 @@
     }
   },
   "Reels": {
-    "metaTitle": "Generar reel",
-    "eyebrow": "№ 06 — Nuevo reel",
-    "title": "Compón un reel vertical.",
-    "subtitle": "Elige tipo, lanza el ángulo. Reachy planifica las escenas; tú ajustas el texto; FFmpeg o Veo 3.1 componen el vídeo 9:16.",
-    "fieldTemplate": "Tipo",
-    "fieldIdea": "Idea / ángulo",
-    "fieldIdeaPlaceholder": "¿Qué historia cuenta este reel? (ej.: cómo SaaS Tracker convierte un dashboard ruidoso en un lunes tranquilo)",
+    "metaTitle": "Diseña una lección de 30 segundos",
+    "eyebrow": "№ 06 — Una nueva edición",
+    "title": "Diseña una lección de 30 segundos.",
+    "subtitle": "Elige una forma, escribe el ángulo. Reachy redacta las escenas — tú editas las líneas, nosotros renderizamos en 9:16. Los reels aquí enseñan un insight; no venden.",
+    "fieldTemplate": "Forma",
+    "fieldIdea": "Ángulo",
+    "fieldIdeaPlaceholder": "¿Cuál es el único insight que esta lección deja claro? (ej. por qué la mayoría del feedback de producto es ruido, y la única señal que vale la pena perseguir)",
     "fieldLanguage": "Idioma",
     "languageEn": "Inglés",
     "languageEs": "Español",
     "fieldEngine": "Motor",
-    "plan": "Planificar reel",
-    "planning": "Planificando…",
-    "compose": "Componer reel",
+    "plan": "Bocetar escenas",
+    "planning": "Bocetando…",
+    "compose": "Renderizar reel",
     "composing": "Encolando…",
     "cancel": "Empezar de cero",
     "queuedCaption": "En cola — espera un momento.",
@@ -202,33 +202,33 @@
     "engineCostFfmpeg": "≈ $0.18",
     "engineCostVeo": "≈ $1.20 / 8s",
     "types": {
-      "pitch-30s": {
-        "label": "Pitch · 30s — Problema / Solución / CTA",
-        "description": "Cinco escenas: duele el problema, gira el cuchillo, presenta la solución, muestra el beneficio, cierra con la llamada."
-      },
-      "feature-15s": {
-        "label": "Feature · 15s — Gancho / Función / Beneficio / CTA",
-        "description": "Loop ajustado de cuatro escenas para destacar una sola función."
-      },
-      "launch-20s": {
-        "label": "Lanzamiento · 20s — Anuncio / Demo / CTA",
-        "description": "Anuncia un release: titular, muestra el cambio, mueve a la acción."
-      },
       "informative-25s": {
-        "label": "Informativo · 25s — Gancho / Insight / Insight / Conclusión",
-        "description": "Ritmo de explicación. Enseñar, no vender. Un insight por escena."
-      },
-      "visual-12s": {
-        "label": "Visual · 16s — Reel de ambiente",
-        "description": "Cuatro planos cinemáticos con movimiento Ken Burns y locución TTS. Las leyendas susurran, la imagen lidera. Ideal para reels de marca."
+        "label": "Explainer · 25s — Gancho / Insight / Insight / Cierre",
+        "description": "Ritmo calmado de enseñanza. Un insight por escena, un cierre tranquilo al final. El default cuando dudes."
       },
       "tutorial-30s": {
-        "label": "Tutorial · 30s — Intro / Paso / Paso / Paso / Resultado",
-        "description": "How-to paso a paso. Captions numeradas, progresión clara."
+        "label": "Cómo hacer · 30s — Intro / Paso / Paso / Paso / Resultado",
+        "description": "Lleva al lector por cinco beats. Captions numeradas, un solo hilo de progresión, el resultado al final."
+      },
+      "feature-15s": {
+        "label": "Nota de función · 15s — Gancho / Función / Beneficio / CTA",
+        "description": "Un primer plano de una sola función. Gancho, mostrar, demostrar, invitar. Breve y escaneable."
+      },
+      "pitch-30s": {
+        "label": "Argumento · 30s — Fricción / Cambio / Resultado / Intención",
+        "description": "Cinco beats: nombra la fricción, asiéntala, ofrece el cambio, muestra qué cambia, termina con intención. La forma más directa — úsala con moderación."
+      },
+      "launch-20s": {
+        "label": "Nota de release · 20s — Anuncio / Detalle / Por qué",
+        "description": "Un anuncio tranquilo de un release nuevo. Qué cambió, por qué importa, dónde mirar."
+      },
+      "visual-12s": {
+        "label": "Ambiente · 16s — Cuatro planos",
+        "description": "Cuatro planos ambientales con movimiento lento. La imagen lidera, las leyendas susurran. Ideal para piezas de marca, no para un único mensaje."
       },
       "testimonial-20s": {
-        "label": "Testimonial · 20s — Contexto / Cita / Cita / Marca",
-        "description": "Prueba social en citas. Abre con cita, cierra con marca."
+        "label": "Cita · 20s — Contexto / Cita / Cita / Marca",
+        "description": "Una historia corta contada en palabras de un cliente. Contexto, dos citas, tu wordmark. Deja hablar al lector."
       }
     },
     "engines": {
@@ -240,7 +240,8 @@
         "label": "Veo 3.1 Fast",
         "tagline": "Genera el reel completo desde un solo prompt. Más lento (~3 min), más impactante."
       }
-    }
+    },
+    "visualStyleNotice": "Estilo visual: {style}. Cámbialo en Identidad."
   },
   "Library": {
     "metaTitle": "Archivo",
@@ -296,7 +297,21 @@
     "languageEnglish": "Inglés",
     "languageSpanish": "Español",
     "logoPending": "La subida de logo está en camino — por ahora tu cabecera se muestra con iniciales.",
-    "previewLabel": "Vista previa en vivo"
+    "previewLabel": "Vista previa en vivo",
+    "sectionVisualStyle": "Estilo visual",
+    "visualStyleHint": "Cómo se ven los reels y las imágenes. Sin personas reales en ningún estilo — solo gráficos, tipografía y movimiento.",
+    "styleEditorial": "Movimiento editorial",
+    "styleEditorialTagline": "Tipografía serif grande, líneas finas, papel-y-tinta. Coincide 1:1 con la landing de Reachy.",
+    "stylePaperCutout": "Recorte de papel",
+    "stylePaperCutoutTagline": "Formas de papel cortado superpuestas con sombras duras. Estilo Headway / Fable.",
+    "styleFlat2d": "Explainer plano 2D",
+    "styleFlat2dTagline": "Personajes geométricos con bordes gruesos. Duolingo / Mailchimp.",
+    "styleInfographic": "Infografía animada",
+    "styleInfographicTagline": "Números contando, barras creciendo, líneas dibujándose. Los datos lideran.",
+    "styleIsometric": "Isométrico mini",
+    "styleIsometricTagline": "Bloques 3D flotantes, figuras pequeñas, gradientes pastel. Notion / Linear.",
+    "styleAbstract": "Formas abstractas",
+    "styleAbstractTagline": "Blobs de color suaves morfeando. Premium y ambient. Apple / Stripe."
   },
   "Landing": {
     "metaTitle": "Reachy — la revista bien editada de tu app",

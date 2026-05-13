@@ -62,45 +62,16 @@ export interface ReelTemplate {
   scenes: readonly ReelSceneTemplate[];
 }
 
+/**
+ * Order matters — REEL_TEMPLATE_KEYS preserves it and the form renders the
+ * cards in this order. Teaching-first shapes (informative, tutorial) come
+ * before sales-first shapes (pitch, launch). See planning/REEL-FIX-B-C.md.
+ */
 export const REEL_TEMPLATES: Record<ReelTemplateKey, ReelTemplate> = {
-  'pitch-30s': {
-    label: 'Pitch · 30s — Problem / Solution / CTA',
-    description:
-      'Five scenes: ache the problem, twist the knife, present the solution, show the benefit, end on the call.',
-    durationSec: 30,
-    scenes: [
-      { durationSec: 5, textPosition: 'bottom', slot: 'problem' },
-      { durationSec: 5, textPosition: 'bottom', slot: 'problem_amplified' },
-      { durationSec: 8, textPosition: 'bottom', slot: 'solution' },
-      { durationSec: 8, textPosition: 'bottom', slot: 'benefit' },
-      { durationSec: 4, textPosition: 'center', slot: 'cta', background: 'brand' },
-    ],
-  },
-  'feature-15s': {
-    label: 'Feature · 15s — Hook / Feature / Benefit / CTA',
-    description: 'Four-scene tight loop for a single feature highlight.',
-    durationSec: 15,
-    scenes: [
-      { durationSec: 3, textPosition: 'top', slot: 'hook' },
-      { durationSec: 6, textPosition: 'bottom', slot: 'feature' },
-      { durationSec: 3, textPosition: 'bottom', slot: 'benefit' },
-      { durationSec: 3, textPosition: 'center', slot: 'cta', background: 'brand' },
-    ],
-  },
-  'launch-20s': {
-    label: 'Launch · 20s — Announcement / Demo / CTA',
-    description: 'Announce a new release: headline, show the change, drive action.',
-    durationSec: 20,
-    scenes: [
-      { durationSec: 4, textPosition: 'top', slot: 'announcement' },
-      { durationSec: 6, textPosition: 'bottom', slot: 'detail' },
-      { durationSec: 6, textPosition: 'bottom', slot: 'benefit' },
-      { durationSec: 4, textPosition: 'center', slot: 'cta', background: 'brand' },
-    ],
-  },
   'informative-25s': {
-    label: 'Informative · 25s — Hook / Insight / Insight / Takeaway',
-    description: 'Calm explainer pace. Teach, not sell. One insight per scene.',
+    label: 'Explainer · 25s — Hook / Insight / Insight / Takeaway',
+    description:
+      'Calm teaching pace. One insight per scene, a quiet takeaway at the end. The default when in doubt.',
     durationSec: 25,
     scenes: [
       { durationSec: 5, textPosition: 'top', slot: 'hook' },
@@ -109,21 +80,10 @@ export const REEL_TEMPLATES: Record<ReelTemplateKey, ReelTemplate> = {
       { durationSec: 6, textPosition: 'center', slot: 'takeaway', background: 'brand' },
     ],
   },
-  'visual-12s': {
-    label: 'Visual · 16s — Mood reel',
-    description:
-      'Four cinematic frames with Ken Burns motion. Captions whisper, imagery leads. Best for brand reels.',
-    durationSec: 16,
-    scenes: [
-      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
-      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
-      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
-      { durationSec: 4, textPosition: 'center', slot: 'logo', background: 'brand' },
-    ],
-  },
   'tutorial-30s': {
-    label: 'Tutorial · 30s — Intro / Step / Step / Step / Result',
-    description: 'Step-by-step how-to. Numbered captions, clear progression.',
+    label: 'How-to · 30s — Intro / Step / Step / Step / Result',
+    description:
+      'Walk a reader through five beats. Numbered captions, single thread of progression, the result at the end.',
     durationSec: 30,
     scenes: [
       { durationSec: 5, textPosition: 'top', slot: 'intro' },
@@ -133,9 +93,58 @@ export const REEL_TEMPLATES: Record<ReelTemplateKey, ReelTemplate> = {
       { durationSec: 7, textPosition: 'center', slot: 'result' },
     ],
   },
+  'feature-15s': {
+    label: 'Feature note · 15s — Hook / Feature / Benefit / CTA',
+    description: 'A close-up on one feature. Hook, show, prove, invite. Brief and scannable.',
+    durationSec: 15,
+    scenes: [
+      { durationSec: 3, textPosition: 'top', slot: 'hook' },
+      { durationSec: 6, textPosition: 'bottom', slot: 'feature' },
+      { durationSec: 3, textPosition: 'bottom', slot: 'benefit' },
+      { durationSec: 3, textPosition: 'center', slot: 'cta', background: 'brand' },
+    ],
+  },
+  'pitch-30s': {
+    label: 'Argument · 30s — Friction / Change / Outcome / Intent',
+    description:
+      'Five beats: name the friction, sit with it, offer the change, show what shifts, end with intent. The most direct shape — use sparingly.',
+    durationSec: 30,
+    scenes: [
+      { durationSec: 5, textPosition: 'bottom', slot: 'problem' },
+      { durationSec: 5, textPosition: 'bottom', slot: 'problem_amplified' },
+      { durationSec: 8, textPosition: 'bottom', slot: 'solution' },
+      { durationSec: 8, textPosition: 'bottom', slot: 'benefit' },
+      { durationSec: 4, textPosition: 'center', slot: 'cta', background: 'brand' },
+    ],
+  },
+  'launch-20s': {
+    label: 'Release note · 20s — Announcement / Detail / Why',
+    description:
+      'A quiet announcement of a new release. What changed, why it matters, where to look.',
+    durationSec: 20,
+    scenes: [
+      { durationSec: 4, textPosition: 'top', slot: 'announcement' },
+      { durationSec: 6, textPosition: 'bottom', slot: 'detail' },
+      { durationSec: 6, textPosition: 'bottom', slot: 'benefit' },
+      { durationSec: 4, textPosition: 'center', slot: 'cta', background: 'brand' },
+    ],
+  },
+  'visual-12s': {
+    label: 'Mood · 16s — Four frames',
+    description:
+      'Four ambient frames with slow motion. Imagery leads, captions whisper. Best for brand pieces, not for a single message.',
+    durationSec: 16,
+    scenes: [
+      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
+      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
+      { durationSec: 4, textPosition: 'bottom', slot: 'mood' },
+      { durationSec: 4, textPosition: 'center', slot: 'logo', background: 'brand' },
+    ],
+  },
   'testimonial-20s': {
-    label: 'Testimonial · 20s — Setup / Quote / Quote / Brand',
-    description: 'Quote-driven social proof. Open quotes, close with brand.',
+    label: 'Quote · 20s — Setup / Quote / Quote / Brand',
+    description:
+      "A short story told through a customer's words. Setup, two quotes, your wordmark. Lets the reader speak.",
     durationSec: 20,
     scenes: [
       { durationSec: 4, textPosition: 'top', slot: 'setup' },

@@ -1,0 +1,1 @@
+ALTER TABLE "brand_kit" ADD COLUMN "visual_style" text DEFAULT 'editorial' NOT NULL;

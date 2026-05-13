@@ -34,6 +34,13 @@ const upsertBrandKitInput = z.object({
     .min(1)
     .max(2)
     .optional(),
+  /**
+   * Drives reel/image aesthetic. See src/server/ai/visualStyles.ts.
+   * DB has a default of 'editorial' so existing rows stay valid after migration.
+   */
+  visualStyle: z
+    .enum(['editorial', 'paper-cutout', 'flat-2d', 'infographic', 'isometric', 'abstract'])
+    .optional(),
 });
 
 export type UpsertBrandKitInput = z.infer<typeof upsertBrandKitInput>;
@@ -129,6 +136,10 @@ export async function upsertBrandKit(input: UpsertBrandKitInput): Promise<Action
   if (rest.languages !== undefined) {
     insertValues.languages = rest.languages;
     updateSet.languages = rest.languages;
+  }
+  if (rest.visualStyle !== undefined) {
+    insertValues.visualStyle = rest.visualStyle;
+    updateSet.visualStyle = rest.visualStyle;
   }
 
   const [row] = await db

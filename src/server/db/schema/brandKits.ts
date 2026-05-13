@@ -10,6 +10,19 @@ export type BrandVoice = {
 
 export type BrandLanguage = 'en' | 'es';
 
+/**
+ * Visual style keys must match VISUAL_STYLE_KEYS in src/server/ai/visualStyles.ts.
+ * We don't use a Drizzle pgEnum here so the enum can be extended without a
+ * migration that touches every brand_kit row.
+ */
+export type BrandVisualStyle =
+  | 'editorial'
+  | 'paper-cutout'
+  | 'flat-2d'
+  | 'infographic'
+  | 'isometric'
+  | 'abstract';
+
 export const brandKit = pgTable(
   'brand_kit',
   {
@@ -27,6 +40,12 @@ export const brandKit = pgTable(
     voice: jsonb('voice').$type<BrandVoice>(),
     keywords: jsonb('keywords').$type<string[]>().default([]),
     languages: jsonb('languages').$type<BrandLanguage[]>().default(['en']).notNull(),
+    /**
+     * Drives reel and image generation aesthetic. Defaults to 'editorial'
+     * (matches the Reachy landing). See src/server/ai/visualStyles.ts for the
+     * prompt fragment each value injects.
+     */
+    visualStyle: text('visual_style').$type<BrandVisualStyle>().default('editorial').notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()

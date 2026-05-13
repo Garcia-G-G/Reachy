@@ -36,6 +36,13 @@
       "when": 1778112999000,
       "tag": "0004_audit_round2_asset_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778710446899,
+      "tag": "0005_sticky_mystique",
+      "breakpoints": true
     }
   ]
 }

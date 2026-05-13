@@ -41,6 +41,7 @@ export default async function IdentityPage({ params }: IdentityPageProps) {
         voice: kit?.voice ?? null,
         keywords: kit?.keywords ?? [],
         languages: kit?.languages ?? ['en'],
+        visualStyle: kit?.visualStyle ?? 'editorial',
       }}
     />
   );

@@ -159,20 +159,20 @@
     }
   },
   "Reels": {
-    "metaTitle": "Generate reel",
-    "eyebrow": "№ 06 — New reel",
-    "title": "Compose a vertical reel.",
-    "subtitle": "Pick a type, drop the angle. Reachy plans the scenes; you tweak the text; FFmpeg or Veo 3.1 composes the 9:16 video.",
-    "fieldTemplate": "Type",
-    "fieldIdea": "Idea / angle",
-    "fieldIdeaPlaceholder": "What story does this reel tell? (e.g. how SaaS Tracker turns a noisy dashboard into a calm Monday morning)",
+    "metaTitle": "Plan a 30-second lesson",
+    "eyebrow": "№ 06 — A new edition",
+    "title": "Plan a 30-second lesson.",
+    "subtitle": "Pick a shape, write the angle. Reachy drafts the scenes — you edit the lines, we render in 9:16. Reels here teach an insight; they don't pitch.",
+    "fieldTemplate": "Shape",
+    "fieldIdea": "Angle",
+    "fieldIdeaPlaceholder": "What's the single insight this lesson lands? (e.g. why most product feedback is noise, and the one signal worth chasing)",
     "fieldLanguage": "Language",
     "languageEn": "English",
     "languageEs": "Spanish",
     "fieldEngine": "Engine",
-    "plan": "Plan reel",
-    "planning": "Planning…",
-    "compose": "Compose reel",
+    "plan": "Draft scenes",
+    "planning": "Drafting…",
+    "compose": "Render reel",
     "composing": "Queueing…",
     "cancel": "Start over",
     "queuedCaption": "Queued — sit tight.",
@@ -202,33 +202,33 @@
     "engineCostFfmpeg": "≈ $0.18",
     "engineCostVeo": "≈ $1.20 / 8s",
     "types": {
-      "pitch-30s": {
-        "label": "Pitch · 30s — Problem / Solution / CTA",
-        "description": "Five scenes: ache the problem, twist the knife, present the solution, show the benefit, end on the call."
-      },
-      "feature-15s": {
-        "label": "Feature · 15s — Hook / Feature / Benefit / CTA",
-        "description": "Four-scene tight loop for a single feature highlight."
-      },
-      "launch-20s": {
-        "label": "Launch · 20s — Announcement / Demo / CTA",
-        "description": "Announce a new release: headline, show the change, drive action."
-      },
       "informative-25s": {
-        "label": "Informative · 25s — Hook / Insight / Insight / Takeaway",
-        "description": "Calm explainer pace. Teach, not sell. One insight per scene."
-      },
-      "visual-12s": {
-        "label": "Visual · 16s — Mood reel",
-        "description": "Four cinematic frames with Ken Burns motion and TTS voiceover. Captions whisper, imagery leads. Best for brand reels."
+        "label": "Explainer · 25s — Hook / Insight / Insight / Takeaway",
+        "description": "Calm teaching pace. One insight per scene, a quiet takeaway at the end. The default when in doubt."
       },
       "tutorial-30s": {
-        "label": "Tutorial · 30s — Intro / Step / Step / Step / Result",
-        "description": "Step-by-step how-to. Numbered captions, clear progression."
+        "label": "How-to · 30s — Intro / Step / Step / Step / Result",
+        "description": "Walk a reader through five beats. Numbered captions, single thread of progression, the result at the end."
+      },
+      "feature-15s": {
+        "label": "Feature note · 15s — Hook / Feature / Benefit / CTA",
+        "description": "A close-up on one feature. Hook, show, prove, invite. Brief and scannable."
+      },
+      "pitch-30s": {
+        "label": "Argument · 30s — Friction / Change / Outcome / Intent",
+        "description": "Five beats: name the friction, sit with it, offer the change, show what shifts, end with intent. The most direct shape — use sparingly."
+      },
+      "launch-20s": {
+        "label": "Release note · 20s — Announcement / Detail / Why",
+        "description": "A quiet announcement of a new release. What changed, why it matters, where to look."
+      },
+      "visual-12s": {
+        "label": "Mood · 16s — Four frames",
+        "description": "Four ambient frames with slow motion. Imagery leads, captions whisper. Best for brand pieces, not for a single message."
       },
       "testimonial-20s": {
-        "label": "Testimonial · 20s — Setup / Quote / Quote / Brand",
-        "description": "Quote-driven social proof. Open quotes, close with brand."
+        "label": "Quote · 20s — Setup / Quote / Quote / Brand",
+        "description": "A short story told through a customer's words. Setup, two quotes, your wordmark. Lets the reader speak."
       }
     },
     "engines": {
@@ -278,6 +278,20 @@
     "sectionVoice": "Voice & tone",
     "sectionAudience": "Audience",
     "sectionLanguages": "Active languages",
+    "sectionVisualStyle": "Visual style",
+    "visualStyleHint": "How reels and images should look. No real people in any style — graphics, type, and motion only.",
+    "styleEditorial": "Editorial motion",
+    "styleEditorialTagline": "Big serif type, thin rules, paper-and-ink. Matches the Reachy landing 1:1.",
+    "stylePaperCutout": "Paper cutout",
+    "stylePaperCutoutTagline": "Layered cut-paper shapes with hard shadows. Headway / Fable feel.",
+    "styleFlat2d": "Flat 2D explainer",
+    "styleFlat2dTagline": "Bold geometric characters, thick outlines. Duolingo / Mailchimp.",
+    "styleInfographic": "Animated infographic",
+    "styleInfographicTagline": "Numbers counting up, bars growing, lines drawing. Data leads.",
+    "styleIsometric": "Isometric mini",
+    "styleIsometricTagline": "Floating 3D blocks, tiny figures, pastel gradients. Notion / Linear.",
+    "styleAbstract": "Abstract shapes",
+    "styleAbstractTagline": "Soft color blobs morphing. Premium and ambient. Apple / Stripe.",
     "colorPrimary": "Primary",
     "colorSecondary": "Secondary",
     "colorAccent": "Accent",

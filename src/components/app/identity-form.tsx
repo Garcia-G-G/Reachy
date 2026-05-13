@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BODY_FONTS, HEADING_FONTS } from '@/lib/google-fonts';
 import { upsertBrandKit } from '@/server/actions/brandKits';
-import type { BrandLanguage, BrandVoice } from '@/server/db/schema/brandKits';
+import type { BrandLanguage, BrandVisualStyle, BrandVoice } from '@/server/db/schema/brandKits';
 import { BrandPreview } from './brand-preview';
 
 interface IdentityFormProps {
@@ -21,8 +21,34 @@ interface IdentityFormProps {
     voice: BrandVoice | null;
     keywords: string[];
     languages: BrandLanguage[];
+    visualStyle: BrandVisualStyle;
   };
 }
+
+const VISUAL_STYLE_OPTIONS: ReadonlyArray<{
+  value: BrandVisualStyle;
+  labelKey:
+    | 'styleEditorial'
+    | 'stylePaperCutout'
+    | 'styleFlat2d'
+    | 'styleInfographic'
+    | 'styleIsometric'
+    | 'styleAbstract';
+  taglineKey:
+    | 'styleEditorialTagline'
+    | 'stylePaperCutoutTagline'
+    | 'styleFlat2dTagline'
+    | 'styleInfographicTagline'
+    | 'styleIsometricTagline'
+    | 'styleAbstractTagline';
+}> = [
+  { value: 'editorial', labelKey: 'styleEditorial', taglineKey: 'styleEditorialTagline' },
+  { value: 'paper-cutout', labelKey: 'stylePaperCutout', taglineKey: 'stylePaperCutoutTagline' },
+  { value: 'flat-2d', labelKey: 'styleFlat2d', taglineKey: 'styleFlat2dTagline' },
+  { value: 'infographic', labelKey: 'styleInfographic', taglineKey: 'styleInfographicTagline' },
+  { value: 'isometric', labelKey: 'styleIsometric', taglineKey: 'styleIsometricTagline' },
+  { value: 'abstract', labelKey: 'styleAbstract', taglineKey: 'styleAbstractTagline' },
+];
 
 type SaveState =
   | { kind: 'idle' }
@@ -64,6 +90,7 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
   const [languages, setLanguages] = useState<BrandLanguage[]>(
     initial.languages.length > 0 ? initial.languages : ['en'],
   );
+  const [visualStyle, setVisualStyle] = useState<BrandVisualStyle>(initial.visualStyle);
 
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
   const isFirstRun = useRef(true);
@@ -97,6 +124,7 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
     dontSay,
     keywordsRaw,
     languages,
+    visualStyle,
   ]);
 
   async function save() {
@@ -137,6 +165,7 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
       voice,
       keywords,
       languages,
+      visualStyle,
     });
 
     if (ctrl.signal.aborted) return;
@@ -276,6 +305,42 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
               checked={languages.includes('es')}
               onChange={(on) => toggleLanguage('es', on)}
             />
+          </div>
+        </Section>
+
+        {/* Visual style */}
+        <Section title={t('sectionVisualStyle')}>
+          <p className="mono-eyebrow mb-6 text-ink-3">{t('visualStyleHint')}</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {VISUAL_STYLE_OPTIONS.map((opt) => {
+              const checked = visualStyle === opt.value;
+              return (
+                <label
+                  key={opt.value}
+                  className={`flex cursor-pointer gap-3 border p-4 transition-colors ${
+                    checked ? 'border-ink bg-paper-2' : 'border-rule hover:border-ink'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="visualStyle"
+                    value={opt.value}
+                    checked={checked}
+                    onChange={() => setVisualStyle(opt.value)}
+                    className="mt-1 accent-ink"
+                  />
+                  <span className="block">
+                    <span
+                      className="block"
+                      style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 18 }}
+                    >
+                      {t(opt.labelKey)}
+                    </span>
+                    <span className="mono-eyebrow mt-1 block text-ink-3">{t(opt.taglineKey)}</span>
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </Section>
       </div>

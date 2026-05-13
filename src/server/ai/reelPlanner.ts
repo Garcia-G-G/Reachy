@@ -8,6 +8,7 @@ import {
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
 import { getOpenAI } from './openai';
+import { resolveVisualStyle } from './visualStyles';
 
 /**
  * Default text model for scene planning. Schema-bound JSON, no chain of
@@ -51,26 +52,31 @@ function buildSystemPrompt(args: PlanReelArgs): string {
   const keywords = (args.brandKit?.keywords ?? []).slice(0, 12).join(', ');
   const audience = args.project.audience?.trim() || 'indie hackers and technical founders';
 
+  // Visual style is the difference between Veo generating a stressed person
+  // at a desk and an animated explainer with motion graphics. See
+  // src/server/ai/visualStyles.ts. Defaults to 'editorial' when no brand kit.
+  const style = resolveVisualStyle(args.brandKit?.visualStyle);
+
   // Caption safe zones (drawtext y= positions in compose.ts):
   //   top    → y=160, 3-line max ~200px high → top 19% of frame
   //   bottom → y=h-th-220, 3-line max ~200px → bottom 22% of frame
   //   center → 3-line max ~290px → middle 15%
-  // Image prompts must keep subjects/faces OUT of those zones, otherwise
-  // the caption box (opaque black) covers them like in the May 12 test.
+  // Image prompts must keep subjects OUT of those zones, otherwise the
+  // caption box (opaque black) covers them.
   if (args.language === 'es') {
     return [
-      'Eres un guionista de vídeos verticales (9:16, 1080×1920) para apps SaaS.',
+      'Eres un guionista de vídeos verticales (9:16, 1080×1920) educativos para apps SaaS.',
       `Tono: ${tone || 'directo, claro, sin jerga'}`,
       dontSay && `NO uses: ${dontSay}`,
       keywords && `Palabras clave del producto: ${keywords}`,
       `Audiencia: ${audience}`,
+      'Enseñas, no vendes. Cada escena entrega UN insight, no una promesa de venta.',
       'Texto sobre vídeo: máximo 6 palabras por escena, una frase corta que se lea en 2 segundos.',
-      'Prompts de imagen (críticos):',
-      '  • Composición vertical 9:16 — el sujeto debe ocupar el TERCIO CENTRAL del encuadre.',
-      '  • Deja el 20% superior y el 25% inferior limpios (ahí va la leyenda con caja oscura).',
-      '  • Encuadre medio o cuerpo entero, NUNCA primer plano de cara cortada por arriba o abajo.',
-      '  • Estilo editorial moderno: paleta cálida, luz natural, profundidad de campo media.',
-      '  • Sin marca de agua, sin texto, sin logos, sin caracteres legibles en pantallas.',
+      '',
+      `ESTILO VISUAL FIJO (${style.label}):`,
+      `  ${style.prompt}`,
+      '',
+      'Cada `imagePrompt` que generes debe respetar ese estilo al pie de la letra.',
       'Cumple el JSON Schema entregado. No inventes campos. Mantén el orden de las escenas.',
     ]
       .filter(Boolean)
@@ -78,18 +84,18 @@ function buildSystemPrompt(args: PlanReelArgs): string {
   }
 
   return [
-    'You are a screenwriter for vertical (9:16, 1080×1920) video reels for SaaS apps.',
+    'You are a screenwriter for vertical (9:16, 1080×1920) educational video reels for SaaS apps.',
     `Tone: ${tone || 'direct, clear, no jargon'}`,
     dontSay && `DO NOT use: ${dontSay}`,
     keywords && `Product keywords: ${keywords}`,
     `Audience: ${audience}`,
+    'You teach, you do not sell. Each scene delivers ONE insight, not a sales promise.',
     'Overlay text: max 6 words per scene, one short line readable in 2 seconds.',
-    'Image prompts (critical):',
-    '  • Vertical 9:16 composition — subject must sit in the CENTRAL THIRD of the frame.',
-    '  • Keep the top 20% and bottom 25% clean (that is where the dark caption box lands).',
-    '  • Medium or full-body shot, NEVER a tight face crop that gets clipped at the top or bottom.',
-    '  • Modern editorial style: warm palette, natural light, mid depth-of-field.',
-    '  • No watermark, no text, no logos, no readable characters on any screen in frame.',
+    '',
+    `LOCKED VISUAL STYLE (${style.label}):`,
+    `  ${style.prompt}`,
+    '',
+    'Every `imagePrompt` you produce must follow that style exactly.',
     'Respect the provided JSON schema. Do not invent fields. Keep scene order.',
   ]
     .filter(Boolean)

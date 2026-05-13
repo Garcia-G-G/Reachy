@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Reachy — Direcciones de estilo para reels</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:#f1ebdf; --ink:#14110d; --ink-2:#4a4338; --ink-3:#8b8170; --rule:#c9bfa9; --accent:#b6481a;
+    --display:'Fraunces',Georgia,serif; --italic:'Instrument Serif',serif;
+    --sans:'Inter',system-ui,sans-serif; --mono:'JetBrains Mono',monospace;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .display{font-family:var(--display);font-weight:400;letter-spacing:-.025em;line-height:.94;font-variation-settings:'opsz' 144}
+  .it{font-family:var(--italic);font-style:italic}
+  .mono{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+
+  header.masthead{border-bottom:1px solid var(--ink)}
+  .mast-inner{max-width:1280px;margin:0 auto;padding:14px 32px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:24px}
+  .mast-l{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+  .mast-c{font-family:var(--display);font-weight:500;font-size:24px}
+  .mast-r{text-align:right;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+
+  .intro{max-width:1280px;margin:0 auto;padding:64px 32px 32px}
+  .intro .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);margin-bottom:18px}
+  .intro h1{font-family:var(--display);font-size:clamp(40px,6vw,72px);letter-spacing:-.025em;line-height:.98;max-width:18ch}
+  .intro h1 em{font-family:var(--italic);font-style:italic;color:var(--accent)}
+  .intro p{font-family:var(--display);font-weight:300;font-size:20px;line-height:1.45;color:var(--ink-2);margin-top:24px;max-width:62ch;font-variation-settings:'opsz' 36}
+
+  /* ─── current vs proposed comparison ─── */
+  .compare{max-width:1280px;margin:0 auto;padding:32px;border-top:1px solid var(--ink);margin-top:32px}
+  .compare h2{font-family:var(--display);font-size:32px;margin-bottom:24px}
+  .compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--ink)}
+  .compare-col{padding:24px;border-right:1px solid var(--ink)}
+  .compare-col:last-child{border-right:none;background:var(--accent);color:var(--paper)}
+  .compare-col h3{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:12px}
+  .compare-col h4{font-family:var(--display);font-size:24px;font-weight:500;margin-bottom:14px;line-height:1.1}
+  .compare-col p{font-size:14px;line-height:1.55}
+  .compare-col code{font-family:var(--mono);font-size:11px;background:rgba(20,17,13,.06);padding:2px 6px;display:inline-block;margin:2px 0}
+  .compare-col:last-child code{background:rgba(241,235,223,.18)}
+
+  /* ─── styles grid ─── */
+  .styles-section{max-width:1280px;margin:0 auto;padding:64px 32px}
+  .styles-section h2{font-family:var(--display);font-size:36px;margin-bottom:8px}
+  .styles-section .sub{font-family:var(--display);font-weight:300;font-size:18px;color:var(--ink-2);max-width:60ch;margin-bottom:48px;font-variation-settings:'opsz' 36}
+
+  .styles-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
+  @media (max-width:1080px){.styles-grid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:720px){.styles-grid{grid-template-columns:1fr}}
+
+  .style-card{background:#fff;border:1px solid var(--ink);box-shadow:10px 10px 0 var(--ink);display:flex;flex-direction:column}
+  .style-num{display:flex;align-items:baseline;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--ink);font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .style-num .n{color:var(--accent)}
+  .style-frame{aspect-ratio:9/16;position:relative;overflow:hidden;background:#fafafa}
+
+  /* style 1: Flat 2D Explainer (Duolingo) */
+  .s1{background:#58cc02}
+  .s1 .ch{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%)}
+  .s1 .ch-body{width:120px;height:140px;background:#fff;border-radius:60px 60px 50px 50px;border:6px solid #14110d;position:relative}
+  .s1 .ch-eye{width:18px;height:18px;background:#14110d;border-radius:50%;position:absolute;top:38px}
+  .s1 .ch-eye.l{left:30px}.s1 .ch-eye.r{right:30px}
+  .s1 .ch-mouth{width:30px;height:18px;border:5px solid #14110d;border-top:none;border-radius:0 0 30px 30px;position:absolute;left:50%;transform:translateX(-50%);top:78px}
+  .s1 .floats{position:absolute;inset:0}
+  .s1 .floats span{position:absolute;width:24px;height:24px;background:#fff;border:3px solid #14110d;border-radius:6px;animation:float 3s ease-in-out infinite}
+  .s1 .floats span:nth-child(1){top:18%;left:18%;animation-delay:0s}
+  .s1 .floats span:nth-child(2){top:72%;right:14%;animation-delay:.6s;background:#ff4b4b;border-radius:50%}
+  .s1 .floats span:nth-child(3){bottom:24%;left:22%;animation-delay:1.2s;background:#1cb0f6;width:32px;height:32px}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+
+  /* style 2: Animated Infographic */
+  .s2{background:#fff8e7;display:flex;flex-direction:column;justify-content:flex-end;padding:30px}
+  .s2 .bars{display:flex;gap:12px;align-items:flex-end;height:55%}
+  .s2 .bar{flex:1;background:#14110d;border:3px solid #14110d;animation:grow 2s ease-out infinite alternate}
+  .s2 .bar:nth-child(1){height:30%}
+  .s2 .bar:nth-child(2){height:55%;background:#b6481a;border-color:#b6481a}
+  .s2 .bar:nth-child(3){height:80%}
+  .s2 .bar:nth-child(4){height:65%;background:#1f3a2f;border-color:#1f3a2f}
+  @keyframes grow{from{transform:scaleY(.6);transform-origin:bottom}to{transform:scaleY(1);transform-origin:bottom}}
+  .s2 .stat{font-family:var(--display);font-size:42px;font-weight:500;color:#14110d;margin-bottom:8px;letter-spacing:-.03em}
+  .s2 .stat-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8b8170;margin-bottom:18px}
+
+  /* style 3: Isometric mini-people (Notion-style) */
+  .s3{background:linear-gradient(180deg,#e8d5f5 0%,#f5e8d5 100%);display:flex;align-items:center;justify-content:center;padding:30px}
+  .s3 .iso{position:relative;width:170px;height:240px}
+  .s3 .iso-block{position:absolute;width:90px;height:90px;background:#fff;border:3px solid #14110d;transform:rotate(-30deg) skewX(30deg);box-shadow:6px 6px 0 #14110d}
+  .s3 .iso-block.b1{top:20px;left:0;background:#ffd6e8}
+  .s3 .iso-block.b2{top:80px;left:50px;background:#d6e8ff}
+  .s3 .iso-block.b3{top:140px;left:20px;background:#fff5d6}
+  .s3 .iso-person{position:absolute;width:32px;height:32px;background:#14110d;border-radius:50%;top:0;left:90px}
+  .s3 .iso-person::after{content:"";position:absolute;width:24px;height:40px;background:#b6481a;top:30px;left:4px;border-radius:8px}
+
+  /* style 4: Editorial motion graphics (NYT/Pudding) */
+  .s4{background:#f1ebdf;padding:40px 30px;display:flex;flex-direction:column;justify-content:space-between}
+  .s4 .head{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:#8b8170;border-bottom:1px solid #14110d;padding-bottom:8px;margin-bottom:18px}
+  .s4 .display-h{font-family:var(--display);font-size:30px;font-weight:500;line-height:.98;letter-spacing:-.02em;max-width:11ch}
+  .s4 .display-h em{font-family:var(--italic);font-style:italic;color:#b6481a}
+  .s4 .number{font-family:var(--display);font-weight:300;font-size:120px;line-height:1;color:#14110d;letter-spacing:-.04em}
+  .s4 .footer{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:#8b8170;border-top:1px solid #14110d;padding-top:8px}
+
+  /* style 5: Abstract Shapes (Apple/Stripe) */
+  .s5{background:#fff;position:relative;overflow:hidden}
+  .s5 .blob1{position:absolute;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#ff80b5,#9089fc);top:-60px;left:-60px;filter:blur(8px);animation:morph 6s ease-in-out infinite}
+  .s5 .blob2{position:absolute;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle at 70% 70%,#80c7ff,#7af0c4);bottom:-40px;right:-40px;filter:blur(8px);animation:morph 6s ease-in-out infinite reverse}
+  @keyframes morph{0%,100%{border-radius:50%;transform:scale(1)}50%{border-radius:30% 70% 70% 30%;transform:scale(1.05)}}
+  .s5 .label{position:absolute;bottom:30px;left:30px;right:30px;font-family:var(--display);font-size:24px;font-weight:500;color:#14110d;text-align:center;letter-spacing:-.02em}
+
+  /* style 6: Paper cutout (Headway) */
+  .s6{background:#fde9d8;padding:30px;position:relative;overflow:hidden}
+  .s6 .paper-shape{position:absolute;border:none;box-shadow:4px 4px 0 rgba(20,17,13,.15)}
+  .s6 .ps1{width:140px;height:80px;background:#b6481a;top:50px;left:30px;transform:rotate(-6deg);border-radius:6px}
+  .s6 .ps2{width:120px;height:120px;background:#1f3a2f;top:130px;right:30px;transform:rotate(8deg);border-radius:60px}
+  .s6 .ps3{width:170px;height:60px;background:#f1ebdf;bottom:60px;left:30px;transform:rotate(-3deg);border:2px solid #14110d;border-radius:30px}
+  .s6 .ps4{width:40px;height:40px;background:#fde9d8;border:3px solid #14110d;border-radius:50%;top:80px;right:80px}
+  .s6 .label{position:absolute;bottom:20px;left:30px;right:30px;font-family:var(--display);font-style:italic;font-weight:400;font-size:18px;color:#14110d;text-align:left}
+
+  .style-cap{padding:18px;border-top:1px solid var(--ink);background:#fff}
+  .style-cap h3{font-family:var(--display);font-size:22px;font-weight:500;margin-bottom:6px;letter-spacing:-.015em}
+  .style-cap h3 em{font-family:var(--italic);font-style:italic}
+  .style-cap .ref{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .style-cap p{font-size:13px;line-height:1.5;color:var(--ink-2)}
+  .style-cap .pros{margin-top:10px;font-size:12px;color:var(--ink-3);line-height:1.5}
+
+  /* footer / decision call */
+  .decision{background:#14110d;color:#f1ebdf;padding:64px 32px;margin-top:48px}
+  .decision-inner{max-width:1280px;margin:0 auto}
+  .decision .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#b6481a;margin-bottom:18px}
+  .decision h2{font-family:var(--display);font-size:48px;letter-spacing:-.025em;line-height:1.05;max-width:18ch;margin-bottom:24px}
+  .decision h2 em{font-family:var(--italic);font-style:italic;color:#b6481a}
+  .decision p{font-family:var(--display);font-weight:300;font-size:18px;line-height:1.5;color:rgba(241,235,223,.85);max-width:60ch}
+  .decision .nums{margin-top:32px;display:grid;grid-template-columns:repeat(6,auto);gap:24px;max-width:none}
+  .decision .nums .n{font-family:var(--display);font-size:36px;font-weight:500;color:#b6481a}
+  .decision .nums .lbl{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:rgba(241,235,223,.6);margin-top:4px}
+
+  footer.colophon{border-top:1px solid var(--ink);padding:28px 32px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);text-align:center}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="mast-inner">
+    <div class="mast-l">Vol. 01 · No. 04 · 2026</div>
+    <div class="mast-c">Reachy</div>
+    <div class="mast-r">Reel style direction</div>
+  </div>
+</header>
+
+<section class="intro">
+  <div class="eyebrow">№ 04 — Dirección de estilo de reels</div>
+  <h1 class="display">El reel actual va por <em>actor de stock</em>. Tú quieres <em>explainer animado</em>.</h1>
+  <p>El planner le pide a Veo "estilo editorial moderno con persona en plano medio". Resultado: la mujer estresada con post-its. Hay seis direcciones más limpias, todas mantienen calidad pero quitan al humano y agregan información visible (gráficos, personajes ilustrados, datos animados). Escoge una — o una mezcla — y actualizo el código.</p>
+</section>
+
+<!-- ─── CURRENT vs PROPOSED ─── -->
+<section class="compare">
+  <h2 class="display">El cambio en el prompt de Veo</h2>
+  <div class="compare-grid">
+    <div class="compare-col">
+      <h3>Actual — `reelPlanner.ts`</h3>
+      <h4>"Modern editorial style, warm palette, natural light, mid depth-of-field. Medium or full-body shot."</h4>
+      <p>Veo lee esto y produce <strong>fotografía de stock con personas reales</strong>. La gente sale incidentalmente porque "shot" + "natural light" implica cámara real.</p>
+      <p style="margin-top:10px"><code>"NEVER a tight face crop"</code> — confirma que asume rostros humanos.</p>
+    </div>
+    <div class="compare-col">
+      <h3>Propuesto</h3>
+      <h4>"Animated explainer / motion graphics. Flat 2D illustration. NO real people."</h4>
+      <p>El subject es <strong>icono ilustrado, gráfico animado, personaje cartoon o forma abstracta</strong>. Mantiene la calidad visual y agrega claridad informativa.</p>
+      <p style="margin-top:10px"><code>"Subject: animated chart, illustrated character, or motion graphic"</code></p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── STYLES GRID ─── -->
+<section class="styles-section">
+  <h2 class="display">Seis direcciones — escoge una <em class="it">o mezcla</em></h2>
+  <p class="sub">Cada tarjeta es una simulación estática de cómo se vería un frame del reel. La idea es que el reel real (8 segundos) tendría animación dentro de ese estilo.</p>
+
+  <div class="styles-grid">
+
+    <!-- 1: Flat 2D Explainer -->
+    <article class="style-card">
+      <div class="style-num"><span><span class="n">№ 01</span> · Flat 2D Explainer</span><span>Duolingo · Mailchimp</span></div>
+      <div class="style-frame s1">
+        <div class="floats"><span></span><span></span><span></span></div>
+        <div class="ch">
+          <div class="ch-body">
+            <div class="ch-eye l"></div>
+            <div class="ch-eye r"></div>
+            <div class="ch-mouth"></div>
+          </div>
+        </div>
+      </div>
+      <div class="style-cap">
+        <div class="ref">Best for: onboarding · features · friendly tone</div>
+        <h3>Personaje plano <em>amigable</em></h3>
+        <p>Personajes geométricos con bordes gruesos, colores planos saturados, animaciones tipo Lottie/Rive. Cero realismo, máxima simpatía.</p>
+        <div class="pros">+ Memorable y "marca propia" · + barato (un personaje rinde 100 reels) · − requiere diseño consistente</div>
+      </div>
+    </article>
+
+    <!-- 2: Animated Infographic -->
+    <article class="style-card">
+      <div class="style-num"><span><span class="n">№ 02</span> · Animated Infographic</span><span>The Pudding · NYT</span></div>
+      <div class="style-frame s2">
+        <div class="stat">+47%</div>
+        <div class="stat-label">Conversion lift</div>
+        <div class="bars">
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+        </div>
+      </div>
+      <div class="style-cap">
+        <div class="ref">Best for: stats · case studies · "we proved it"</div>
+        <h3>Datos que <em>se mueven</em></h3>
+        <p>Números grandes contando hacia arriba, barras creciendo, líneas dibujándose. El protagonista es el dato, no la persona.</p>
+        <div class="pros">+ Credibilidad inmediata · + perfecto para SaaS B2B · − requiere métricas reales</div>
+      </div>
+    </article>
+
+    <!-- 3: Isometric Mini -->
+    <article class="style-card">
+      <div class="style-num"><span><span class="n">№ 03</span> · Isometric Mini</span><span>Notion · Linear · Stripe</span></div>
+      <div class="style-frame s3">
+        <div class="iso">
+          <div class="iso-block b1"></div>
+          <div class="iso-block b2"></div>
+          <div class="iso-block b3"></div>
+          <div class="iso-person"></div>
+        </div>
+      </div>
+      <div class="style-cap">
+        <div class="ref">Best for: producto técnico · workflow · "cómo funciona"</div>
+        <h3>Bloques 3D <em>ligeros</em></h3>
+        <p>Mini-mundos isométricos donde flotan tarjetas, dashboards y figuras pequeñas. Sensación premium, técnica, "diseñado por developers".</p>
+        <div class="pros">+ Encaja con audiencia indie hacker · + escala bien para mostrar UI · − más caro de generar bien</div>
+      </div>
+    </article>
+
+    <!-- 4: Editorial Motion -->
+    <article class="style-card">
+      <div class="style-num"><span><span class="n">№ 04</span> · Editorial Motion</span><span>NYT · The Pudding · Aperture</span></div>
+      <div class="style-frame s4">
+        <div>
+          <div class="head">Edición № 12 · Mayo 2026</div>
+          <h3 class="display-h">Tu app merece más que un post a las <em>3 a.m.</em></h3>
+        </div>
+        <div class="number">3</div>
+        <div class="footer">— Pliego 02 · Reachy</div>
+      </div>
+      <div class="style-cap">
+        <div class="ref">Best for: thought leadership · launch announcement</div>
+        <h3>Tipografía <em>editorial</em></h3>
+        <p>Texto enorme en Fraunces, números display animados, líneas finas dibujándose. Coincide 1:1 con el branding de Reachy. Sin imágenes — el tipo es el reel.</p>
+        <div class="pros">+ Coherencia total con tu landing · + sobrio y memorable · − requiere copy excelente</div>
+      </div>
+    </article>
+
+    <!-- 5: Abstract Shapes -->
+    <article class="style-card">
+      <div class="style-num"><span><span class="n">№ 05</span> · Abstract Shapes</span><span>Apple · Stripe · Vercel</span></div>
+      <div class="style-frame s5">
+        <div class="blob1"></div>
+        <div class="blob2"></div>
+        <div class="label">Form follows fluency.</div>
+      </div>
+      <div class="style-cap">
+        <div class="ref">Best for: brand reveal · teaser · ambient</div>
+        <h3>Formas que <em>respiran</em></h3>
+        <p>Blobs de color morfeando, gradientes suaves moviéndose, texto mínimo encima. No explica nada — sugiere. Sirve para abrir/cerrar reels.</p>
+        <div class="pros">+ Premium e intemporal · + barato y rápido · − no informa, solo evoca</div>
+      </div>
+    </article>
+
+    <!-- 6: Paper Cutout -->
+    <article class="style-card">
+      <div class="style-num"><span><span class="n">№ 06</span> · Paper Cutout</span><span>Headway · Fable</span></div>
+      <div class="style-frame s6">
+        <div class="paper-shape ps1"></div>
+        <div class="paper-shape ps2"></div>
+        <div class="paper-shape ps4"></div>
+        <div class="paper-shape ps3"></div>
+        <div class="label">Each launch, a new <em class="it">edition</em>.</div>
+      </div>
+      <div class="style-cap">
+        <div class="ref">Best for: storytelling · feel-good · brand emotional</div>
+        <h3>Recortes <em>tactiles</em></h3>
+        <p>Formas de papel cortado superpuestas, pequeñas sombras duras, paleta cálida. Headway construyó toda su marca con esto. Va MUY bien con tu paleta editorial paper/ink.</p>
+        <div class="pros">+ Único en SaaS (nadie lo hace) · + matchea el branding editorial · − requiere art direction estricta</div>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<!-- ─── DECISION ─── -->
+<section class="decision">
+  <div class="decision-inner">
+    <div class="eyebrow">№ 05 — Lo que necesito de ti</div>
+    <h2 class="display">Dime <em>uno o dos</em> números y actualizo el código.</h2>
+    <p>Mi recomendación si quieres <em class="it">Reachy mismo</em> = № 04 (Editorial) + № 06 (Paper Cutout) como mezcla. Encaja con tu paleta paper/ink/sienna y nadie en SaaS está haciendo eso.</p>
+    <p style="margin-top:18px">Si quieres <em class="it">máximo alcance</em> en redes = № 01 (Flat 2D) + № 02 (Infographic). Es lo que mejor performa en TikTok/Reels orgánico para SaaS B2B.</p>
+
+    <div class="nums">
+      <div><div class="n">01</div><div class="lbl">Flat 2D</div></div>
+      <div><div class="n">02</div><div class="lbl">Infographic</div></div>
+      <div><div class="n">03</div><div class="lbl">Isometric</div></div>
+      <div><div class="n">04</div><div class="lbl">Editorial</div></div>
+      <div><div class="n">05</div><div class="lbl">Abstract</div></div>
+      <div><div class="n">06</div><div class="lbl">Paper Cutout</div></div>
+    </div>
+  </div>
+</section>
+
+<footer class="colophon">© Reachy 2026 · Reel style direction · Hecho con Inter, Fraunces, Instrument Serif</footer>
+</body>
+</html>
