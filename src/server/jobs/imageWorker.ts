@@ -67,6 +67,15 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         .set({ status: 'running', errorMessage: null, finishedAt: null })
         .where(eq(generation.id, generationId));
 
+      // Single audit-line per job: which model / provider / quality / n /
+      // layout actually got picked up. Helps diagnose dropdown bugs (e.g.
+      // "only gpt-image-2 is selectable") without needing to query the
+      // DB — tail the worker log and you can see exactly what each
+      // generation row was running with.
+      console.log(
+        `[reachy:image] gen ${generationId} provider=${provider} model=${model} quality=${quality ?? 'medium'} n=${n} layout=${layoutId ?? 'none'} variation=${sourceRawUrl ? 'yes' : 'no'}`,
+      );
+
       // Idempotency: wipe any rows from a prior failed attempt so we never
       // double-charge the archive when BullMQ retries this job.
       if (job.attemptsMade > 0) {

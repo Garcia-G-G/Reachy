@@ -285,6 +285,7 @@ export async function composeImage(args: ComposeImageArgs): Promise<Buffer> {
   const { background, width, height, layout, copy, colors } = args;
   const svg = await buildOverlaySvg(layout, copy, width, height, colors);
 
+  // Step 1 — Resize the raw AI background to the target frame.
   // failOn:'none' shrugs off harmless upstream metadata that would
   // otherwise reject the input (Apple ColorSync chunks etc); same
   // setting we use in imageGen's resize step.
@@ -293,15 +294,48 @@ export async function composeImage(args: ComposeImageArgs): Promise<Buffer> {
     .png({ compressionLevel: 6 })
     .toBuffer();
 
-  // sharp rasterizes the SVG using the @font-face data URLs embedded in
-  // it. The SVG already declares `width` and `height` in pixels matching
-  // the target, so we let sharp use the default 72 DPI density — anything
-  // higher up-samples the SVG past the background dimensions and trips
-  // libvips's "Image to composite must have same dimensions or smaller"
-  // guard (was: density:144 doubled the overlay to 2160px). Vector text
-  // stays crisp at 72 DPI because it's still rendered from the font
-  // outlines, not raster.
-  return sharp(resizedBackground)
+  // Step 2 — Editorial post-processing pass. AI image models return
+  // technically-correct but visually flat output: saturation slightly
+  // low, contrast soft, edges fuzzy where the model interpolates.
+  // A light editorial grade closes the "this looks AI" gap without
+  // crossing into Instagram-filter territory.
+  //
+  // Knobs (tuned 2026-05-14 against the editorial palette):
+  //   modulate.saturation 1.12  — bump 12% so the brand sienna doesn't
+  //                                read washed-out. Pushing past 1.20
+  //                                makes the ink hex bleed magenta.
+  //   modulate.brightness 1.02  — a barely-perceptible lift, mostly
+  //                                useful for slightly underexposed
+  //                                Sora-style outputs.
+  //   linear(1.05, -8)          — pixel ← 1.05·pixel - 8. Gentle S-curve
+  //                                equivalent that adds bite to mid-tones
+  //                                without crushing the shadows.
+  //   sharpen sigma 0.8 / m1 0.5 / m2 1.5
+  //                              — radius 0.8 picks up edge detail on
+  //                                gradients; m1 0.5 holds back over-
+  //                                sharpening flat areas; m2 1.5 lets
+  //                                actual edges crisp without halo. The
+  //                                AI noise becomes intentional grain
+  //                                instead of soft mush.
+  //
+  // If a brand reports the look feels off, drop saturation to 1.05–1.08
+  // OR sharpen sigma to 0.6. Don't disable entirely — the un-graded
+  // baseline is what users were complaining about.
+  const enhanced = await sharp(resizedBackground, { failOn: 'none' })
+    .modulate({ saturation: 1.12, brightness: 1.02 })
+    .linear(1.05, -8)
+    .sharpen({ sigma: 0.8, m1: 0.5, m2: 1.5 })
+    .png({ compressionLevel: 6 })
+    .toBuffer();
+
+  // Step 3 — Composite the deterministic SVG overlay on top of the
+  // graded background. The SVG rasterizes from the @font-face data URLs
+  // embedded in it; at 72 DPI it matches the background pixel-for-pixel
+  // (density:144 would double the overlay and trip libvips's same-or-
+  // smaller guard — bug from 2026-05-14, do not re-introduce). Vector
+  // text stays crisp because sharp renders from font outlines, not
+  // raster.
+  return sharp(enhanced)
     .composite([
       {
         input: Buffer.from(svg),
