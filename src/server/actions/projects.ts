@@ -1,9 +1,10 @@
 'use server';
 
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { db } from '@/server/db/client';
+import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
 import { getSession } from '@/server/getSession';
 
@@ -144,6 +145,59 @@ export async function listProjectsForCurrentUser(): Promise<Project[]> {
     .from(project)
     .where(and(eq(project.userId, session.user.id), isNull(project.archivedAt)))
     .orderBy(asc(project.createdAt));
+}
+
+export interface ProjectOverviewStats {
+  /** Count of generations in 'done' status for this project (all-time). */
+  piecesDone: number;
+  /** Count of generations currently queued or running. */
+  inFlight: number;
+  /** Sum of cost_cents for generations finished this calendar month. */
+  monthSpendCents: number;
+}
+
+/**
+ * Overview-page stats for a single project. The page was rendering hardcoded
+ * zeros until this landed — see DIAGNOSTIC + dashboard screenshot from
+ * 2026-05-14. Returns null when the project isn't owned by the current user
+ * (caller can then 404).
+ */
+export async function getProjectOverviewStats(
+  projectId: string,
+): Promise<ProjectOverviewStats | null> {
+  const session = await getSession();
+  if (!session) return null;
+
+  // Confirm ownership before counting — otherwise a crafted projectId from
+  // another user would leak counts.
+  const [owned] = await db
+    .select({ id: project.id })
+    .from(project)
+    .where(and(eq(project.id, projectId), eq(project.userId, session.user.id)))
+    .limit(1);
+  if (!owned) return null;
+
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+
+  // One aggregate query with filtered counts/sum so the page renders in
+  // one round-trip. Drizzle's sql helper lets us inline FILTER (WHERE …).
+  const [row] = await db
+    .select({
+      piecesDone: sql<number>`COUNT(*) FILTER (WHERE ${generation.status} = 'done')`,
+      inFlight: sql<number>`COUNT(*) FILTER (WHERE ${generation.status} IN ('queued', 'running'))`,
+      monthSpendCents: sql<number>`COALESCE(SUM(${generation.costCents}) FILTER (WHERE ${generation.status} = 'done' AND ${generation.finishedAt} >= ${monthStart}), 0)`,
+    })
+    .from(generation)
+    .where(eq(generation.projectId, projectId));
+
+  // Postgres COUNT/SUM come back as strings via the pg driver; coerce.
+  return {
+    piecesDone: Number(row?.piecesDone ?? 0),
+    inFlight: Number(row?.inFlight ?? 0),
+    monthSpendCents: Number(row?.monthSpendCents ?? 0),
+  };
 }
 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {

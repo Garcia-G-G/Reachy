@@ -19,12 +19,19 @@ import {
   submitSora,
 } from '@/server/ai/openaiVideo';
 import { resolveVisualStyle } from '@/server/ai/visualStyles';
+import { isElevenLabsConfigured, synthesizeElevenLabs } from '@/server/audio/elevenlabs';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
 import { putR2 } from '@/server/storage/r2';
-import { composeReel } from '@/server/video/compose';
+import {
+  buildOneShotAudioTrack,
+  composeOneShot,
+  composeReel,
+  type OneShotBeat,
+} from '@/server/video/compose';
 import { ensureFfmpeg } from '@/server/video/ensureFfmpeg';
+import { ffprobe } from '@/server/video/ffprobe';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 import type { VideoGenJobData } from './videoQueue';
 
@@ -97,7 +104,25 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
         const out =
           engine === 'ffmpeg'
             ? await runFfmpeg(job.data, progressCb)
-            : await runSora(job.data, progressCb);
+            : await runSoraOneShot(job.data, progressCb);
+
+        // Truth: ffprobe the final MP4 and use its container duration for
+        // asset.duration_sec. The previous worker wrote the plan total
+        // (sum of scene.durationSec) which silently hid the 7s truncation
+        // across three reels (see planning/DIAGNOSTIC-LAST-REEL.md).
+        const probed = await ffprobe(out.outputPath);
+        const expected = out.expectedDurationSec;
+        const truncationRatio = expected > 0 ? probed.durationSec / expected : 1;
+        if (truncationRatio < 0.95) {
+          throw new Error(
+            `compose-truncated: expected ${expected.toFixed(2)}s got ${probed.durationSec.toFixed(2)}s ` +
+              `(${(truncationRatio * 100).toFixed(0)}% of plan; ` +
+              `ffprobe ${probed.videoCodec} ${probed.width}x${probed.height} @ ${probed.fps}fps)`,
+          );
+        }
+        console.log(
+          `[reachy:video] gen ${generationId} ffprobe: ${probed.durationSec.toFixed(2)}s ${probed.videoCodec} ${probed.width}x${probed.height} @ ${probed.fps}fps (expected ${expected.toFixed(2)}s)`,
+        );
 
         const key = `${projectId}/reels/${generationId}.mp4`;
         const upload = await putR2(key, out.buffer, 'video/mp4');
@@ -107,9 +132,11 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
           projectId,
           kind: 'video',
           format: plan.template,
-          width: REEL_DIMENSIONS.width,
-          height: REEL_DIMENSIONS.height,
-          durationSec: out.durationSec,
+          width: probed.width || REEL_DIMENSIONS.width,
+          height: probed.height || REEL_DIMENSIONS.height,
+          // Real probed duration — never the plan total. The asset row is the
+          // single source of truth for what the user can actually watch.
+          durationSec: Math.round(probed.durationSec),
           storageKey: upload.key,
           publicUrl: upload.publicUrl,
           bytes: upload.bytes,
@@ -189,12 +216,18 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
 interface EngineResult {
   buffer: Buffer;
   bytes: number;
-  durationSec: number;
+  /** Local path of the final composed MP4 — the worker ffprobes this for the
+   *  asset row's real duration (not the plan total — see DIAGNOSTIC). */
+  outputPath: string;
+  /** Total intended duration from the plan/engine. Used by the truncation
+   *  guard: if ffprobe(outputPath) < 0.95 × expectedDurationSec the worker
+   *  fails the generation with `compose-truncated` instead of writing a lie. */
+  expectedDurationSec: number;
   costCents: number;
   /** Per-component cost breakdown — same shape returned by estimateReelCost
    *  so the client and server agree on TTS / video-gen / image-gen / compose
    *  attribution. Persisted into generation.params.costBreakdown so the UI
-   *  can show "Cost: $6.05 (Sora $6.00 · TTS $0.04 · compose $0.01)". */
+   *  can show "Cost: $3.70 (Sora $3.60 · TTS $0.09 · compose $0.01)". */
   costBreakdown: ReelCostBreakdown;
 }
 
@@ -297,11 +330,13 @@ async function runFfmpeg(
 
     const buffer = await readFile(outputPath);
     const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
+    const expectedDur = totalDur - (data.plan.scenes.length - 1) * 0.4;
     const costCents = 1 + autoImageCostCents + tts.ttsCostCents;
     return {
       buffer,
       bytes: buffer.length,
-      durationSec: totalDur,
+      outputPath,
+      expectedDurationSec: expectedDur,
       costCents,
       costBreakdown: {
         cents: costCents,
@@ -326,21 +361,33 @@ async function renderSceneTts(
   data: VideoGenJobData,
   tmp: string,
 ): Promise<{ sceneAudios: Array<string | null> | undefined; ttsCostCents: number }> {
-  // gpt-4o-mini-tts (March 2025). `sage` is the editorial-warm voice that
-  // handles Spanish phonemes natively; pace steered via `instructions`.
   const isEs = data.plan.language === 'es';
+  const useEleven = isElevenLabsConfigured();
+  if (!useEleven) {
+    console.warn(
+      `[reachy:video] gen ${data.generationId} ElevenLabs not configured — falling back to gpt-4o-mini-tts. Set ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID_${isEs ? 'ES' : 'EN'} in .env.local for editorial-quality narration.`,
+    );
+  }
+  // OpenAI fallback knobs — only consulted when ElevenLabs is missing.
   const ttsVoice = 'sage' as const;
   const ttsInstructions = isEs
     ? 'Voz de narrador editorial cálido y natural. Ritmo conversacional, NO lento, con pausas naturales solo entre frases. Tono profesional pero cercano. Acentúa correctamente el español.'
     : 'Warm editorial narrator. Natural conversational pace, NOT slow, with subtle pauses between sentences. Professional but friendly tone.';
   try {
-    const openai = getOpenAI();
     const ttsStart = Date.now();
     let ttsCostCents = 0;
     const sceneAudios = await Promise.all(
       data.plan.scenes.map(async (scene, i) => {
         const text = scene.text?.trim();
         if (!text) return null;
+        const path = join(tmp, `scene-tts-${i}.mp3`);
+        if (useEleven) {
+          const synth = await synthesizeElevenLabs({ text, language: isEs ? 'es' : 'en' });
+          await writeFile(path, synth.buffer);
+          ttsCostCents += synth.costCents;
+          return path;
+        }
+        const openai = getOpenAI();
         const speech = await openai.audio.speech.create({
           model: 'gpt-4o-mini-tts',
           voice: ttsVoice,
@@ -349,7 +396,6 @@ async function renderSceneTts(
           response_format: 'mp3',
         });
         const buf = Buffer.from(await speech.arrayBuffer());
-        const path = join(tmp, `scene-tts-${i}.mp3`);
         await writeFile(path, buf);
         // ~$0.015/min audio; per-scene cost rounds to <1¢ but we keep the
         // 1¢ floor for ledger consistency.
@@ -357,8 +403,9 @@ async function renderSceneTts(
         return path;
       }),
     );
+    const provider = useEleven ? 'elevenlabs' : 'gpt-4o-mini-tts';
     console.log(
-      `[reachy:video] gen ${data.generationId} TTS x${sceneAudios.filter(Boolean).length} ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${ttsCostCents}¢, voice=${ttsVoice}, lang=${isEs ? 'es' : 'en'})`,
+      `[reachy:video] gen ${data.generationId} TTS x${sceneAudios.filter(Boolean).length} ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${ttsCostCents}¢, provider=${provider}, lang=${isEs ? 'es' : 'en'})`,
     );
     return { sceneAudios, ttsCostCents };
   } catch (err) {
@@ -385,7 +432,15 @@ async function renderSceneTts(
  * initial submit batch so a BullMQ retry resumes polling existing jobs
  * instead of paying for fresh ones (a 4-scene Sora Pro reel is $9.60;
  * resubmits would double-bill).
+ *
+ * DEPRECATED PATH: kept as a fallback only. The dispatch in startVideoWorker
+ * routes sora-* engines through runSoraOneShot, which sidesteps the
+ * snapSoraDuration → -t/xfade mismatch that truncated three reels to 7s
+ * (see planning/DIAGNOSTIC-LAST-REEL.md). Do NOT rewire this without
+ * also fixing compose.ts to ffprobe each clip and derive fade/xfade
+ * timings from the actual durations.
  */
+// biome-ignore lint/correctness/noUnusedVariables: kept as documented fallback for the multi-scene Sora path
 async function runSora(
   data: VideoGenJobData,
   onProgress?: (pct: number) => void,
@@ -557,10 +612,182 @@ async function runSora(
     }
 
     const costCents = 1 + videoCostCents + tts.ttsCostCents;
+    const expectedDur = totalDur - (data.plan.scenes.length - 1) * 0.4;
     return {
       buffer,
       bytes: buffer.length,
-      durationSec: totalDur,
+      outputPath,
+      expectedDurationSec: expectedDur,
+      costCents,
+      costBreakdown: {
+        cents: costCents,
+        parts: { tts: tts.ttsCostCents, video: videoCostCents, compose: 1 },
+      },
+    };
+  } finally {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Sora 2 one-shot: a SINGLE 12s Sora call instead of N parallel per-scene
+ * calls. Eliminates the per-scene-duration math that produced the 7s
+ * truncation across three reels (see planning/DIAGNOSTIC-LAST-REEL.md).
+ *
+ * Architecture:
+ *   1. Build a master prompt = visualStyle.promptMotion + a beat sheet
+ *      derived from the plan's per-scene `text` (4 lines mapped to
+ *      0-3s / 3-6s / 6-9s / 9-12s windows).
+ *   2. Submit ONE Sora job at 12s. Persist its id for BullMQ resume.
+ *   3. Poll until done; download once.
+ *   4. Render TTS narration the same way runFfmpeg/runSora do.
+ *   5. composeOneShot the 12s clip with beat-timed drawtext overlays +
+ *      a concatenated audio track padded to the beat windows.
+ *
+ * Cost: Sora 2 Pro 720p × 12s × $0.30 = $3.60 + TTS + 1¢ compose.
+ *
+ * The user-edited per-scene imagePrompt fields are intentionally NOT used —
+ * Sora gets one master prompt for the whole reel. The PlanEditor's
+ * per-scene imagePrompt inputs are decorative when engine is sora-*.
+ */
+const SORA_ONE_SHOT_DURATION_SEC = 12;
+
+async function runSoraOneShot(
+  data: VideoGenJobData,
+  onProgress?: (pct: number) => void,
+): Promise<EngineResult> {
+  const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-oneshot-'));
+  try {
+    const soraModel: SoraModel = data.engine === 'sora-pro-720p' ? 'sora-2-pro' : 'sora-2';
+    const style = resolveVisualStyle(data.visualStyle);
+
+    // Map the plan's scene texts to evenly-spaced beat windows over the
+    // 12s clip. The visualStyle motion + this beat sheet are the master
+    // Sora prompt. Brand-bg scenes still get a beat window but no special
+    // visual treatment (the user can still pick a closing tagline scene).
+    const sceneTexts = data.plan.scenes.map((s) => s.text?.trim()).filter((t) => t && t.length > 0);
+    const beatCount = Math.max(1, sceneTexts.length);
+    const beatDur = SORA_ONE_SHOT_DURATION_SEC / beatCount;
+    const beatSheet = sceneTexts
+      .map((text, i) => `[${(i * beatDur).toFixed(1)}-${((i + 1) * beatDur).toFixed(1)}s] ${text}`)
+      .join(' ');
+    const masterPrompt = [
+      style.promptMotion,
+      '',
+      `Beat sheet (12s total, ${beatCount} beats of ${beatDur.toFixed(1)}s each): ${beatSheet}`,
+      '',
+      'Sustain the locked visual style across all beats. The motion is continuous, with subtle pacing shifts as each beat lands. No cuts, no transitions, no camera moves — just the elements evolving in place over 12 seconds. CRITICAL: NO text, NO letters, NO words, NO numbers visible in the rendered video. NO real people, NO faces. The beat sheet is for pacing the visual rhythm only; the overlay text is added separately by our renderer.',
+    ].join(' ');
+
+    // Step 1+2: submit or resume.
+    let storedJobs = await getStoredSoraJobs(data.generationId);
+    if (storedJobs && storedJobs.length !== 1) storedJobs = null;
+    let job: ScheduledSoraJob | null = storedJobs?.[0] ?? null;
+
+    if (!job) {
+      const submitted = await submitSora({
+        model: soraModel,
+        prompt: masterPrompt,
+        aspectRatio: '9:16',
+        durationSec: SORA_ONE_SHOT_DURATION_SEC,
+      });
+      job = { ...submitted, retries: 0 };
+      await persistSoraJobs(data.generationId, [job]);
+      console.log(
+        `[reachy:video] gen ${data.generationId} one-shot submitted to ${soraModel} (${SORA_ONE_SHOT_DURATION_SEC}s, jobId=${submitted.jobId})`,
+      );
+    } else {
+      console.log(
+        `[reachy:video] gen ${data.generationId} resuming one-shot job from storage (jobId=${job.jobId}, retries=${job.retries})`,
+      );
+    }
+
+    // Step 3: poll until done.
+    const videoPath = join(tmp, 'sora-oneshot.mp4');
+    const startedAt = Date.now();
+    let lastProgress = 0;
+    while (true) {
+      if (Date.now() - startedAt > SORA_POLL_TIMEOUT_MS) {
+        throw new Error(`Sora one-shot polling timed out after ${SORA_POLL_TIMEOUT_MS / 1000}s`);
+      }
+      await new Promise((r) => setTimeout(r, SORA_POLL_INTERVAL_MS));
+      const status = await pollSora(job);
+      if (status.state === 'failed') {
+        const errMsg = status.errorMessage ?? 'unknown';
+        const isModerationBlock = MODERATION_BLOCK.test(errMsg);
+        if (isModerationBlock && job.retries < 1) {
+          // Same safe-prompt retry as the multi-scene path.
+          const safePrompt = buildSafeSoraPrompt(data.visualStyle);
+          console.warn(
+            `[reachy:video] gen ${data.generationId} one-shot blocked by Sora moderation — retrying with safe prompt`,
+          );
+          const replacement = await submitSora({
+            model: soraModel,
+            prompt: safePrompt,
+            aspectRatio: '9:16',
+            durationSec: SORA_ONE_SHOT_DURATION_SEC,
+          });
+          job = { ...replacement, retries: job.retries + 1 };
+          await persistSoraJobs(data.generationId, [job]);
+          console.log(
+            `[reachy:video] gen ${data.generationId} one-shot resubmitted (jobId=${replacement.jobId})`,
+          );
+          continue;
+        }
+        throw new Error(`Sora one-shot failed: ${errMsg}`);
+      }
+      if (status.state === 'done') {
+        const dl = await downloadSora(job.jobId);
+        await writeFile(videoPath, dl.buffer);
+        console.log(
+          `[reachy:video] gen ${data.generationId} one-shot downloaded (${dl.bytes} bytes)`,
+        );
+        break;
+      }
+      lastProgress = status.progress ?? lastProgress;
+      onProgress?.(Math.min(0.85, (lastProgress / 100) * 0.85));
+    }
+
+    // Step 4: TTS — same path as the FFmpeg engine.
+    const tts = await renderSceneTts(data, tmp);
+    // Concatenate per-scene TTS mp3s into one audio file aligned to the
+    // beat windows. apad each to its beat duration before concat so the
+    // overlay text + voice stay in sync.
+    let audioPath: string | undefined;
+    if (tts.sceneAudios) {
+      audioPath = await buildOneShotAudioTrack({
+        tmpDir: tmp,
+        sceneAudios: tts.sceneAudios,
+        totalDurationSec: SORA_ONE_SHOT_DURATION_SEC,
+      });
+    }
+
+    // Step 5: compose. One video input + N beat-timed overlays.
+    const beats: OneShotBeat[] = data.plan.scenes.map((scene, i) => ({
+      text: scene.text ?? '',
+      startSec: i * beatDur,
+      endSec: (i + 1) * beatDur,
+      position: scene.textPosition,
+    }));
+
+    const outputPath = join(tmp, 'out.mp4');
+    await composeOneShot({
+      videoPath,
+      beats,
+      audioPath,
+      durationSec: SORA_ONE_SHOT_DURATION_SEC,
+      outputPath,
+      onProgress: (pct) => onProgress?.(0.85 + pct * 0.15),
+    });
+
+    const buffer = await readFile(outputPath);
+    const videoCostCents = soraCostCents(soraModel, SORA_ONE_SHOT_DURATION_SEC);
+    const costCents = 1 + videoCostCents + tts.ttsCostCents;
+    return {
+      buffer,
+      bytes: buffer.length,
+      outputPath,
+      expectedDurationSec: SORA_ONE_SHOT_DURATION_SEC,
       costCents,
       costBreakdown: {
         cents: costCents,

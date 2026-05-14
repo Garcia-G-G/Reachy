@@ -25,6 +25,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1044.0",
     "@base-ui/react": "^1.4.1",
     "@better-auth/drizzle-adapter": "^1.6.9",
+    "@elevenlabs/elevenlabs-js": "^2.47.0",
     "@fal-ai/client": "^1.10.1",
     "@types/fluent-ffmpeg": "^2.1.28",
     "better-auth": "^1.6.9",

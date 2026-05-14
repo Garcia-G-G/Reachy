@@ -598,3 +598,213 @@ async function resolveDrawtextFont(): Promise<string> {
     'No drawtext-compatible font found. Install fontconfig or ship a TTF in public/fonts/.',
   );
 }
+
+export interface BuildOneShotAudioArgs {
+  /** Worker's per-job tmp dir; the output mp3 lives inside it. */
+  tmpDir: string;
+  /** Per-scene narration paths, in scene order. nulls become silence. */
+  sceneAudios: Array<string | null>;
+  /** Total reel duration the audio must cover (the Sora clip's `-t`). */
+  totalDurationSec: number;
+}
+
+/**
+ * Concatenate per-scene TTS mp3s into one audio file aligned to even beat
+ * windows over the reel's total duration. Each clip is padded with trailing
+ * silence to its beat duration, then concatenated, so the narrator's start
+ * lines up with each overlay's start. Returns undefined if every scene was
+ * silent (caller drops audio entirely).
+ */
+export async function buildOneShotAudioTrack(
+  args: BuildOneShotAudioArgs,
+): Promise<string | undefined> {
+  const { tmpDir, sceneAudios, totalDurationSec } = args;
+  if (!sceneAudios.some((p) => p)) return undefined;
+  const beatDur = totalDurationSec / Math.max(1, sceneAudios.length);
+  const outputPath = join(tmpDir, 'oneshot-audio.mp3');
+
+  return await new Promise<string>((resolve, reject) => {
+    const cmd = ffmpeg();
+    for (const p of sceneAudios) {
+      if (p) cmd.input(p);
+    }
+    const filters: string[] = [];
+    const segLabels: string[] = [];
+    let inIdx = 0;
+    for (let i = 0; i < sceneAudios.length; i++) {
+      const seg = `seg${i}`;
+      if (sceneAudios[i]) {
+        filters.push(
+          `[${inIdx}:a]apad=whole_dur=${beatDur},atrim=0:${beatDur},asetpts=PTS-STARTPTS[${seg}]`,
+        );
+        inIdx++;
+      } else {
+        filters.push(
+          `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=0:${beatDur},asetpts=PTS-STARTPTS[${seg}]`,
+        );
+      }
+      segLabels.push(`[${seg}]`);
+    }
+    filters.push(`${segLabels.join('')}concat=n=${sceneAudios.length}:v=0:a=1[aout]`);
+
+    cmd
+      .complexFilter(filters, ['aout'])
+      .outputOptions(['-c:a', 'libmp3lame', '-b:a', '128k'])
+      .output(outputPath)
+      .on('end', () => resolve(outputPath))
+      .on('error', (err) => reject(err))
+      .run();
+  });
+}
+
+export interface OneShotBeat {
+  /** Plain text overlay for this beat (word-by-word reveal still applies). */
+  text: string;
+  /** Scene-relative second at which this beat becomes visible. */
+  startSec: number;
+  /** Scene-relative second at which this beat stops being visible. */
+  endSec: number;
+  /** Where the caption sits within the frame. */
+  position: 'top' | 'bottom' | 'center';
+}
+
+export interface ComposeOneShotArgs {
+  /** Single Sora 2 MP4 — the entire reel's visual. */
+  videoPath: string;
+  /** Captions to overlay, each enabled for a window of the clip. */
+  beats: OneShotBeat[];
+  /** Optional audio track to mix in — typically a concatenated TTS MP3 chain. */
+  audioPath?: string;
+  /** Output duration (we trim with -t to lock this even if the source is longer). */
+  durationSec: number;
+  outputPath: string;
+  onProgress?: (pct: number) => void;
+}
+
+/**
+ * One-shot compose: ONE Sora video + N timed caption overlays + one mixed
+ * audio track. Strictly simpler than the multi-scene `composeReel` — no
+ * xfade, no per-scene zoompan, no concat. The Sora 2 clip carries all the
+ * motion; FFmpeg only layers captions and audio.
+ *
+ * Each beat reveals its text word-by-word inside a fixed safe-zone drawbox,
+ * the same way composeReel does per scene. The beat windows are simply
+ * `enable='between(t, startSec, endSec)'` ranges on the same input stream.
+ */
+export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ outputPath: string }> {
+  const fontFile = await resolveDrawtextFont();
+  const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-oneshot-'));
+
+  // Pre-wrap + word-snapshot each beat. Snapshots scoped to the beat's
+  // own duration so the within-beat word reveal pacing feels right
+  // regardless of how long the beat is.
+  const beatSnapshots = await Promise.all(
+    args.beats.map(async (beat, i) => {
+      const beatDur = Math.max(0.5, beat.endSec - beat.startSec);
+      const plan = planSceneCaption(beat.text, beatDur, beat.position);
+      if (plan.length === 0) return null;
+      return await Promise.all(
+        plan.map(async (snap, k) => {
+          const path = join(tmp, `oneshot-beat-${i}-w${k}.txt`);
+          await writeFile(path, snap.wrapped, 'utf8');
+          return {
+            path,
+            // Snapshot start/end are scene-relative; project to reel-relative.
+            startSec: beat.startSec + snap.startSec,
+            endSec: beat.startSec + snap.endSec,
+          };
+        }),
+      );
+    }),
+  );
+
+  try {
+    return await new Promise<{ outputPath: string }>((resolve, reject) => {
+      const cmd = ffmpeg();
+      cmd.input(args.videoPath).inputOptions(['-t', String(args.durationSec)]);
+      if (args.audioPath) {
+        cmd.input(args.audioPath);
+      }
+
+      const filters: string[] = [];
+      // [0:v] gets normalized to 1080x1920 yuv420p at 30fps. Sora delivers
+      // 720x1280 so the upscale is integer-clean (1.5x).
+      const baseChain = [
+        `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase`,
+        `crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}`,
+        `fps=${REEL_DIMENSIONS.fps}`,
+        `format=yuv420p`,
+      ].join(',');
+
+      // Build the caption layers. One drawbox per beat (safe-zone rectangle
+      // sized for that beat's text position, enabled for the beat window),
+      // then N drawtext filters per beat snapshot for the word-by-word reveal.
+      const overlayParts: string[] = [];
+      args.beats.forEach((beat, i) => {
+        const snaps = beatSnapshots[i];
+        if (!snaps || snaps.length === 0) return;
+        const overlayY = drawtextY(beat.position);
+        const fontSize = overlayFontSize(beat.position);
+        const beatStart = beat.startSec.toFixed(3);
+        const beatEnd = beat.endSec.toFixed(3);
+        overlayParts.push(
+          `drawbox=${captionBoxRect(beat.position)}:color=0x00000088:t=fill:enable='between(t,${beatStart},${beatEnd})'`,
+        );
+        for (const snap of snaps) {
+          const enable = `:enable='between(t,${snap.startSec.toFixed(3)},${snap.endSec.toFixed(3)})'`;
+          overlayParts.push(
+            `drawtext=fontfile='${fontFile}':textfile='${snap.path}':expansion=none:fontsize=${fontSize}:fontcolor=white:x=(w-tw)/2:y=${overlayY}:line_spacing=10${enable}`,
+          );
+        }
+      });
+
+      const videoChain = overlayParts.length
+        ? `[0:v]${baseChain},${overlayParts.join(',')}[vfinal]`
+        : `[0:v]${baseChain}[vfinal]`;
+      filters.push(videoChain);
+
+      const audioOpts = args.audioPath
+        ? ['-map', '[vfinal]', '-map', '1:a', '-c:a', 'aac', '-b:a', '128k', '-shortest']
+        : ['-map', '[vfinal]', '-an'];
+
+      cmd
+        .complexFilter(filters, ['vfinal'])
+        .outputOptions([
+          '-c:v',
+          'libx264',
+          '-preset',
+          'medium',
+          '-crf',
+          '22',
+          '-pix_fmt',
+          'yuv420p',
+          '-r',
+          String(REEL_DIMENSIONS.fps),
+          '-movflags',
+          '+faststart',
+          '-t',
+          String(args.durationSec),
+          ...audioOpts,
+        ])
+        .output(args.outputPath)
+        .on('start', (cmdline) => {
+          console.log(`[reachy:video] ffmpeg cmd (oneshot):\n${cmdline}`);
+        })
+        .on('progress', (info) => {
+          if (args.onProgress && typeof info.percent === 'number') {
+            args.onProgress(Math.min(1, Math.max(0, info.percent / 100)));
+          }
+        })
+        .on('end', () => resolve({ outputPath: args.outputPath }))
+        .on('error', (err, _stdout, stderr) => {
+          const tail = (stderr ?? '').split('\n').slice(-40).join('\n');
+          reject(
+            new Error(`${err.message}${tail ? `\n--- ffmpeg stderr (tail) ---\n${tail}` : ''}`),
+          );
+        })
+        .run();
+    });
+  } finally {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}

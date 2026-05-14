@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { getProjectBySlug } from '@/server/actions/projects';
+import { getProjectBySlug, getProjectOverviewStats } from '@/server/actions/projects';
 
 interface OverviewPageProps {
   params: Promise<{ slug: string }>;
@@ -11,11 +11,33 @@ export default async function OverviewPage({ params }: OverviewPageProps) {
   const project = await getProjectBySlug(slug);
   if (!project) notFound();
 
-  return <OverviewContent description={project.description ?? null} />;
+  // Pre-2026-05-14 this page rendered hardcoded zeros — the bug Garcia spotted
+  // on the dashboard. Now we actually count.
+  const stats = await getProjectOverviewStats(project.id);
+
+  return (
+    <OverviewContent
+      description={project.description ?? null}
+      piecesDone={stats?.piecesDone ?? 0}
+      inFlight={stats?.inFlight ?? 0}
+      monthSpendCents={stats?.monthSpendCents ?? 0}
+    />
+  );
 }
 
-function OverviewContent({ description }: { description: string | null }) {
+function OverviewContent({
+  description,
+  piecesDone,
+  inFlight,
+  monthSpendCents,
+}: {
+  description: string | null;
+  piecesDone: number;
+  inFlight: number;
+  monthSpendCents: number;
+}) {
   const t = useTranslations('Projects');
+  const spendDollars = (monthSpendCents / 100).toFixed(2);
 
   return (
     <div className="space-y-12">
@@ -34,9 +56,9 @@ function OverviewContent({ description }: { description: string | null }) {
       )}
 
       <dl className="grid grid-cols-1 gap-12 md:grid-cols-3">
-        <Stat label={t('overviewPieces')} value="0" />
-        <Stat label={t('overviewQueued')} value="0" />
-        <Stat label={t('overviewSpend')} value="$0.00" />
+        <Stat label={t('overviewPieces')} value={String(piecesDone)} />
+        <Stat label={t('overviewQueued')} value={String(inFlight)} />
+        <Stat label={t('overviewSpend')} value={`$${spendDollars}`} />
       </dl>
     </div>
   );
