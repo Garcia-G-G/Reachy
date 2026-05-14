@@ -14,12 +14,15 @@ import {
   pollSora,
   type SoraJob,
   type SoraModel,
+  type SoraSize,
   snapSoraDuration,
   soraCostCents,
   submitSora,
 } from '@/server/ai/openaiVideo';
 import { resolveVisualStyle } from '@/server/ai/visualStyles';
 import { isElevenLabsConfigured, synthesizeElevenLabs } from '@/server/audio/elevenlabs';
+import { generateMusic } from '@/server/audio/elevenlabsMusic';
+import { generateSfx } from '@/server/audio/elevenlabsSfx';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
@@ -398,7 +401,11 @@ async function renderSceneTts(
     let ttsCostCents = 0;
     const sceneAudios = await Promise.all(
       data.plan.scenes.map(async (scene, i) => {
-        const text = scene.text?.trim();
+        // narration (full sentence) is the canonical TTS source; fall back
+        // to text (overlay headline) only when narration is missing — that
+        // preserves the legacy single-field plan shape so old scenes still
+        // render audio. The on-screen drawtext keeps using `text`.
+        const text = (scene.narration?.trim() || scene.text?.trim()) ?? '';
         if (!text) return null;
         const path = join(tmp, `scene-tts-${i}.mp3`);
         if (useEleven) {
@@ -683,7 +690,13 @@ async function runSoraOneShot(
     `[reachy:debug-trace] runSoraOneShot enter generationId=${data.generationId} engine=${data.engine} tmp=${tmp}`,
   );
   try {
-    const soraModel: SoraModel = data.engine === 'sora-pro-720p' ? 'sora-2-pro' : 'sora-2';
+    // Engine → (Sora model, output size, cost-tier key). Pro 1024p is the
+    // premium tier ($0.50/s) for flagship demos; Pro 720p is the cheaper
+    // default ($0.30/s); base is 720p only ($0.10/s).
+    const soraModel: SoraModel =
+      data.engine === 'sora-pro-1024p' || data.engine === 'sora-pro-720p' ? 'sora-2-pro' : 'sora-2';
+    const soraSize: SoraSize = data.engine === 'sora-pro-1024p' ? '1024x1792' : '720x1280';
+    const costRes: '720' | '1024' = data.engine === 'sora-pro-1024p' ? '1024' : '720';
     const style = resolveVisualStyle(data.visualStyle);
 
     // Map the plan's scene texts to evenly-spaced beat windows over the
@@ -715,6 +728,7 @@ async function runSoraOneShot(
         prompt: masterPrompt,
         aspectRatio: '9:16',
         durationSec: SORA_ONE_SHOT_DURATION_SEC,
+        size: soraSize,
       });
       job = { ...submitted, retries: 0 };
       await persistSoraJobs(data.generationId, [job]);
@@ -751,6 +765,7 @@ async function runSoraOneShot(
             prompt: safePrompt,
             aspectRatio: '9:16',
             durationSec: SORA_ONE_SHOT_DURATION_SEC,
+            size: soraSize,
           });
           job = { ...replacement, retries: job.retries + 1 };
           await persistSoraJobs(data.generationId, [job]);
@@ -776,8 +791,34 @@ async function runSoraOneShot(
       onProgress?.(Math.min(0.85, (lastProgress / 100) * 0.85));
     }
 
-    // Step 4: TTS — same path as the FFmpeg engine.
-    const tts = await renderSceneTts(data, tmp);
+    // Step 4: TTS narration + ElevenLabs music + ElevenLabs SFX in PARALLEL.
+    // All three hit the same provider over independent endpoints; running
+    // them in parallel saves ~5-10s wall-clock per reel vs sequential.
+    // Each is best-effort — a music failure shouldn't kill the reel; the
+    // music path is just omitted from the compose mix.
+    const useElevenAudio = isElevenLabsConfigured();
+    const [tts, music, sfxHits] = await Promise.all([
+      renderSceneTts(data, tmp),
+      useElevenAudio
+        ? generateMusic({
+            visualStyle: data.visualStyle ?? 'editorial',
+            durationSec: SORA_ONE_SHOT_DURATION_SEC,
+          }).catch((err) => {
+            console.warn(
+              `[reachy:music] gen ${data.generationId} music failed — continuing without music: ${(err as Error).message}`,
+            );
+            return null;
+          })
+        : Promise.resolve(null),
+      useElevenAudio
+        ? generateSfxBundleForReel(SORA_ONE_SHOT_DURATION_SEC).catch((err) => {
+            console.warn(
+              `[reachy:sfx] gen ${data.generationId} sfx failed — continuing without sfx: ${(err as Error).message}`,
+            );
+            return [] as Array<{ path: string; startSec: number; costCents: number }>;
+          })
+        : Promise.resolve([] as Array<{ path: string; startSec: number; costCents: number }>),
+    ]);
     // Concatenate per-scene TTS mp3s into one audio file aligned to the
     // beat windows. apad each to its beat duration before concat so the
     // overlay text + voice stay in sync.
@@ -790,7 +831,23 @@ async function runSoraOneShot(
       });
     }
 
-    // Step 5: compose. One video input + N beat-timed overlays.
+    // Music: write returned bytes to disk so composeOneShot can read it
+    // as an FFmpeg input (we already have the file path for SFX via the
+    // disk cache; music is generated fresh each reel so we write it here).
+    let musicPath: string | undefined;
+    let musicCostCents = 0;
+    if (music) {
+      musicPath = join(tmp, 'music.mp3');
+      await writeFile(musicPath, music.buffer);
+      musicCostCents = music.costCents;
+      console.log(
+        `[reachy:music] gen ${data.generationId} music written path=${musicPath} bytes=${music.bytes}`,
+      );
+    }
+
+    const sfxCostCents = sfxHits.reduce((sum, hit) => sum + hit.costCents, 0);
+
+    // Step 5: compose. One video input + N beat-timed overlays + audio mix.
     const beats: OneShotBeat[] = data.plan.scenes.map((scene, i) => ({
       text: scene.text ?? '',
       startSec: i * beatDur,
@@ -800,13 +857,15 @@ async function runSoraOneShot(
 
     const outputPath = join(tmp, 'out.mp4');
     console.log(
-      `[reachy:debug-trace] runSoraOneShot -> composeOneShot beats=${beats.length} hasAudio=${Boolean(audioPath)} duration=${SORA_ONE_SHOT_DURATION_SEC}s outputPath=${outputPath}`,
+      `[reachy:debug-trace] runSoraOneShot -> composeOneShot beats=${beats.length} hasAudio=${Boolean(audioPath)} hasMusic=${Boolean(musicPath)} sfxHits=${sfxHits.length} duration=${SORA_ONE_SHOT_DURATION_SEC}s outputPath=${outputPath}`,
     );
     const composeStart = Date.now();
     await composeOneShot({
       videoPath,
       beats,
       audioPath,
+      musicPath,
+      sfxHits: sfxHits.map((h) => ({ path: h.path, startSec: h.startSec })),
       durationSec: SORA_ONE_SHOT_DURATION_SEC,
       outputPath,
       onProgress: (pct) => onProgress?.(0.85 + pct * 0.15),
@@ -824,8 +883,8 @@ async function runSoraOneShot(
       `[reachy:debug-trace] runSoraOneShot ffprobe done duration=${probed.durationSec.toFixed(2)}s width=${probed.width} height=${probed.height} codec=${probed.videoCodec}`,
     );
     const buffer = await readFile(outputPath);
-    const videoCostCents = soraCostCents(soraModel, SORA_ONE_SHOT_DURATION_SEC);
-    const costCents = 1 + videoCostCents + tts.ttsCostCents;
+    const videoCostCents = soraCostCents(soraModel, SORA_ONE_SHOT_DURATION_SEC, costRes);
+    const costCents = 1 + videoCostCents + tts.ttsCostCents + musicCostCents + sfxCostCents;
     return {
       buffer,
       bytes: buffer.length,
@@ -834,12 +893,56 @@ async function runSoraOneShot(
       costCents,
       costBreakdown: {
         cents: costCents,
-        parts: { tts: tts.ttsCostCents, video: videoCostCents, compose: 1 },
+        parts: {
+          tts: tts.ttsCostCents,
+          video: videoCostCents,
+          music: musicCostCents > 0 ? musicCostCents : undefined,
+          sfx: sfxCostCents > 0 ? sfxCostCents : undefined,
+          compose: 1,
+        },
       },
     };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Three short ElevenLabs SFX hits used in every reel: intro chime, midpoint
+ * transition, outro click. The disk cache in elevenlabsSfx.ts keys by
+ * description so the same chime hits the cache after the first reel renders.
+ * Returned hits include their reel-relative start times so composeOneShot
+ * can adelay each to its target.
+ */
+async function generateSfxBundleForReel(
+  totalDurationSec: number,
+): Promise<Array<{ path: string; startSec: number; costCents: number }>> {
+  const midpoint = totalDurationSec / 2;
+  const tailStart = Math.max(0, totalDurationSec - 0.6);
+  const requests: Array<{ description: string; durationSec: number; startSec: number }> = [
+    {
+      description: 'soft brief chime, editorial intro stinger, warm',
+      durationSec: 1.0,
+      startSec: 0,
+    },
+    {
+      description: 'subtle paper rustle transition swoosh, brief',
+      durationSec: 1.0,
+      startSec: midpoint,
+    },
+    { description: 'gentle UI click, brief, premium outro', durationSec: 0.6, startSec: tailStart },
+  ];
+  const results = await Promise.all(
+    requests.map(async (req) => {
+      const sfx = await generateSfx({
+        description: req.description,
+        durationSec: req.durationSec,
+        promptInfluence: 0.6,
+      });
+      return { path: sfx.path, startSec: req.startSec, costCents: sfx.costCents };
+    }),
+  );
+  return results;
 }
 
 /**

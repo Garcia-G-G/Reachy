@@ -163,7 +163,7 @@ export const REEL_DIMENSIONS = { width: 1080, height: 1920, fps: 30 } as const;
 /** xfade transition length. Each scene's effective on-screen time is durationSec - 0.4. */
 export const REEL_TRANSITION_SEC = 0.4;
 
-export type ReelEngine = 'ffmpeg' | 'sora-base' | 'sora-pro-720p';
+export type ReelEngine = 'ffmpeg' | 'sora-base' | 'sora-pro-720p' | 'sora-pro-1024p';
 
 export const REEL_ENGINES: ReadonlyArray<{
   id: ReelEngine;
@@ -191,8 +191,14 @@ export const REEL_ENGINES: ReadonlyArray<{
   {
     id: 'sora-pro-720p',
     label: 'Sora 2 Pro 720p',
-    tagline: 'Premium quality, full motion. ~$0.30/s. Default for flagship reels.',
+    tagline: 'Premium quality, full motion. ~$0.30/s.',
     secondsCost: 30,
+  },
+  {
+    id: 'sora-pro-1024p',
+    label: 'Sora 2 Pro 1024p',
+    tagline: 'Highest fidelity, 1024×1792 source upscaled. ~$0.50/s. Default for flagship reels.',
+    secondsCost: 50,
   },
 ];
 
@@ -205,10 +211,15 @@ export const REEL_ENGINES: ReadonlyArray<{
  * as the user-selected cheaper option in the UI.
  */
 export const TYPE_DEFAULT_ENGINE: Record<ReelTemplateKey, ReelEngine> = {
-  'informative-25s': 'sora-pro-720p',
+  // Flagship explainer/pitch shapes default to the premium Sora tier.
+  // Garcia's call (2026-05-14, max-quality push): quality > cost for the
+  // marketing demo, hard ceiling $20 per reel — Sora Pro 1024p × 12s = $6.
+  'informative-25s': 'sora-pro-1024p',
+  'pitch-30s': 'sora-pro-1024p',
+  // Shorter/auxiliary shapes stay on FFmpeg for cost ($4-6 of Sora 1024p
+  // is wasted on 16s mood reels and feature notes).
   'tutorial-30s': 'ffmpeg',
   'feature-15s': 'ffmpeg',
-  'pitch-30s': 'sora-pro-720p',
   'launch-20s': 'ffmpeg',
   'visual-12s': 'ffmpeg',
   'testimonial-20s': 'ffmpeg',
@@ -218,8 +229,17 @@ export const TYPE_DEFAULT_ENGINE: Record<ReelTemplateKey, ReelEngine> = {
 export interface PlannedScene {
   slot: SceneSlot;
   durationSec: number;
-  /** Headline text to overlay (kept short — drawtext truncates ungracefully). */
+  /** Short headline to overlay (≤ 6 words ideally — drawtext truncates ungracefully).
+   *  Drives the on-screen kicker; the narrator reads `narration` instead so the
+   *  audio can run the full scene without sounding clipped after 2 seconds. */
   text: string;
+  /**
+   * Full narration line the TTS reads (typically 15–25 words, written as
+   * natural sentence prose). When empty the worker falls back to `text`,
+   * which preserves the legacy single-line behavior. The planner generates
+   * both fields for AI mode; script mode lets the user write both per scene.
+   */
+  narration?: string;
   textPosition: 'top' | 'bottom' | 'center';
   /** Image prompt the user can edit before we generate. Empty for `brand`-bg scenes. */
   imagePrompt: string;

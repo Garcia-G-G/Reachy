@@ -200,8 +200,8 @@ function buildUserPrompt(args: PlanReelArgs): string {
     slots,
     '',
     scriptMode
-      ? 'For each scene, write an `imagePrompt` that visualizes the user\'s line in the locked style. Set `imagePrompt: ""` for any scene whose `background` is "brand". Echo each scene\'s line back verbatim in its `text` field — do not paraphrase.'
-      : 'Return JSON. Set `imagePrompt: ""` for any scene whose `background` is "brand".',
+      ? 'For each scene: (1) echo the user\'s line back verbatim in `text` (do not paraphrase); (2) write a `narration` that is that line EXPANDED into a full natural sentence of 15-25 words in the same language — keep the exact meaning but make it flow well when spoken over a 5-8 second scene; (3) write an `imagePrompt` that visualizes the line in the locked style (set `imagePrompt: ""` for any scene whose `background` is "brand"). Example: text="Marketing real para apps reales." → narration="Hacemos marketing real, hecho para apps reales, sin atajos ni plantillas vacías que no convencen a nadie."'
+      : 'Return JSON. For every scene write a SHORT `text` (≤ 6 words, the on-screen kicker) AND a longer `narration` (15-25 words, what the narrator reads aloud over the scene — same language, flows well spoken, EXPANDS on the text rather than repeating it). Set `imagePrompt: ""` for any scene whose `background` is "brand".',
   ]
     .filter((line): line is string => typeof line === 'string')
     .join('\n');
@@ -223,11 +223,21 @@ function jsonSchemaFor(template: ReelTemplateKey): Record<string, unknown> {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['slot', 'durationSec', 'text', 'textPosition', 'imagePrompt', 'background'],
+          required: [
+            'slot',
+            'durationSec',
+            'text',
+            'narration',
+            'textPosition',
+            'imagePrompt',
+            'background',
+          ],
           properties: {
             slot: { type: 'string' },
             durationSec: { type: 'number' },
             text: { type: 'string' },
+            /** Full narration line the TTS reads. Distinct from `text`. */
+            narration: { type: 'string' },
             textPosition: { type: 'string', enum: ['top', 'bottom', 'center'] },
             imagePrompt: { type: 'string' },
             background: { type: 'string', enum: ['image', 'brand'] },
@@ -302,11 +312,16 @@ export async function planReel(args: PlanReelArgs): Promise<PlanReelResult> {
     const sceneText = scriptMode
       ? (args.customScript?.[i]?.trim() ?? '')
       : (planned?.text?.trim() ?? '');
+    // Narration is what the TTS reads. If the model produced one, take it.
+    // Otherwise fall back to the overlay text so the worker still synthesizes
+    // audio (degrades to the legacy single-field shape).
+    const narration = planned?.narration?.trim();
     const rawPrompt = slot.background === 'brand' ? '' : (planned?.imagePrompt?.trim() ?? '');
     return {
       slot: slot.slot,
       durationSec: slot.durationSec,
       text: sceneText,
+      narration: narration && narration.length > 0 ? narration : undefined,
       textPosition: slot.textPosition,
       imagePrompt: rawPrompt.slice(0, MAX_IMAGE_PROMPT_CHARS),
       background: slot.background ?? 'image',

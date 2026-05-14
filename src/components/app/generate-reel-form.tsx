@@ -366,7 +366,10 @@ export function GenerateReelForm({
               {VISUAL_STYLE_KEYS.map((key) => {
                 const meta = VISUAL_STYLE_META[key];
                 const checked = visualStyle === key;
-                const soraSelected = engine === 'sora-base' || engine === 'sora-pro-720p';
+                const soraSelected =
+                  engine === 'sora-base' ||
+                  engine === 'sora-pro-720p' ||
+                  engine === 'sora-pro-1024p';
                 // Empirically: editorial/paper-cutout/infographic produce
                 // near-static Sora output. We warn (not disable) so the user
                 // can still override if they're feeling adventurous.
@@ -703,7 +706,8 @@ function PlanEditor({
 
 function ComposingPanel({ engine, status }: { engine: ReelEngine; status: 'queued' | 'running' }) {
   const t = useTranslations('Reels');
-  const isSora = engine === 'sora-base' || engine === 'sora-pro-720p';
+  const isSora =
+    engine === 'sora-base' || engine === 'sora-pro-720p' || engine === 'sora-pro-1024p';
   const caption = isSora
     ? t('composingSora')
     : status === 'queued'
@@ -736,7 +740,13 @@ function DonePanel({
       <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-rule pb-2">
         <span className="mono-eyebrow text-ink-3">
           {t('doneCaption')} —{' '}
-          {engine === 'sora-pro-720p' ? 'Sora 2 Pro' : engine === 'sora-base' ? 'Sora 2' : 'FFmpeg'}
+          {engine === 'sora-pro-1024p'
+            ? 'Sora 2 Pro 1024p'
+            : engine === 'sora-pro-720p'
+              ? 'Sora 2 Pro 720p'
+              : engine === 'sora-base'
+                ? 'Sora 2'
+                : 'FFmpeg'}
         </span>
         {typeof costCents === 'number' && (
           <span className="mono-eyebrow text-ink-3">
@@ -777,19 +787,31 @@ function DonePanel({
   );
 }
 
-/** "Sora $6.00 · TTS $0.04 · compose $0.01" — same display the library uses. */
+/** "Sora $6.00 · TTS $0.04 · music $0.24 · SFX $0.03 · compose $0.01" — same display the library uses. */
 function formatCostBreakdown(breakdown: ReelCostBreakdown, engine: ReelEngine): string {
   const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
   const parts: string[] = [];
   if (typeof breakdown.parts.video === 'number' && breakdown.parts.video > 0) {
     const videoLabel =
-      engine === 'sora-pro-720p' ? 'Sora Pro' : engine === 'sora-base' ? 'Sora' : 'video';
+      engine === 'sora-pro-1024p'
+        ? 'Sora Pro 1024p'
+        : engine === 'sora-pro-720p'
+          ? 'Sora Pro 720p'
+          : engine === 'sora-base'
+            ? 'Sora'
+            : 'video';
     parts.push(`${videoLabel} ${fmt(breakdown.parts.video)}`);
   }
   if (typeof breakdown.parts.images === 'number' && breakdown.parts.images > 0) {
     parts.push(`images ${fmt(breakdown.parts.images)}`);
   }
   if (breakdown.parts.tts > 0) parts.push(`TTS ${fmt(breakdown.parts.tts)}`);
+  if (typeof breakdown.parts.music === 'number' && breakdown.parts.music > 0) {
+    parts.push(`music ${fmt(breakdown.parts.music)}`);
+  }
+  if (typeof breakdown.parts.sfx === 'number' && breakdown.parts.sfx > 0) {
+    parts.push(`SFX ${fmt(breakdown.parts.sfx)}`);
+  }
   if (breakdown.parts.compose > 0) parts.push(`compose ${fmt(breakdown.parts.compose)}`);
   return parts.join(' · ');
 }

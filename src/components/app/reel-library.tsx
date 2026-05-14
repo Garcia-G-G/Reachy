@@ -80,11 +80,13 @@ function ReelCard({ reel }: { reel: ReelLibraryRow }) {
         </p>
         <p className="mono-eyebrow text-ink-3">
           {date} · {tplLabel} ·{' '}
-          {reel.engine === 'sora-pro-720p'
-            ? 'Sora 2 Pro'
-            : reel.engine === 'sora-base'
-              ? 'Sora 2'
-              : 'FFmpeg'}
+          {reel.engine === 'sora-pro-1024p'
+            ? 'Sora 2 Pro 1024p'
+            : reel.engine === 'sora-pro-720p'
+              ? 'Sora 2 Pro 720p'
+              : reel.engine === 'sora-base'
+                ? 'Sora 2'
+                : 'FFmpeg'}
           {typeof reel.durationSec === 'number' && ` · ${reel.durationSec}s`}
           {typeof reel.costCents === 'number' && ` · $${(reel.costCents / 100).toFixed(2)}`}
         </p>
@@ -135,13 +137,25 @@ function formatLibraryCostBreakdown(breakdown: ReelCostBreakdown, engine: ReelEn
   const parts: string[] = [];
   if (typeof breakdown.parts.video === 'number' && breakdown.parts.video > 0) {
     const label =
-      engine === 'sora-pro-720p' ? 'Sora Pro' : engine === 'sora-base' ? 'Sora' : 'video';
+      engine === 'sora-pro-1024p'
+        ? 'Sora Pro 1024p'
+        : engine === 'sora-pro-720p'
+          ? 'Sora Pro 720p'
+          : engine === 'sora-base'
+            ? 'Sora'
+            : 'video';
     parts.push(`${label} ${fmt(breakdown.parts.video)}`);
   }
   if (typeof breakdown.parts.images === 'number' && breakdown.parts.images > 0) {
     parts.push(`images ${fmt(breakdown.parts.images)}`);
   }
   if (breakdown.parts.tts > 0) parts.push(`TTS ${fmt(breakdown.parts.tts)}`);
+  if (typeof breakdown.parts.music === 'number' && breakdown.parts.music > 0) {
+    parts.push(`music ${fmt(breakdown.parts.music)}`);
+  }
+  if (typeof breakdown.parts.sfx === 'number' && breakdown.parts.sfx > 0) {
+    parts.push(`SFX ${fmt(breakdown.parts.sfx)}`);
+  }
   if (breakdown.parts.compose > 0) parts.push(`compose ${fmt(breakdown.parts.compose)}`);
   return parts.join(' · ');
 }

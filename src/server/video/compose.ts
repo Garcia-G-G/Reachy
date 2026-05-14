@@ -668,13 +668,24 @@ export interface OneShotBeat {
   position: 'top' | 'bottom' | 'center';
 }
 
+export interface OneShotSfxHit {
+  /** Local MP3 path. */
+  path: string;
+  /** When in the reel to fire it (scene-relative seconds, 0-based). */
+  startSec: number;
+}
+
 export interface ComposeOneShotArgs {
   /** Single Sora 2 MP4 — the entire reel's visual. */
   videoPath: string;
   /** Captions to overlay, each enabled for a window of the clip. */
   beats: OneShotBeat[];
-  /** Optional audio track to mix in — typically a concatenated TTS MP3 chain. */
+  /** Optional TTS narration track — already concatenated to the reel length. */
   audioPath?: string;
+  /** Optional ElevenLabs Music track — mixed under TTS at background level. */
+  musicPath?: string;
+  /** Optional ElevenLabs SFX hits — each placed at its `startSec`. */
+  sfxHits?: OneShotSfxHit[];
   /** Output duration (we trim with -t to lock this even if the source is longer). */
   durationSec: number;
   outputPath: string;
@@ -724,9 +735,21 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
   try {
     return await new Promise<{ outputPath: string }>((resolve, reject) => {
       const cmd = ffmpeg();
+      // Input layout (fixed indices used by the filter graph below):
+      //   [0:v] = Sora MP4 (trimmed to durationSec)
+      //   [N:a] = TTS narration (when audioPath set), N = 1
+      //   [N:a] = ElevenLabs Music (when musicPath set), N = next
+      //   [N:a] = ElevenLabs SFX hits (when sfxHits provided), N = next per hit
+      let nextInputIdx = 1;
       cmd.input(args.videoPath).inputOptions(['-t', String(args.durationSec)]);
-      if (args.audioPath) {
-        cmd.input(args.audioPath);
+      const ttsInputIdx = args.audioPath ? nextInputIdx++ : null;
+      if (args.audioPath) cmd.input(args.audioPath);
+      const musicInputIdx = args.musicPath ? nextInputIdx++ : null;
+      if (args.musicPath) cmd.input(args.musicPath);
+      const sfxInputIdxs: number[] = [];
+      for (const hit of args.sfxHits ?? []) {
+        cmd.input(hit.path);
+        sfxInputIdxs.push(nextInputIdx++);
       }
 
       const filters: string[] = [];
@@ -766,16 +789,66 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
         : `[0:v]${baseChain}[vfinal]`;
       filters.push(videoChain);
 
-      // NOTE: complexFilter(filters, ['vfinal']) below already adds `-map [vfinal]`
-      // automatically (see fluent-ffmpeg source). Duplicating `-map [vfinal]` here
-      // caused ffmpeg to exit 234 with "Invalid argument" on the oneshot path —
-      // diagnosed May 13. Only map the audio input (or `-an`) here.
-      const audioOpts = args.audioPath
-        ? ['-map', '1:a', '-c:a', 'aac', '-b:a', '128k', '-shortest']
-        : ['-an'];
+      // Audio mixing chain. We build it conditionally:
+      //   1. TTS narration (input N=ttsInputIdx) → padded to durationSec  → [a_tts]
+      //   2. Music (input N=musicInputIdx)        → looped/trimmed + volume → [a_music]
+      //   3. Each SFX hit (input N=sfxInputIdxs[i]) → adelay to hit.startSec → [a_sfx_i]
+      // amix them all into [afinal]. Single audio source → no amix.
+      //
+      // Volume balance:
+      //   TTS narration:   1.0   (foreground)
+      //   Music:           0.15  (≈-22 LUFS background, fits under voice)
+      //   SFX:             0.20  (≈-18 LUFS, brief enough to peak through)
+      const audioLabels: string[] = [];
+      if (ttsInputIdx !== null) {
+        filters.push(
+          `[${ttsInputIdx}:a]apad=whole_dur=${args.durationSec},atrim=0:${args.durationSec},asetpts=PTS-STARTPTS,volume=1.0[a_tts]`,
+        );
+        audioLabels.push('[a_tts]');
+      }
+      if (musicInputIdx !== null) {
+        filters.push(
+          `[${musicInputIdx}:a]aloop=loop=-1:size=2147483647,atrim=0:${args.durationSec},asetpts=PTS-STARTPTS,volume=0.15[a_music]`,
+        );
+        audioLabels.push('[a_music]');
+      }
+      args.sfxHits?.forEach((hit, i) => {
+        const inputIdx = sfxInputIdxs[i];
+        if (inputIdx === undefined) return;
+        // adelay accepts per-channel ms values — `Xms|Xms` to delay both
+        // channels by the same amount. atrim caps so a 5s SFX doesn't tail
+        // past the reel end.
+        const delayMs = Math.round(hit.startSec * 1000);
+        filters.push(
+          `[${inputIdx}:a]adelay=${delayMs}|${delayMs},atrim=0:${args.durationSec},asetpts=PTS-STARTPTS,volume=0.20[a_sfx_${i}]`,
+        );
+        audioLabels.push(`[a_sfx_${i}]`);
+      });
+
+      // NOTE: complexFilter(filters, [...]) below adds `-map [<label>]` for
+      // each output label automatically (see fluent-ffmpeg source). Duplicating
+      // `-map` in outputOptions caused ffmpeg to exit 234 with "Invalid
+      // argument" on the oneshot path — diagnosed May 13.
+      let audioOpts: string[];
+      let filterOutputs: string[];
+      if (audioLabels.length === 0) {
+        filterOutputs = ['vfinal'];
+        audioOpts = ['-an'];
+      } else if (audioLabels.length === 1) {
+        // Single source: alias it to [afinal] (saves one amix node).
+        filters.push(`${audioLabels[0]}anull[afinal]`);
+        filterOutputs = ['vfinal', 'afinal'];
+        audioOpts = ['-c:a', 'aac', '-b:a', '128k', '-shortest'];
+      } else {
+        filters.push(
+          `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0,atrim=0:${args.durationSec},asetpts=PTS-STARTPTS[afinal]`,
+        );
+        filterOutputs = ['vfinal', 'afinal'];
+        audioOpts = ['-c:a', 'aac', '-b:a', '128k', '-shortest'];
+      }
 
       cmd
-        .complexFilter(filters, ['vfinal'])
+        .complexFilter(filters, filterOutputs)
         .outputOptions([
           '-c:v',
           'libx264',

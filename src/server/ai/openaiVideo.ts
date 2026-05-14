@@ -28,14 +28,22 @@ import { getOpenAI } from './openai';
 export const SORA_MODELS = ['sora-2', 'sora-2-pro'] as const;
 export type SoraModel = (typeof SORA_MODELS)[number];
 
+/** Output sizes the API supports today. We use the 9:16 portrait variants. */
+export type SoraSize = '720x1280' | '1024x1792';
+
 /** Sora-supported clip durations. The SDK types these as string literals. */
 export const SORA_VALID_DURATIONS = [4, 8, 12] as const;
 export type SoraDuration = (typeof SORA_VALID_DURATIONS)[number];
 
-/** Cents per generated second, by model, at 720p. */
-export const SORA_CENTS_PER_SEC: Record<SoraModel, number> = {
-  'sora-2': 10,
-  'sora-2-pro': 30,
+/**
+ * Cents per generated second, by model AND output resolution. Sora 2 base
+ * only supports 720p; Sora 2 Pro adds 1024p at a higher rate. We always
+ * use the 9:16 portrait orientation, so the size values below stand for
+ * 720x1280 and 1024x1792 respectively.
+ */
+export const SORA_CENTS_PER_SEC: Record<SoraModel, Record<'720' | '1024', number>> = {
+  'sora-2': { '720': 10, '1024': 0 },
+  'sora-2-pro': { '720': 30, '1024': 50 },
 };
 
 /** Snap any requested length to the nearest supported Sora step. Ties round up. */
@@ -52,8 +60,21 @@ export function snapSoraDuration(seconds: number): SoraDuration {
   return best;
 }
 
-export function soraCostCents(model: SoraModel, seconds: number): number {
-  return Math.max(1, Math.round(SORA_CENTS_PER_SEC[model] * seconds));
+/**
+ * Cost helper. Pass the resolution explicitly — Sora 2 Pro at 1024 is
+ * 5/3 the rate of Sora 2 Pro at 720, so the model alone isn't enough.
+ * Defaults to 720 for backwards compat.
+ */
+export function soraCostCents(
+  model: SoraModel,
+  seconds: number,
+  res: '720' | '1024' = '720',
+): number {
+  const rate = SORA_CENTS_PER_SEC[model][res];
+  if (rate === 0) {
+    throw new Error(`Sora model '${model}' does not support resolution ${res}`);
+  }
+  return Math.max(1, Math.round(rate * seconds));
 }
 
 export interface SoraSubmitArgs {
@@ -62,6 +83,9 @@ export interface SoraSubmitArgs {
   /** Only 9:16 portrait for reels right now. */
   aspectRatio: '9:16';
   durationSec: SoraDuration;
+  /** Output resolution. Defaults to 720x1280; set 1024x1792 for the
+   *  premium tier. Sora 2 Pro is the only model that accepts 1024x1792. */
+  size?: SoraSize;
 }
 
 export interface SoraJob {
@@ -84,7 +108,8 @@ export async function submitSora(args: SoraSubmitArgs): Promise<SoraJob> {
   // SDK requires VideoSeconds as a string literal ('4' | '8' | '12').
   const seconds = String(args.durationSec) as '4' | '8' | '12';
   // VideoSize: '720x1280' is 9:16 portrait. 1280x720 would be 16:9.
-  const size = args.aspectRatio === '9:16' ? '720x1280' : '1280x720';
+  // Premium tier passes 1024x1792 (only Sora 2 Pro supports it).
+  const size = args.size ?? (args.aspectRatio === '9:16' ? '720x1280' : '1280x720');
   const startedAt = Date.now();
   console.log(
     `[reachy:debug-trace] submitSora -> openai.videos.create model=${args.model} size=${size} seconds=${seconds} promptBytes=${args.prompt.length}`,

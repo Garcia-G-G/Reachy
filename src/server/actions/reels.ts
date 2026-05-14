@@ -35,7 +35,7 @@ const planInput = z
     /** Engine the plan will be composed with. Selects promptStatic vs
      *  promptMotion in the visual-style fragment baked into each scene's
      *  imagePrompt. Defaults to 'ffmpeg' (static) for backwards compat. */
-    engine: z.enum(['ffmpeg', 'sora-base', 'sora-pro-720p']).default('ffmpeg'),
+    engine: z.enum(['ffmpeg', 'sora-base', 'sora-pro-720p', 'sora-pro-1024p']).default('ffmpeg'),
     /**
      * Script mode: one literal overlay line per scene, in template order.
      * Length must match REEL_TEMPLATES[template].scenes.length. Each line
@@ -70,6 +70,10 @@ const plannedSceneSchema = z.object({
   slot: z.enum(SCENE_SLOT_VALUES),
   durationSec: z.number().positive().max(30),
   text: z.string().trim().max(160),
+  /** Optional full narration line for TTS — when present, runSceneTts
+   *  reads this instead of `text` so the voice can fill the whole scene
+   *  duration. Cap at ~500 chars to avoid TTS billing surprises. */
+  narration: z.string().trim().max(500).optional(),
   textPosition: z.enum(['top', 'bottom', 'center']),
   imagePrompt: z.string().trim().max(MAX_IMAGE_PROMPT_CHARS),
   background: z.enum(['image', 'brand']),
@@ -106,7 +110,7 @@ const VISUAL_STYLE_VALUES = [
 
 const composeInput = z.object({
   projectId: z.string().uuid(),
-  engine: z.enum(['ffmpeg', 'sora-base', 'sora-pro-720p']),
+  engine: z.enum(['ffmpeg', 'sora-base', 'sora-pro-720p', 'sora-pro-1024p']),
   plan: planSchema,
   /** Per-reel visual style override. When provided, supersedes the project's
    *  brandKit.visualStyle (the form prefills with the brand-kit value but
