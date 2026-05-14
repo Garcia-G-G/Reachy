@@ -78,6 +78,21 @@ export interface BackdropRect {
   /** 0–1; defaults to 0.92. Lets the layout dial in a translucent slab
    *  when the brand wants the background to peek through. */
   opacity?: number;
+  /** Optional corner radius as a fraction of frame width. The
+   *  card-soft layout uses ~0.018 (about a 20px radius at 1080px). */
+  cornerRadiusFrac?: number;
+  /** Optional soft drop shadow under the rect — picks up the
+   *  "floating card" feel without depending on the AI background.
+   *  When set, composeImage wraps the rect in an SVG filter with
+   *  feGaussianBlur + feOffset + low-opacity black. */
+  shadow?: {
+    /** Blur stdDeviation in px (typical 8-24 for soft cards). */
+    blurPx: number;
+    /** Vertical offset in px (positive = down). */
+    offsetY: number;
+    /** Black-shadow opacity 0–1 (typical 0.15-0.25). */
+    opacity: number;
+  };
 }
 
 export interface Layout {
@@ -102,7 +117,15 @@ export interface Layout {
   blocks: readonly TextBlock[];
 }
 
-export type LayoutId = 'hero-centered' | 'hero-split-left' | 'quote-slab' | 'announcement-banner';
+export type LayoutId =
+  | 'hero-centered'
+  | 'hero-split-left'
+  | 'quote-slab'
+  | 'announcement-banner'
+  | 'card-soft'
+  | 'quote-large'
+  | 'editorial-margin'
+  | 'feature-stack';
 
 /**
  * ─────────────────────────────────────────────────────────────────────
@@ -331,11 +354,263 @@ const announcementBanner: Layout = {
   ],
 };
 
+/**
+ * Layout 5 — card-soft
+ *   A floating brand-colored card with a soft drop shadow sits centered
+ *   over the AI background. Headline + small sub inside the card. The
+ *   IG-native aesthetic — feels like a curated product post, not a
+ *   slide deck.
+ *   Used for: post-ig (DEFAULT), square, og-square, linkedin-post-square.
+ */
+const cardSoft: Layout = {
+  id: 'card-soft',
+  label: 'Card · soft',
+  slots: ['headline', 'subheadline'],
+  negativeSpaceHint:
+    'Treat the frame as the OUTER PHOTO — a colourful, textured, gradient-heavy scene where ANY part of the frame can be visually rich. The composition will be partially covered by a centered cream-coloured card with a soft drop shadow; you do NOT need to leave a quiet zone. Push for an evocative, premium IG aesthetic in the background: rich gradients, soft natural lighting, organic textures.',
+  backdrops: [
+    {
+      x: 0.08,
+      y: 0.22,
+      widthFrac: 0.84,
+      heightFrac: 0.56,
+      color: 'paper',
+      opacity: 1,
+      cornerRadiusFrac: 0.022,
+      shadow: { blurPx: 28, offsetY: 18, opacity: 0.22 },
+    },
+  ],
+  blocks: [
+    {
+      role: 'headline',
+      textSource: 'headline',
+      x: 0.5,
+      y: 0.39,
+      widthFrac: 0.68,
+      sizeFrac: 0.062,
+      font: 'display',
+      align: 'center',
+      color: 'ink',
+      weight: 600,
+      letterSpacingEm: -0.018,
+      lineHeightEm: 1.06,
+    },
+    {
+      role: 'subheadline',
+      textSource: 'subheadline',
+      x: 0.5,
+      y: 0.62,
+      widthFrac: 0.62,
+      sizeFrac: 0.024,
+      font: 'body',
+      align: 'center',
+      color: 'ink',
+      weight: 400,
+      lineHeightEm: 1.4,
+    },
+  ],
+};
+
+/**
+ * Layout 6 — quote-large
+ *   Full-bleed solid brand color (paper) with one huge italic phrase.
+ *   The AI background is OPTIONAL noise — we paint a full-frame paper
+ *   rect on top of it before the typography. Wordmark below in mono.
+ *   Used for: square, post-ig (quote variants), reel-cover.
+ */
+const quoteLarge: Layout = {
+  id: 'quote-large',
+  label: 'Quote · large',
+  slots: ['headline', 'wordmark'],
+  negativeSpaceHint:
+    'The composition will be covered by a full-bleed solid brand color before the typography lands — the AI background only contributes very subtle visible noise (paper texture, soft grain) if any. Generate a tonal, mostly-flat field of the brand cream tone with VERY soft texture. No focal elements, no shapes — just a quiet field.',
+  backdrops: [
+    {
+      x: 0,
+      y: 0,
+      widthFrac: 1,
+      heightFrac: 1,
+      color: 'paper',
+      opacity: 0.97,
+    },
+  ],
+  blocks: [
+    {
+      role: 'headline',
+      textSource: 'headline',
+      x: 0.5,
+      y: 0.32,
+      widthFrac: 0.78,
+      sizeFrac: 0.13,
+      font: 'italic',
+      align: 'center',
+      color: 'ink',
+      letterSpacingEm: -0.025,
+      lineHeightEm: 1.0,
+    },
+    {
+      role: 'wordmark',
+      textSource: 'wordmark',
+      x: 0.5,
+      y: 0.86,
+      widthFrac: 0.4,
+      sizeFrac: 0.022,
+      font: 'mono',
+      align: 'center',
+      color: 'accent',
+      upper: true,
+      letterSpacingEm: 0.22,
+    },
+  ],
+};
+
+/**
+ * Layout 7 — editorial-margin
+ *   Typography column on the LEFT 30% of the frame, AI imagery owns the
+ *   right 70%. A subtle paper rect on the left hides AI scribbles in
+ *   that column. Picks up the magazine-spread feel.
+ *   Used for: hero, og, linkedin-post-landscape, youtube-thumbnail.
+ */
+const editorialMargin: Layout = {
+  id: 'editorial-margin',
+  label: 'Editorial · margin',
+  slots: ['eyebrow', 'headline', 'subheadline'],
+  negativeSpaceHint:
+    'Compose the visual subject — gradients, focal elements, texture, hero shapes — entirely within the RIGHT 70% of the frame (from x=30% to x=100%). The LEFT 30% column should be a quiet field of the brand cream tone with optional very-soft texture, hosting no recognisable shapes or colour shifts. This becomes the typography margin.',
+  backdrops: [
+    {
+      x: 0,
+      y: 0,
+      widthFrac: 0.34,
+      heightFrac: 1,
+      color: 'paper',
+      opacity: 0.96,
+    },
+  ],
+  blocks: [
+    {
+      role: 'eyebrow',
+      textSource: 'eyebrow',
+      x: 0.04,
+      y: 0.12,
+      widthFrac: 0.26,
+      sizeFrac: 0.022,
+      font: 'mono',
+      align: 'left',
+      color: 'accent',
+      upper: true,
+      letterSpacingEm: 0.2,
+    },
+    {
+      role: 'headline',
+      textSource: 'headline',
+      x: 0.04,
+      y: 0.2,
+      widthFrac: 0.26,
+      sizeFrac: 0.062,
+      font: 'display',
+      align: 'left',
+      color: 'ink',
+      weight: 600,
+      letterSpacingEm: -0.02,
+      lineHeightEm: 1.04,
+    },
+    {
+      role: 'subheadline',
+      textSource: 'subheadline',
+      x: 0.04,
+      y: 0.78,
+      widthFrac: 0.26,
+      sizeFrac: 0.022,
+      font: 'body',
+      align: 'left',
+      color: 'ink',
+      weight: 400,
+      lineHeightEm: 1.4,
+    },
+  ],
+};
+
+/**
+ * Layout 8 — feature-stack
+ *   Mono accent dot · eyebrow · large headline · supporting line.
+ *   All centered, generously spaced. The "feature post" aesthetic for
+ *   product launches and announcements.
+ *   Used for: post-ig, square, linkedin-post-square, og-square.
+ */
+const featureStack: Layout = {
+  id: 'feature-stack',
+  label: 'Feature · stack',
+  slots: ['eyebrow', 'headline', 'subheadline'],
+  negativeSpaceHint:
+    'Keep the central 70% of the frame visually CALM — soft tones, low contrast, no busy details. The composition will host centered typography with generous breathing room across most of the frame. Push texture and accent gradients toward the extreme corners only; the middle should feel airy and uncluttered.',
+  backdrops: [
+    // Small accent dot above the eyebrow — drawn as a tiny rect; the
+    // SVG renderer treats this as a solid block. It's the "decoration"
+    // that makes the layout feel intentional vs. arbitrary.
+    {
+      x: 0.49,
+      y: 0.24,
+      widthFrac: 0.02,
+      heightFrac: 0.02,
+      color: 'accent',
+      opacity: 1,
+      cornerRadiusFrac: 0.01,
+    },
+  ],
+  blocks: [
+    {
+      role: 'eyebrow',
+      textSource: 'eyebrow',
+      x: 0.5,
+      y: 0.3,
+      widthFrac: 0.7,
+      sizeFrac: 0.022,
+      font: 'mono',
+      align: 'center',
+      color: 'accent',
+      upper: true,
+      letterSpacingEm: 0.22,
+    },
+    {
+      role: 'headline',
+      textSource: 'headline',
+      x: 0.5,
+      y: 0.4,
+      widthFrac: 0.78,
+      sizeFrac: 0.078,
+      font: 'display',
+      align: 'center',
+      color: 'ink',
+      weight: 600,
+      letterSpacingEm: -0.02,
+      lineHeightEm: 1.04,
+    },
+    {
+      role: 'subheadline',
+      textSource: 'subheadline',
+      x: 0.5,
+      y: 0.66,
+      widthFrac: 0.64,
+      sizeFrac: 0.026,
+      font: 'body',
+      align: 'center',
+      color: 'ink',
+      weight: 400,
+      lineHeightEm: 1.4,
+    },
+  ],
+};
+
 export const LAYOUTS: Record<LayoutId, Layout> = {
   'hero-centered': heroCentered,
   'hero-split-left': heroSplitLeft,
   'quote-slab': quoteSlab,
   'announcement-banner': announcementBanner,
+  'card-soft': cardSoft,
+  'quote-large': quoteLarge,
+  'editorial-margin': editorialMargin,
+  'feature-stack': featureStack,
 };
 
 export const LAYOUT_IDS = Object.keys(LAYOUTS) as LayoutId[];
@@ -349,18 +624,22 @@ export const LAYOUT_IDS = Object.keys(LAYOUTS) as LayoutId[];
  * Square / portrait → hero-centered or quote-slab.
  */
 export const DEFAULT_LAYOUT_FOR_FORMAT: Record<ImageFormat, LayoutId> = {
-  hero: 'hero-split-left',
-  og: 'hero-split-left',
-  square: 'hero-centered',
-  'og-square': 'hero-centered',
-  'post-ig': 'hero-centered',
-  'reel-cover': 'quote-slab',
-  'tiktok-cover': 'quote-slab',
-  'linkedin-post-square': 'hero-centered',
-  'linkedin-post-landscape': 'hero-split-left',
-  pinterest: 'quote-slab',
+  hero: 'editorial-margin',
+  og: 'editorial-margin',
+  // post-ig default switched from hero-centered → card-soft so IG posts
+  // come out feeling like real posts (floating brand card on a textured
+  // photo) instead of a PowerPoint title slide. The card-soft layout is
+  // tuned for the 1080x1350 4:5 aspect ratio.
+  'post-ig': 'card-soft',
+  square: 'feature-stack',
+  'og-square': 'card-soft',
+  'reel-cover': 'quote-large',
+  'tiktok-cover': 'quote-large',
+  'linkedin-post-square': 'feature-stack',
+  'linkedin-post-landscape': 'editorial-margin',
+  pinterest: 'quote-large',
   'banner-tw': 'announcement-banner',
-  'youtube-thumbnail': 'hero-split-left',
+  'youtube-thumbnail': 'editorial-margin',
   'email-header': 'announcement-banner',
   'email-banner-wide': 'announcement-banner',
 };

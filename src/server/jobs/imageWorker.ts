@@ -57,6 +57,8 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         layoutId,
         idea,
         language,
+        sourceRawUrl,
+        tweakPrompt,
       } = job.data;
       const fm = getFormat(format);
 
@@ -78,9 +80,37 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         //      this layout needs.
         //   3. composeImage overlays brand-fontd typography on top with exact
         //      brand hex colors.
-        // The video pipeline calls generateImage directly (no layoutId) so it
-        // keeps getting raw image scenes — overlay is opt-in via layoutId.
-        const result = await generateImage({ prompt, format, provider, model, n, quality });
+        // Variation mode: when sourceRawUrl is set we fetch that bg from R2
+        // and pass it to openai.images.edit. The model treats it as the
+        // reference image for the new variant — keeps composition close to
+        // the source while honouring the tweakPrompt.
+        let sourceImage: Buffer | undefined;
+        if (sourceRawUrl) {
+          const sourceRes = await fetch(sourceRawUrl);
+          if (!sourceRes.ok) {
+            throw new Error(
+              `variation source fetch failed: ${sourceRes.status} ${sourceRes.statusText}`,
+            );
+          }
+          sourceImage = Buffer.from(await sourceRes.arrayBuffer());
+        }
+        const editPrompt = sourceRawUrl
+          ? [
+              tweakPrompt?.trim()
+                ? `Variation. Tweak the composition: ${tweakPrompt.trim()}.`
+                : 'Generate a variation: keep the visual style and palette of the source, vary the specific composition (different shapes, slightly different layout, fresh take on the same vibe).',
+              prompt,
+            ].join(' ')
+          : prompt;
+        const result = await generateImage({
+          prompt: editPrompt,
+          format,
+          provider,
+          model,
+          n,
+          quality,
+          sourceImage,
+        });
 
         // Load project + brand kit ONCE for the compose step (n copies share
         // the same brand). The compose branch only runs when layoutId is set.

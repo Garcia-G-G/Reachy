@@ -166,6 +166,202 @@ export async function enqueueImageGeneration(
 }
 
 /**
+ * Enqueue 4 variations of an existing asset. Uses OpenAI's images.edit
+ * with the source RAW background as the seed image, so the variant
+ * keeps the source visual style while exploring different composition.
+ *
+ * Cost: same per-image as a fresh generation at the source's quality
+ * tier × 4 variants. The copy plan + compose runs per-variant.
+ *
+ * Architecture: lifts model / quality / layout / idea / language from
+ * the source generation's params so the user doesn't have to restate
+ * them. The optional tweakPrompt is appended to the AI prompt to push
+ * the model in a specific direction ("warmer", "more centered", etc.).
+ */
+const enqueueVariationsInput = z.object({
+  /** Source asset id to vary. Its parent generation must have a
+   *  composeState with at least one rawAssets entry — i.e. it was
+   *  rendered through the marketing-grade pipeline. */
+  sourceAssetId: z.string().uuid(),
+  /** Optional plain-English nudge appended to the AI prompt. */
+  tweakPrompt: z.string().trim().max(400).optional(),
+  /** Optional override for the variant idea. Defaults to the source's
+   *  idea so variations honour the original brief by default. */
+  ideaOverride: z.string().trim().min(3).max(600).optional(),
+});
+
+export type EnqueueVariationsInput = z.infer<typeof enqueueVariationsInput>;
+
+export async function enqueueVariations(
+  input: EnqueueVariationsInput,
+): Promise<ActionResult<{ generationId: string; projectSlug: string }>> {
+  const session = await getSession();
+  if (!session) return { ok: false, error: 'unauthenticated' };
+
+  const parsed = enqueueVariationsInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
+  }
+
+  // Look up the source asset (and through it, the source generation +
+  // project). Ownership is enforced at the project level — userId on
+  // the project row.
+  const [src] = await db
+    .select({
+      asset,
+      generation,
+      project,
+    })
+    .from(asset)
+    .innerJoin(generation, eq(generation.id, asset.generationId))
+    .innerJoin(project, eq(project.id, asset.projectId))
+    .where(
+      and(
+        eq(asset.id, parsed.data.sourceAssetId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!src) return { ok: false, error: 'not-found' };
+
+  // Daily cap check — variations cost like fresh generations.
+  const usage = await checkDailyUsage(session.user.id, 'image');
+  if (!usage.ok) return { ok: false, error: `daily-cap (${usage.used}/${usage.cap})` };
+
+  // Recover compose state from the source so we run the variation with
+  // the same model + quality + layout + idea + language as the original.
+  const sourceParams = (src.generation.params ?? {}) as {
+    idea?: string;
+    language?: 'en' | 'es';
+    quality?: 'low' | 'medium' | 'high' | 'auto';
+    visualStyleOverride?: string | null;
+    layoutId?: LayoutId | 'none';
+    composeState?: {
+      layoutId?: LayoutId;
+      rawAssets?: Array<{ key: string; publicUrl: string | null }>;
+    };
+  };
+
+  // Find the raw background URL for THIS asset within the source
+  // generation. rawAssets[] is parallel to the asset insertion order;
+  // we need the index of `parsed.data.sourceAssetId` within the
+  // generation's assets sorted by createdAt.
+  const siblings = await db
+    .select({ id: asset.id })
+    .from(asset)
+    .where(eq(asset.generationId, src.generation.id))
+    .orderBy(asset.createdAt);
+  const sourceAssetIdx = siblings.findIndex((a) => a.id === parsed.data.sourceAssetId);
+  const rawAsset = sourceParams.composeState?.rawAssets?.[sourceAssetIdx];
+  const sourceRawUrl = rawAsset?.publicUrl ?? src.asset.publicUrl;
+  if (!sourceRawUrl) {
+    return { ok: false, error: 'source asset has no public url to fetch' };
+  }
+
+  // Recover ALL the original render settings — model, quality, layout,
+  // idea, language. Sensible defaults if any are missing on legacy rows.
+  const provider = (src.generation.provider ?? 'openai') as ImageProvider;
+  const model = src.generation.model ?? 'gpt-image-1';
+  const format = src.generation.format as ImageFormat;
+  const quality = sourceParams.quality ?? 'high';
+  const idea = parsed.data.ideaOverride ?? sourceParams.idea ?? '';
+  const language = sourceParams.language ?? 'en';
+  const sourceLayoutId = sourceParams.composeState?.layoutId ?? sourceParams.layoutId;
+  // Variation always uses an overlay-enabled layout — even if the
+  // original was raw, we fall back to the format default so the user
+  // gets brand typography on top.
+  const variationLayoutId: LayoutId | 'none' =
+    sourceLayoutId && sourceLayoutId !== 'none'
+      ? sourceLayoutId
+      : DEFAULT_LAYOUT_FOR_FORMAT[format];
+
+  const layout = getLayout({ layoutId: variationLayoutId });
+
+  // Re-build the AI prompt using the SAME pipeline as fresh generations
+  // — buildImagePrompt knows how to inject the layout's negativeSpaceHint
+  // and the brand kit's palette/style. The worker will further prepend
+  // a "variation, tweak: …" cue at edit time.
+  const [kit] = await db
+    .select()
+    .from(brandKit)
+    .where(eq(brandKit.projectId, src.project.id))
+    .limit(1);
+  const prompt = buildImagePrompt({
+    idea,
+    format,
+    project: {
+      name: src.project.name,
+      audience: src.project.audience,
+      tone: src.project.tone,
+    },
+    brandKit: kit ?? null,
+    language,
+    visualStyleOverride: (sourceParams.visualStyleOverride ?? undefined) as
+      | VisualStyleKey
+      | undefined,
+    layout,
+  });
+
+  const [gen] = await db
+    .insert(generation)
+    .values({
+      projectId: src.project.id,
+      type: 'image',
+      format,
+      status: 'queued',
+      provider,
+      model,
+      prompt,
+      params: {
+        idea,
+        n: 4,
+        language,
+        quality,
+        layoutId: variationLayoutId,
+        sourceAssetId: parsed.data.sourceAssetId,
+        sourceGenerationId: src.generation.id,
+        tweakPrompt: parsed.data.tweakPrompt ?? null,
+      },
+    })
+    .returning();
+  if (!gen) return { ok: false, error: 'enqueue failed' };
+
+  try {
+    await getImageQueue().add(
+      'generate',
+      {
+        generationId: gen.id,
+        projectId: src.project.id,
+        prompt,
+        format,
+        provider,
+        model,
+        n: 4,
+        quality,
+        layoutId: variationLayoutId,
+        idea,
+        language,
+        sourceRawUrl,
+        tweakPrompt: parsed.data.tweakPrompt,
+      },
+      { jobId: gen.id },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'queue error';
+    await db
+      .update(generation)
+      .set({ status: 'failed', errorMessage: `queue add failed: ${msg}`, finishedAt: new Date() })
+      .where(eq(generation.id, gen.id));
+    return { ok: false, error: 'queue-unreachable' };
+  }
+
+  revalidatePath(`/app/projects/${src.project.slug}/library`, 'layout');
+  revalidatePath(`/app/projects/${src.project.slug}/generate/image`, 'layout');
+  return { ok: true, data: { generationId: gen.id, projectSlug: src.project.slug } };
+}
+
+/**
  * Re-render the typography overlay on an existing asset with new copy.
  * Loads the original AI background from R2, runs composeImage with the
  * caller-supplied copy + the asset's saved colors + layout, uploads the

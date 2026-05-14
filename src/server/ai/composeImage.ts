@@ -182,24 +182,60 @@ function renderBlock(
   ].join(' ');
 }
 
+interface BackdropSvgPieces {
+  /** SVG <filter> definitions (drop-shadows) gathered across all
+   *  backdrops. Inserted inside <defs>. Empty when no backdrop wants
+   *  a shadow. */
+  filterDefs: string;
+  /** The actual <rect> elements rendered after <defs>. */
+  rects: string;
+}
+
 function renderBackdrops(
   layout: Layout,
   width: number,
   height: number,
   colors: BrandColors,
-): string {
-  if (!layout.backdrops || layout.backdrops.length === 0) return '';
-  return layout.backdrops
-    .map((b) => {
+): BackdropSvgPieces {
+  if (!layout.backdrops || layout.backdrops.length === 0) {
+    return { filterDefs: '', rects: '' };
+  }
+  const filters: string[] = [];
+  const rects = layout.backdrops
+    .map((b, i) => {
       const x = b.x * width;
       const y = b.y * height;
       const w = b.widthFrac * width;
       const h = b.heightFrac * height;
       const color = resolveColor(b.color, colors);
       const opacity = b.opacity ?? 0.92;
-      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${color}" opacity="${opacity}"/>`;
+      const r = b.cornerRadiusFrac ? b.cornerRadiusFrac * width : 0;
+      const radiusAttrs = r > 0 ? ` rx="${r}" ry="${r}"` : '';
+
+      // Drop-shadow path: build a SVG <filter> with feGaussianBlur +
+      // feOffset + feMerge so the result is the shadow under the
+      // original rect. The card-soft layout is the main user; quote
+      // layouts skip the shadow because they're flat.
+      let filterAttr = '';
+      if (b.shadow) {
+        const filterId = `bdshadow${i}`;
+        filters.push(
+          [
+            `<filter id="${filterId}" x="-20%" y="-20%" width="140%" height="160%">`,
+            `  <feGaussianBlur in="SourceAlpha" stdDeviation="${b.shadow.blurPx}"/>`,
+            `  <feOffset dy="${b.shadow.offsetY}" result="off"/>`,
+            `  <feComponentTransfer><feFuncA type="linear" slope="${b.shadow.opacity}"/></feComponentTransfer>`,
+            `  <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>`,
+            `</filter>`,
+          ].join('\n'),
+        );
+        filterAttr = ` filter="url(#${filterId})"`;
+      }
+
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}"${radiusAttrs} fill="${color}" opacity="${opacity}"${filterAttr}/>`;
     })
     .join('\n');
+  return { filterDefs: filters.join('\n'), rects };
 }
 
 /**
@@ -229,8 +265,9 @@ export async function buildOverlaySvg(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
     `<defs>`,
     `<style>${fontFaces}</style>`,
+    backdrops.filterDefs,
     `</defs>`,
-    backdrops,
+    backdrops.rects,
     texts,
     `</svg>`,
   ].join('\n');

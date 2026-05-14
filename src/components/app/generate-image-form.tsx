@@ -36,7 +36,11 @@ import {
   VISUAL_STYLE_META,
   type VisualStyleKey,
 } from '@/lib/visual-styles-meta';
-import { enqueueImageGeneration, rerenderOverlay } from '@/server/actions/images';
+import {
+  enqueueImageGeneration,
+  enqueueVariations,
+  rerenderOverlay,
+} from '@/server/actions/images';
 
 interface GenerateImageFormProps {
   projectId: string;
@@ -45,6 +49,8 @@ interface GenerateImageFormProps {
   /** Brand kit visual style — used as the default in the override picker
    *  so the user sees what their project is currently set to. */
   brandVisualStyle: VisualStyleKey | null;
+  /** Brand kit's active languages — first one drives the copy planner default. */
+  brandLanguages: Array<'en' | 'es'>;
 }
 
 interface AssetSummary {
@@ -126,7 +132,13 @@ export function GenerateImageForm({
   providerAvailability,
   r2Configured,
   brandVisualStyle,
+  brandLanguages,
 }: GenerateImageFormProps) {
+  // Default planner language = first active brand kit language. Falls back
+  // to 'es' if the brand kit has no languages set (Reachy is ES-primary).
+  // Previously hardcoded to 'en' which produced English copy on every render
+  // regardless of brand setting (bug found 2026-05-14).
+  const plannerLanguage: 'en' | 'es' = brandLanguages[0] ?? 'es';
   const t = useTranslations('Generate');
   const tCommon = useTranslations('common');
 
@@ -172,6 +184,14 @@ export function GenerateImageForm({
     assetId: string;
     publicUrl: string | null;
   } | null>(null);
+  // More-like-this modal state. Open when an asset is set.
+  const [moreLikeThisTarget, setMoreLikeThisTarget] = useState<{
+    assetId: string;
+    publicUrl: string | null;
+  } | null>(null);
+  // Which thumbnail is currently being shown in the large preview.
+  // Reset to 0 whenever the run kicks off a new generation.
+  const [selectedAssetIdx, setSelectedAssetIdx] = useState(0);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -272,7 +292,7 @@ export function GenerateImageForm({
         provider: modelEntry.provider as ImageProvider,
         model: modelId,
         n,
-        language: 'en',
+        language: plannerLanguage,
         quality: effectiveQuality,
         visualStyleOverride: visualStyleOverride ?? undefined,
         layoutId: layoutOverride ?? undefined,
@@ -285,6 +305,7 @@ export function GenerateImageForm({
         return;
       }
 
+      setSelectedAssetIdx(0);
       setRun({
         kind: 'running',
         generationId: result.data.generationId,
@@ -293,6 +314,67 @@ export function GenerateImageForm({
       });
       startPolling(result.data.generationId);
     });
+  }
+
+  /** Regenerate with the EXACT same form state — useful when the user
+   *  liked the brief but wants another shot at the visuals. */
+  function handleRegenerate() {
+    if (!modelEntry || !modelId || idea.trim().length < 3) {
+      toast.error(tCommon('errorGeneric'));
+      return;
+    }
+    setRun({ kind: 'queueing' });
+    startTransition(async () => {
+      const result = await enqueueImageGeneration({
+        projectId,
+        idea: idea.trim(),
+        format,
+        provider: modelEntry.provider as ImageProvider,
+        model: modelId,
+        n,
+        language: plannerLanguage,
+        quality: effectiveQuality,
+        visualStyleOverride: visualStyleOverride ?? undefined,
+        layoutId: layoutOverride ?? undefined,
+      });
+      if (!result.ok) {
+        const msg = t('errorEnqueue');
+        setRun({ kind: 'failed', message: msg });
+        toast.error(msg);
+        return;
+      }
+      setSelectedAssetIdx(0);
+      setRun({
+        kind: 'running',
+        generationId: result.data.generationId,
+        status: 'queued',
+        assets: [],
+      });
+      startPolling(result.data.generationId);
+    });
+  }
+
+  /** Kick off a variations job for a specific asset. Server fetches the
+   *  raw bg from R2 and uses openai.images.edit. */
+  async function handleSubmitVariations(args: { tweakPrompt: string }) {
+    if (!moreLikeThisTarget) return;
+    const result = await enqueueVariations({
+      sourceAssetId: moreLikeThisTarget.assetId,
+      tweakPrompt: args.tweakPrompt.trim() || undefined,
+    });
+    if (!result.ok) {
+      toast.error(`Variations failed: ${result.error}`);
+      return;
+    }
+    setMoreLikeThisTarget(null);
+    setSelectedAssetIdx(0);
+    setRun({
+      kind: 'running',
+      generationId: result.data.generationId,
+      status: 'queued',
+      assets: [],
+    });
+    startPolling(result.data.generationId);
   }
 
   const formDisabled = pending || run.kind === 'queueing' || run.kind === 'running';
@@ -559,7 +641,10 @@ export function GenerateImageForm({
         <ResultPanel
           run={run}
           t={t}
+          format={format}
           layoutId={layoutOverride ?? DEFAULT_LAYOUT_FOR_FORMAT[format]}
+          selectedAssetIdx={selectedAssetIdx}
+          onSelectAsset={setSelectedAssetIdx}
           onEditCopy={(asset) =>
             setEditTarget({
               generationId: 'generationId' in run ? run.generationId : '',
@@ -567,6 +652,11 @@ export function GenerateImageForm({
               publicUrl: asset.publicUrl,
             })
           }
+          onMoreLikeThis={(asset) =>
+            setMoreLikeThisTarget({ assetId: asset.id, publicUrl: asset.publicUrl })
+          }
+          onRegenerate={handleRegenerate}
+          regenerateDisabled={formDisabled || noProvider || idea.trim().length < 3}
         />
       </aside>
       {editTarget?.generationId && (
@@ -596,27 +686,61 @@ export function GenerateImageForm({
                 ],
               };
             });
+            setSelectedAssetIdx(0);
             setEditTarget(null);
             toast.success('Overlay re-rendered (no cost — typography only)');
           }}
+        />
+      )}
+      {moreLikeThisTarget && (
+        <MoreLikeThisModal
+          target={moreLikeThisTarget}
+          initialIdea={idea}
+          onClose={() => setMoreLikeThisTarget(null)}
+          onSubmit={handleSubmitVariations}
         />
       )}
     </div>
   );
 }
 
+/**
+ * IG-style result panel: 1 big preview centered (max-w-600, format aspect)
+ * + horizontal thumb strip below + toolbar of asset actions. Clicking a
+ * thumb swaps the preview; selected thumb gets a 1px ink border + soft
+ * shadow. Dimensions move to a tooltip on the preview.
+ */
 function ResultPanel({
   run,
   t,
+  format,
   layoutId,
+  selectedAssetIdx,
+  onSelectAsset,
   onEditCopy,
+  onMoreLikeThis,
+  onRegenerate,
+  regenerateDisabled,
 }: {
   run: RunState;
   t: ReturnType<typeof useTranslations<'Generate'>>;
+  format: ImageFormat;
   layoutId: LayoutId | 'none';
+  selectedAssetIdx: number;
+  onSelectAsset: (idx: number) => void;
   onEditCopy: (asset: AssetSummary) => void;
+  onMoreLikeThis: (asset: AssetSummary) => void;
+  onRegenerate: () => void;
+  regenerateDisabled: boolean;
 }) {
   if (run.kind === 'idle') return null;
+
+  // Aspect ratio drives the preview frame so a 9:16 reel cover doesn't
+  // squish into a square. Always uses the FORMAT's intrinsic aspect, not
+  // the asset's reported width/height (those are sometimes null until
+  // the worker finishes ffprobing).
+  const fm = IMAGE_FORMATS[format];
+  const aspect = `${fm.w} / ${fm.h}`;
 
   if (run.kind === 'queueing' || (run.kind === 'running' && run.assets.length === 0)) {
     const caption =
@@ -640,49 +764,123 @@ function ResultPanel({
   }
 
   const assets = run.assets;
-  const grid = assets.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
+  if (assets.length === 0) return null;
+  const safeIdx = Math.min(Math.max(0, selectedAssetIdx), assets.length - 1);
+  const selected = assets[safeIdx] ?? assets[0];
+  if (!selected) return null;
   const canEdit = layoutId !== 'none' && run.kind === 'done';
+  const dimsLabel = `${selected.width ?? fm.w} × ${selected.height ?? fm.h}`;
+  const isDownloadable = Boolean(selected.publicUrl);
+
+  // box-shadow values — kept inline so we don't add a new tailwind layer
+  // for this one-off "selected thumb" treatment. Soft print-feel shadow:
+  // a tight inner offset plus a softer outer glow in the ink tone.
+  const selectedShadow = '0 1px 0 0 rgba(20,17,13,0.05), 0 8px 24px -8px rgba(20,17,13,0.25)';
 
   return (
-    <div className="space-y-4">
-      <div className={`grid gap-3 ${grid}`}>
-        {assets.map((a) => (
-          <figure key={a.id} className="space-y-2">
-            <div className="relative aspect-square border border-ink">
-              {a.publicUrl ? (
-                <Image
-                  src={a.publicUrl}
-                  alt=""
-                  fill
-                  sizes="(min-width: 1024px) 25vw, 50vw"
-                  className="object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-paper-2 mono-eyebrow text-ink-3">
-                  no public url
-                </div>
-              )}
-            </div>
-            <figcaption className="flex items-center justify-between gap-2">
-              <span className="mono-eyebrow text-ink-3">
-                {a.width ?? '?'} × {a.height ?? '?'}
-              </span>
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => onEditCopy(a)}
-                  className="mono-eyebrow text-ink underline underline-offset-2 hover:text-accent"
-                  title="Re-render typography on this background (no AI cost)"
-                >
-                  Edit copy
-                </button>
-              )}
-            </figcaption>
-          </figure>
-        ))}
+    <div className="space-y-5">
+      {/* Big preview */}
+      <figure
+        className="relative mx-auto w-full max-w-[600px] overflow-hidden border border-ink bg-paper-2"
+        style={{ aspectRatio: aspect }}
+        title={dimsLabel}
+      >
+        {selected.publicUrl ? (
+          <Image
+            src={selected.publicUrl}
+            alt=""
+            fill
+            sizes="(min-width: 1024px) 600px, 90vw"
+            className="object-cover"
+            unoptimized
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center mono-eyebrow text-ink-3">
+            no public url
+          </div>
+        )}
+        <figcaption className="sr-only">{dimsLabel}</figcaption>
+      </figure>
+
+      {/* Toolbar */}
+      <div className="mx-auto flex max-w-[600px] flex-wrap items-center justify-center gap-2">
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => onMoreLikeThis(selected)}
+            className="mono-eyebrow border border-ink px-3 py-2 hover:bg-ink hover:text-paper"
+            title="Generate 4 variations of this image (same model, same cost as fresh)"
+          >
+            + More like this
+          </button>
+        )}
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => onEditCopy(selected)}
+            className="mono-eyebrow border border-ink px-3 py-2 hover:bg-ink hover:text-paper"
+            title="Re-render typography on this background ($0)"
+          >
+            Edit copy
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onRegenerate}
+          disabled={regenerateDisabled}
+          className="mono-eyebrow border border-ink px-3 py-2 hover:bg-ink hover:text-paper disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-paper disabled:hover:text-ink"
+          title="Run the same brief again with a fresh AI background"
+        >
+          ↻ Regenerate
+        </button>
+        {isDownloadable && selected.publicUrl && (
+          <a
+            href={selected.publicUrl}
+            download={`reachy-${selected.id}.png`}
+            className="mono-eyebrow border border-ink px-3 py-2 hover:bg-ink hover:text-paper"
+            title="Download this image as PNG"
+          >
+            ↓ Download
+          </a>
+        )}
       </div>
+
+      {/* Thumb strip — only show when there's more than one variant. */}
+      {assets.length > 1 && (
+        <div className="mx-auto flex max-w-[600px] flex-wrap justify-center gap-3">
+          {assets.map((a, i) => {
+            const isActive = i === safeIdx;
+            return (
+              <button
+                type="button"
+                key={a.id}
+                onClick={() => onSelectAsset(i)}
+                className="block overflow-hidden bg-paper-2"
+                style={{
+                  width: 80,
+                  aspectRatio: aspect,
+                  border: `1px solid ${isActive ? 'var(--ink, #14110D)' : 'transparent'}`,
+                  boxShadow: isActive ? selectedShadow : 'none',
+                  transition: 'box-shadow 120ms ease, border-color 120ms ease',
+                }}
+                aria-label={`Show variant ${i + 1}`}
+                aria-pressed={isActive}
+              >
+                {a.publicUrl ? (
+                  // Plain img is fine here — small, no need for next/image.
+                  // biome-ignore lint/performance/noImgElement: 80px thumb
+                  <img src={a.publicUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <span className="block h-full w-full" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {run.kind === 'done' && (
-        <p className="mono-eyebrow text-ink-3">
+        <p className="mono-eyebrow text-center text-ink-3">
           {t('doneCaption')}
           {typeof run.costCents === 'number' && ` · ${t('costNote', { cents: run.costCents })}`}
         </p>
@@ -805,6 +1003,110 @@ function EditCopyModal({ target, layoutId, initialCopy, onClose, onRendered }: E
             disabled={submitting}
           >
             {submitting ? 'Re-rendering…' : 'Re-render overlay'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface MoreLikeThisModalProps {
+  target: { assetId: string; publicUrl: string | null };
+  initialIdea: string;
+  onClose: () => void;
+  onSubmit: (args: { tweakPrompt: string }) => Promise<void>;
+}
+
+function MoreLikeThisModal({ target, initialIdea, onClose, onSubmit }: MoreLikeThisModalProps) {
+  const [tweakPrompt, setTweakPrompt] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    try {
+      await onSubmit({ tweakPrompt });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/70 p-6"
+      role="dialog"
+      aria-modal
+      aria-label="Generate variations"
+    >
+      <button
+        type="button"
+        aria-label="Close dialog"
+        className="absolute inset-0 cursor-default bg-transparent"
+        onClick={onClose}
+      />
+      <div className="relative w-full max-w-lg space-y-6 bg-paper p-8 border border-ink">
+        <div>
+          <h3 style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 28 }}>
+            More like this
+          </h3>
+          <p className="mono-eyebrow mt-2 text-ink-3">
+            4 variations · same idea + same brand · only the visuals change
+          </p>
+        </div>
+
+        {target.publicUrl && (
+          <div className="flex justify-center">
+            {/* biome-ignore lint/performance/noImgElement: small preview */}
+            <img src={target.publicUrl} alt="" className="max-h-40 border border-ink" />
+          </div>
+        )}
+
+        <div>
+          <label htmlFor="vary-idea" className="mono-eyebrow mb-2 block">
+            Idea (locked)
+          </label>
+          <textarea
+            id="vary-idea"
+            rows={2}
+            value={initialIdea}
+            disabled
+            className="field resize-none cursor-not-allowed opacity-75"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="vary-tweak" className="mono-eyebrow mb-2 block">
+            Tweak (optional)
+          </label>
+          <textarea
+            id="vary-tweak"
+            rows={2}
+            value={tweakPrompt}
+            onChange={(e) => setTweakPrompt(e.target.value)}
+            placeholder="warmer, more centered, more negative space"
+            maxLength={400}
+            className="field resize-y placeholder:text-ink-3"
+          />
+          <p className="mono-eyebrow mt-2 text-ink-3">
+            Cost · ~$0.76 (4 × current model + quality)
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 border-t border-ink-3/30 pt-6">
+          <button
+            type="button"
+            className="mono-eyebrow text-ink-3 hover:text-ink"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-ink disabled:opacity-50"
+            onClick={handleSubmit}
+            disabled={submitting}
+          >
+            {submitting ? 'Queuing…' : 'Generate 4 variations'}
           </button>
         </div>
       </div>

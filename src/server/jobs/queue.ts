@@ -30,6 +30,14 @@ export interface ImageGenJobData {
   idea?: string;
   /** Language for the planned copy. */
   language?: 'en' | 'es';
+  /** Variation mode: when set, the worker calls OpenAI's images.edit
+   *  with this URL's bytes as the source image instead of images.generate.
+   *  Used by the "More like this" flow — keeps the original visual but
+   *  applies an edit prompt for variations / nudges. */
+  sourceRawUrl?: string;
+  /** Plain-English nudge appended to the combined edit prompt when in
+   *  variation mode ("warmer, more centered, more negative space"). */
+  tweakPrompt?: string;
 }
 
 let cached: Queue<ImageGenJobData> | null = null;

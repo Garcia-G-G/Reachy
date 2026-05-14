@@ -1,4 +1,5 @@
 import 'server-only';
+import { toFile } from 'openai';
 import sharp from 'sharp';
 import type { ImageFormat, ImageFormatSpec, ImageProvider } from '@/lib/image-formats';
 import { estimateImageCost, type ImageModelId, type QualityTier } from '@/lib/image-models';
@@ -57,6 +58,10 @@ export interface GenerateImageInput {
   /** OpenAI-family quality tier. fal entries ignore this. Defaults to
    *  'medium' when omitted so legacy callers don't change behavior. */
   quality?: QualityTier;
+  /** When set, the OpenAI path runs `images.edit` against this source
+   *  buffer instead of `images.generate`. The fal path ignores this.
+   *  Used by the "More like this" variation flow. */
+  sourceImage?: Buffer;
 }
 
 export interface GenerateImageResult {
@@ -130,13 +135,28 @@ async function openaiImage(input: GenerateImageInput): Promise<GenerateImageResu
   // that don't supply one. Garcia's image form passes the user's selection.
   const quality = input.quality ?? 'medium';
 
-  const result = await openai.images.generate({
-    model: input.model,
-    prompt: input.prompt,
-    n: input.n,
-    size,
-    quality,
-  });
+  // Variation mode: when a sourceImage buffer is provided we call the
+  // images.edit endpoint (gpt-image-* family supports it natively, up
+  // to 16 reference images). Cost mirrors generate at the same tier
+  // because OpenAI bills per output image regardless of endpoint.
+  // The toFile helper wraps the Buffer with a filename so the SDK can
+  // serialize it as multipart/form-data.
+  const result = input.sourceImage
+    ? await openai.images.edit({
+        model: input.model,
+        image: await toFile(input.sourceImage, 'source.png', { type: 'image/png' }),
+        prompt: input.prompt,
+        n: input.n,
+        size,
+        quality,
+      })
+    : await openai.images.generate({
+        model: input.model,
+        prompt: input.prompt,
+        n: input.n,
+        size,
+        quality,
+      });
 
   if (!result.data || result.data.length === 0) {
     throw new Error('OpenAI returned no images.');

@@ -38,7 +38,8 @@ export type FalImageModelId =
   | 'fal-ai/flux-2-flex'
   | 'fal-ai/recraft-v3'
   | 'fal-ai/nano-banana-2'
-  | 'fal-ai/ideogram/v3';
+  | 'fal-ai/ideogram/v3'
+  | 'fal-ai/stable-diffusion-v35-large';
 
 export type ImageModelId = OpenAIImageModelId | FalImageModelId;
 
@@ -196,6 +197,18 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelEntry> = {
     supportsEdit: false,
     supportsReferenceImages: false,
     note: 'Three tiers map to fal turbo / balanced / quality. Beats gpt-image-2 on small-font and tight typographic layouts.',
+  },
+  'fal-ai/stable-diffusion-v35-large': {
+    id: 'fal-ai/stable-diffusion-v35-large',
+    provider: 'fal',
+    label: 'fal.ai · Stable Diffusion 3.5 Large',
+    tagline: 'Photoreal Stability flagship · ~6¢/image · 1MP sweet spot',
+    costCentsByQuality: { low: 6, medium: 6, high: 6, auto: 6 },
+    supportsQualityTier: false,
+    rendersTextWell: false,
+    supportsEdit: false,
+    supportsReferenceImages: false,
+    note: 'Mediocre text rendering vs FLUX/Ideogram. Strong for photoreal scenes and stylised illustrations; cheaper than Ideogram for non-typographic work. Endpoint: fal-ai/stable-diffusion-v35-large (note `v35`).',
   },
 };
 
