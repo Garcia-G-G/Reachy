@@ -94,6 +94,10 @@ export async function synthesizeElevenLabs(
     );
   }
   const modelId = env.ELEVENLABS_MODEL_ID ?? 'eleven_v3';
+  const startedAt = Date.now();
+  console.log(
+    `[reachy:debug-trace] synthesizeElevenLabs -> convert voiceId=${voiceId} modelId=${modelId} lang=${args.language} textBytes=${args.text.length}`,
+  );
 
   const stream = await client.textToSpeech.convert(voiceId, {
     text: args.text,
@@ -128,5 +132,8 @@ export async function synthesizeElevenLabs(
   // For typical reel scene text (50 chars) this rounds to <1¢; per-scene
   // 1¢ floor stays aligned with the OpenAI TTS reporting we replaced.
   const costCents = Math.max(1, Math.round((args.text.length / 1000) * 30));
+  console.log(
+    `[reachy:debug-trace] synthesizeElevenLabs ok voiceId=${voiceId} bytes=${buffer.length} costCents=${costCents} elapsedMs=${Date.now() - startedAt}`,
+  );
   return { buffer, bytes: buffer.length, costCents };
 }

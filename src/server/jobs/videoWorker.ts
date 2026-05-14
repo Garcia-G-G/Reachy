@@ -31,7 +31,7 @@ import {
   type OneShotBeat,
 } from '@/server/video/compose';
 import { ensureFfmpeg } from '@/server/video/ensureFfmpeg';
-import { ffprobe } from '@/server/video/ffprobe';
+import { ffprobe, type ProbeResult } from '@/server/video/ffprobe';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 import type { VideoGenJobData } from './videoQueue';
 
@@ -86,6 +86,9 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
     QUEUE_NAMES.videoGen,
     async (job) => {
       const { generationId, projectId, projectSlug, engine, plan } = job.data;
+      console.log(
+        `[reachy:debug-trace] worker pickup generationId=${generationId} engine=${engine} template=${plan.template} sceneCount=${plan.scenes.length} attemptsMade=${job.attemptsMade}`,
+      );
       await db.update(generation).set({ status: 'running' }).where(eq(generation.id, generationId));
 
       // Idempotency: a retry should leave no stale partial assets behind.
@@ -106,11 +109,13 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
             ? await runFfmpeg(job.data, progressCb)
             : await runSoraOneShot(job.data, progressCb);
 
-        // Truth: ffprobe the final MP4 and use its container duration for
-        // asset.duration_sec. The previous worker wrote the plan total
-        // (sum of scene.durationSec) which silently hid the 7s truncation
-        // across three reels (see planning/DIAGNOSTIC-LAST-REEL.md).
-        const probed = await ffprobe(out.outputPath);
+        // Truth: out.probed was captured INSIDE the engine fn before its tmp
+        // dir was cleaned up. The previous version called ffprobe(out.outputPath)
+        // here, which raced the engine's `finally { rm(tmp) }` cleanup and
+        // ENOENT'd every time. The plan-total lie (asset.duration_sec = sum
+        // of scene.durationSec) hid the 7s Sora truncation for three reels;
+        // see planning/DIAGNOSTIC-LAST-REEL.md.
+        const probed = out.probed;
         const expected = out.expectedDurationSec;
         const truncationRatio = expected > 0 ? probed.durationSec / expected : 1;
         if (truncationRatio < 0.95) {
@@ -124,8 +129,15 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
           `[reachy:video] gen ${generationId} ffprobe: ${probed.durationSec.toFixed(2)}s ${probed.videoCodec} ${probed.width}x${probed.height} @ ${probed.fps}fps (expected ${expected.toFixed(2)}s)`,
         );
 
+        console.log(
+          `[reachy:debug-trace] worker uploading to R2 generationId=${generationId} bytes=${out.bytes}`,
+        );
+        const r2Start = Date.now();
         const key = `${projectId}/reels/${generationId}.mp4`;
         const upload = await putR2(key, out.buffer, 'video/mp4');
+        console.log(
+          `[reachy:debug-trace] worker R2 ok key=${upload.key} bytes=${upload.bytes} elapsedMs=${Date.now() - r2Start}`,
+        );
 
         await db.insert(asset).values({
           generationId,
@@ -216,11 +228,14 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
 interface EngineResult {
   buffer: Buffer;
   bytes: number;
-  /** Local path of the final composed MP4 — the worker ffprobes this for the
-   *  asset row's real duration (not the plan total — see DIAGNOSTIC). */
-  outputPath: string;
+  /** ffprobe of the final composed MP4. The engine functions run ffprobe
+   *  BEFORE their `finally { rm(tmp) }` cleanup, then ship the result
+   *  through here. Probing outside the engine would race the tmp-dir
+   *  cleanup and ENOENT every time — that's the bug Cowork diagnosed
+   *  in the live-debug session. */
+  probed: ProbeResult;
   /** Total intended duration from the plan/engine. Used by the truncation
-   *  guard: if ffprobe(outputPath) < 0.95 × expectedDurationSec the worker
+   *  guard: if probed.durationSec < 0.95 × expectedDurationSec the worker
    *  fails the generation with `compose-truncated` instead of writing a lie. */
   expectedDurationSec: number;
   costCents: number;
@@ -328,6 +343,11 @@ async function runFfmpeg(
       onProgress,
     });
 
+    // ffprobe MUST run before the `finally` block below clears the tmp dir
+    // — otherwise the outer worker would race the cleanup and ENOENT (the
+    // bug Cowork diagnosed in the live-debug session). Probe + read both
+    // happen on the file while it still exists.
+    const probed = await ffprobe(outputPath);
     const buffer = await readFile(outputPath);
     const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
     const expectedDur = totalDur - (data.plan.scenes.length - 1) * 0.4;
@@ -335,7 +355,7 @@ async function runFfmpeg(
     return {
       buffer,
       bytes: buffer.length,
-      outputPath,
+      probed,
       expectedDurationSec: expectedDur,
       costCents,
       costBreakdown: {
@@ -598,6 +618,8 @@ async function runSora(
       onProgress: (pct) => onProgress?.(0.9 + pct * 0.1),
     });
 
+    // ffprobe BEFORE the finally block reaps tmp — see EngineResult.probed.
+    const probed = await ffprobe(outputPath);
     const buffer = await readFile(outputPath);
     const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
 
@@ -616,7 +638,7 @@ async function runSora(
     return {
       buffer,
       bytes: buffer.length,
-      outputPath,
+      probed,
       expectedDurationSec: expectedDur,
       costCents,
       costBreakdown: {
@@ -657,6 +679,9 @@ async function runSoraOneShot(
   onProgress?: (pct: number) => void,
 ): Promise<EngineResult> {
   const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-oneshot-'));
+  console.log(
+    `[reachy:debug-trace] runSoraOneShot enter generationId=${data.generationId} engine=${data.engine} tmp=${tmp}`,
+  );
   try {
     const soraModel: SoraModel = data.engine === 'sora-pro-720p' ? 'sora-2-pro' : 'sora-2';
     const style = resolveVisualStyle(data.visualStyle);
@@ -740,6 +765,9 @@ async function runSoraOneShot(
         const dl = await downloadSora(job.jobId);
         await writeFile(videoPath, dl.buffer);
         console.log(
+          `[reachy:debug-trace] runSoraOneShot wrote Sora MP4 path=${videoPath} bytes=${dl.bytes}`,
+        );
+        console.log(
           `[reachy:video] gen ${data.generationId} one-shot downloaded (${dl.bytes} bytes)`,
         );
         break;
@@ -771,6 +799,10 @@ async function runSoraOneShot(
     }));
 
     const outputPath = join(tmp, 'out.mp4');
+    console.log(
+      `[reachy:debug-trace] runSoraOneShot -> composeOneShot beats=${beats.length} hasAudio=${Boolean(audioPath)} duration=${SORA_ONE_SHOT_DURATION_SEC}s outputPath=${outputPath}`,
+    );
+    const composeStart = Date.now();
     await composeOneShot({
       videoPath,
       beats,
@@ -779,14 +811,25 @@ async function runSoraOneShot(
       outputPath,
       onProgress: (pct) => onProgress?.(0.85 + pct * 0.15),
     });
+    console.log(
+      `[reachy:debug-trace] runSoraOneShot composeOneShot done elapsedMs=${Date.now() - composeStart}`,
+    );
 
+    // ffprobe BEFORE the finally block reaps tmp — see EngineResult.probed.
+    // This is the bug fix: previously the outer worker called ffprobe on
+    // outputPath after we returned, but our `finally { rm(tmp) }` had
+    // already deleted the file. ENOENT every single render.
+    const probed = await ffprobe(outputPath);
+    console.log(
+      `[reachy:debug-trace] runSoraOneShot ffprobe done duration=${probed.durationSec.toFixed(2)}s width=${probed.width} height=${probed.height} codec=${probed.videoCodec}`,
+    );
     const buffer = await readFile(outputPath);
     const videoCostCents = soraCostCents(soraModel, SORA_ONE_SHOT_DURATION_SEC);
     const costCents = 1 + videoCostCents + tts.ttsCostCents;
     return {
       buffer,
       bytes: buffer.length,
-      outputPath,
+      probed,
       expectedDurationSec: SORA_ONE_SHOT_DURATION_SEC,
       costCents,
       costBreakdown: {

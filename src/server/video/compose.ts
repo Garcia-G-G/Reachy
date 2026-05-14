@@ -692,6 +692,9 @@ export interface ComposeOneShotArgs {
  * `enable='between(t, startSec, endSec)'` ranges on the same input stream.
  */
 export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ outputPath: string }> {
+  console.log(
+    `[reachy:debug-trace] composeOneShot enter videoPath=${args.videoPath} beats=${args.beats.length} hasAudio=${Boolean(args.audioPath)} duration=${args.durationSec}s outputPath=${args.outputPath}`,
+  );
   const fontFile = await resolveDrawtextFont();
   const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-oneshot-'));
 
@@ -763,9 +766,13 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
         : `[0:v]${baseChain}[vfinal]`;
       filters.push(videoChain);
 
+      // NOTE: complexFilter(filters, ['vfinal']) below already adds `-map [vfinal]`
+      // automatically (see fluent-ffmpeg source). Duplicating `-map [vfinal]` here
+      // caused ffmpeg to exit 234 with "Invalid argument" on the oneshot path —
+      // diagnosed May 13. Only map the audio input (or `-an`) here.
       const audioOpts = args.audioPath
-        ? ['-map', '[vfinal]', '-map', '1:a', '-c:a', 'aac', '-b:a', '128k', '-shortest']
-        : ['-map', '[vfinal]', '-an'];
+        ? ['-map', '1:a', '-c:a', 'aac', '-b:a', '128k', '-shortest']
+        : ['-an'];
 
       cmd
         .complexFilter(filters, ['vfinal'])
@@ -788,6 +795,7 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
         ])
         .output(args.outputPath)
         .on('start', (cmdline) => {
+          console.log(`[reachy:debug-trace] composeOneShot ffmpeg start argv:\n${cmdline}`);
           console.log(`[reachy:video] ffmpeg cmd (oneshot):\n${cmdline}`);
         })
         .on('progress', (info) => {
@@ -795,9 +803,17 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
             args.onProgress(Math.min(1, Math.max(0, info.percent / 100)));
           }
         })
-        .on('end', () => resolve({ outputPath: args.outputPath }))
+        .on('end', () => {
+          console.log(
+            `[reachy:debug-trace] composeOneShot ffmpeg ok outputPath=${args.outputPath}`,
+          );
+          resolve({ outputPath: args.outputPath });
+        })
         .on('error', (err, _stdout, stderr) => {
           const tail = (stderr ?? '').split('\n').slice(-40).join('\n');
+          console.error(
+            `[reachy:debug-trace] composeOneShot ffmpeg ERROR: ${err.message}\n--- stderr tail ---\n${tail}`,
+          );
           reject(
             new Error(`${err.message}${tail ? `\n--- ffmpeg stderr (tail) ---\n${tail}` : ''}`),
           );

@@ -85,20 +85,38 @@ export async function submitSora(args: SoraSubmitArgs): Promise<SoraJob> {
   const seconds = String(args.durationSec) as '4' | '8' | '12';
   // VideoSize: '720x1280' is 9:16 portrait. 1280x720 would be 16:9.
   const size = args.aspectRatio === '9:16' ? '720x1280' : '1280x720';
-  const video = await openai.videos.create({
-    model: args.model,
-    prompt: args.prompt,
-    seconds,
-    size,
-  });
-  return { jobId: video.id, model: args.model, durationSec: args.durationSec };
+  const startedAt = Date.now();
+  console.log(
+    `[reachy:debug-trace] submitSora -> openai.videos.create model=${args.model} size=${size} seconds=${seconds} promptBytes=${args.prompt.length}`,
+  );
+  try {
+    const video = await openai.videos.create({
+      model: args.model,
+      prompt: args.prompt,
+      seconds,
+      size,
+    });
+    console.log(
+      `[reachy:debug-trace] submitSora ok jobId=${video.id} elapsedMs=${Date.now() - startedAt}`,
+    );
+    return { jobId: video.id, model: args.model, durationSec: args.durationSec };
+  } catch (err) {
+    console.error(
+      `[reachy:debug-trace] submitSora failed elapsedMs=${Date.now() - startedAt} err=${(err as Error).message}`,
+    );
+    throw err;
+  }
 }
 
 /** Poll a Sora job. State maps the SDK status to our internal enum. */
 export async function pollSora(job: SoraJob): Promise<SoraStatus> {
   const openai = getOpenAI();
+  const startedAt = Date.now();
   try {
     const video = await openai.videos.retrieve(job.jobId);
+    console.log(
+      `[reachy:debug-trace] pollSora jobId=${job.jobId} status=${video.status} progress=${video.progress ?? 'n/a'}% elapsedMs=${Date.now() - startedAt}`,
+    );
     if (video.status === 'completed') return { state: 'done', progress: 100 };
     if (video.status === 'failed') {
       return { state: 'failed', errorMessage: video.error?.message ?? 'sora returned failed' };
@@ -107,6 +125,9 @@ export async function pollSora(job: SoraJob): Promise<SoraStatus> {
     return { state: 'queued', progress: video.progress };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[reachy:debug-trace] pollSora threw jobId=${job.jobId} elapsedMs=${Date.now() - startedAt} err=${message}`,
+    );
     return { state: 'failed', errorMessage: message };
   }
 }
@@ -118,8 +139,16 @@ export async function pollSora(job: SoraJob): Promise<SoraStatus> {
  */
 export async function downloadSora(jobId: string): Promise<{ buffer: Buffer; bytes: number }> {
   const openai = getOpenAI();
+  const startedAt = Date.now();
+  console.log(`[reachy:debug-trace] downloadSora -> openai.videos.downloadContent jobId=${jobId}`);
   const response = await openai.videos.downloadContent(jobId, { variant: 'video' });
+  console.log(
+    `[reachy:debug-trace] downloadSora response status=${response.status} contentLength=${response.headers.get('content-length') ?? 'n/a'} contentType=${response.headers.get('content-type') ?? 'n/a'}`,
+  );
   const arrayBuffer = await response.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
+  console.log(
+    `[reachy:debug-trace] downloadSora ok jobId=${jobId} bytes=${buffer.length} elapsedMs=${Date.now() - startedAt}`,
+  );
   return { buffer, bytes: buffer.length };
 }
