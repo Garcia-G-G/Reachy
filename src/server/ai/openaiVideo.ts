@@ -102,6 +102,67 @@ export interface SoraStatus {
   errorMessage?: string;
 }
 
+export interface SoraExtendArgs {
+  /** Existing completed Sora video to continue from — its last frame seeds
+   *  the new segment, preserving motion + camera + style. */
+  sourceVideoId: string;
+  /** New prompt directing what happens next. Per OpenAI's guide, keep the
+   *  master visualStyle language and add "continue smoothly" cues. */
+  prompt: string;
+  durationSec: SoraDuration;
+  /** Same as submit; passed through to keep all segments at the same model. */
+  model: SoraModel;
+}
+
+/**
+ * Kick off a Sora extension. The full source video is sent as context; the
+ * new segment starts from the source's last frame and continues for
+ * `durationSec` more seconds. Used by the worker to chain past the 12s
+ * single-shot ceiling — Explainer-25s needs 19s of image-scene Sora, so
+ * the worker calls submitSora(12s) then extendSora(8s) and concats.
+ *
+ * Limitations to be aware of:
+ *  • Extensions do NOT support character references (we don't use any).
+ *  • Same 4/8/12 second slots as create.
+ *  • Pricing matches create at the model's rate; a 12s + 8s chain costs
+ *    the same as a single 20s call would (which the API doesn't allow).
+ */
+export async function extendSora(args: SoraExtendArgs): Promise<SoraJob> {
+  const openai = getOpenAI();
+  const seconds = String(args.durationSec) as '4' | '8' | '12';
+  const video = await openai.videos.extend({
+    video: { id: args.sourceVideoId },
+    prompt: args.prompt,
+    seconds,
+  });
+  return { jobId: video.id, model: args.model, durationSec: args.durationSec };
+}
+
+/**
+ * Pack a target number of seconds into Sora's valid 4/8/12 segment slots,
+ * greedy-largest-first. Returns the list of segment durations whose sum
+ * is the SMALLEST value ≥ the target. The caller can trim the final
+ * concat to the exact target with -t.
+ *
+ *   19s → [12, 8]   (sum 20, trim 1)
+ *   25s → [12, 12, 4] (sum 28, trim 3)
+ *   8s  → [8]       (sum 8)
+ *   3s  → [4]       (sum 4)
+ */
+export function planSoraSegments(targetSec: number): SoraDuration[] {
+  if (targetSec <= 0) return [];
+  const segs: SoraDuration[] = [];
+  let remaining = targetSec;
+  while (remaining > 12) {
+    segs.push(12);
+    remaining -= 12;
+  }
+  if (remaining > 8) segs.push(12);
+  else if (remaining > 4) segs.push(8);
+  else if (remaining > 0) segs.push(4);
+  return segs;
+}
+
 /** Kick off a Sora generation. Returns the job id immediately. */
 export async function submitSora(args: SoraSubmitArgs): Promise<SoraJob> {
   const openai = getOpenAI();

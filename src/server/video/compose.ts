@@ -404,7 +404,7 @@ function captionBoxRect(pos: 'top' | 'bottom' | 'center'): string {
   return 'x=40:y=ih-440:w=iw-80:h=320';
 }
 
-async function ensureBrandBg(dir: string, hex: string): Promise<string> {
+export async function ensureBrandBg(dir: string, hex: string): Promise<string> {
   const { r, g, b } = hexToRgb(hex);
   const path = join(dir, 'brand-bg.png');
   await sharp({
@@ -604,23 +604,27 @@ export interface BuildOneShotAudioArgs {
   tmpDir: string;
   /** Per-scene narration paths, in scene order. nulls become silence. */
   sceneAudios: Array<string | null>;
-  /** Total reel duration the audio must cover (the Sora clip's `-t`). */
-  totalDurationSec: number;
+  /** Per-scene durations in seconds, parallel to sceneAudios. Each TTS clip
+   *  is padded (or trimmed) to its scene's exact duration before concat,
+   *  so the narrator aligns with the matching overlay window even when
+   *  scenes are non-uniform (e.g. Explainer-25s = 5,7,7,6). */
+  sceneDurationsSec: number[];
 }
 
 /**
- * Concatenate per-scene TTS mp3s into one audio file aligned to even beat
- * windows over the reel's total duration. Each clip is padded with trailing
- * silence to its beat duration, then concatenated, so the narrator's start
- * lines up with each overlay's start. Returns undefined if every scene was
- * silent (caller drops audio entirely).
+ * Concatenate per-scene TTS mp3s into one audio file matching each scene's
+ * exact duration. Returns undefined if every scene was silent.
  */
 export async function buildOneShotAudioTrack(
   args: BuildOneShotAudioArgs,
 ): Promise<string | undefined> {
-  const { tmpDir, sceneAudios, totalDurationSec } = args;
+  const { tmpDir, sceneAudios, sceneDurationsSec } = args;
   if (!sceneAudios.some((p) => p)) return undefined;
-  const beatDur = totalDurationSec / Math.max(1, sceneAudios.length);
+  if (sceneAudios.length !== sceneDurationsSec.length) {
+    throw new Error(
+      `buildOneShotAudioTrack: sceneAudios length (${sceneAudios.length}) != sceneDurationsSec length (${sceneDurationsSec.length})`,
+    );
+  }
   const outputPath = join(tmpDir, 'oneshot-audio.mp3');
 
   return await new Promise<string>((resolve, reject) => {
@@ -633,14 +637,15 @@ export async function buildOneShotAudioTrack(
     let inIdx = 0;
     for (let i = 0; i < sceneAudios.length; i++) {
       const seg = `seg${i}`;
+      const dur = sceneDurationsSec[i] ?? 0;
       if (sceneAudios[i]) {
         filters.push(
-          `[${inIdx}:a]apad=whole_dur=${beatDur},atrim=0:${beatDur},asetpts=PTS-STARTPTS[${seg}]`,
+          `[${inIdx}:a]apad=whole_dur=${dur},atrim=0:${dur},asetpts=PTS-STARTPTS[${seg}]`,
         );
         inIdx++;
       } else {
         filters.push(
-          `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=0:${beatDur},asetpts=PTS-STARTPTS[${seg}]`,
+          `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=0:${dur},asetpts=PTS-STARTPTS[${seg}]`,
         );
       }
       segLabels.push(`[${seg}]`);
@@ -657,6 +662,120 @@ export async function buildOneShotAudioTrack(
   });
 }
 
+export interface ConcatVideoSegmentsArgs {
+  /** Worker's per-job tmp dir. The composite MP4 lives inside it. */
+  tmpDir: string;
+  /** Pre-downloaded Sora MP4 paths, in chronological order. */
+  segments: string[];
+  /** Optional trailing brand-bg phase: a solid-color PNG looped for this
+   *  many seconds. Skipped when null. Used by Explainer/Pitch templates
+   *  whose final scene is `background:'brand'`. */
+  brandBg?: { pngPath: string; durationSec: number };
+  /** Trim the concatenated SORA portion to this length BEFORE appending
+   *  brand-bg. (Sora segments come in 4/8/12 slots; usually slightly
+   *  overshoot the planned image-scene total.) Pass undefined to keep
+   *  the full natural length. */
+  soraTrimSec?: number;
+  /** Output file name (relative to tmpDir). */
+  outputName: string;
+}
+
+/**
+ * Stitch a chain of Sora extension segments (and optionally a brand-bg PNG
+ * tail) into a single MP4 timeline. Uses concat in the filter graph (not
+ * the concat demuxer) so we can mix MP4 + looped PNG sources and trim the
+ * Sora portion in one pass.
+ *
+ * Returns the composite path. The worker then hands this to composeOneShot
+ * for caption + audio overlay.
+ */
+export async function concatVideoSegments(
+  args: ConcatVideoSegmentsArgs,
+): Promise<{ outputPath: string; durationSec: number }> {
+  if (args.segments.length === 0 && !args.brandBg) {
+    throw new Error('concatVideoSegments: at least one segment or a brand-bg required');
+  }
+  const outputPath = join(args.tmpDir, args.outputName);
+
+  return await new Promise<{ outputPath: string; durationSec: number }>((resolve, reject) => {
+    const cmd = ffmpeg();
+    // Sora segments as video inputs.
+    for (const seg of args.segments) cmd.input(seg);
+    // Brand-bg as a looped PNG input.
+    if (args.brandBg) {
+      cmd
+        .input(args.brandBg.pngPath)
+        .inputOptions(['-loop', '1', '-t', String(args.brandBg.durationSec)]);
+    }
+
+    const filters: string[] = [];
+    // Normalize each Sora segment to 1080x1920 yuv420p 30fps. Sora delivers
+    // 720x1280 or 1024x1792, both 9:16; force_original_aspect_ratio=increase
+    // upscales without letterboxing.
+    args.segments.forEach((_, i) => {
+      filters.push(
+        `[${i}:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase,crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},fps=${REEL_DIMENSIONS.fps},format=yuv420p[v${i}]`,
+      );
+    });
+    let videoChainLabel: string;
+    if (args.segments.length === 0) {
+      // Brand-only (degenerate edge case — usually we have ≥1 Sora segment).
+      filters.push(
+        `[0:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},fps=${REEL_DIMENSIONS.fps},format=yuv420p[brand]`,
+      );
+      videoChainLabel = 'brand';
+    } else if (args.segments.length === 1 && !args.brandBg) {
+      videoChainLabel = 'v0';
+    } else {
+      // Concat the normalized Sora segments first.
+      const segLabels = args.segments.map((_, i) => `[v${i}]`).join('');
+      filters.push(`${segLabels}concat=n=${args.segments.length}:v=1:a=0[soracat]`);
+      let soraChain = 'soracat';
+      if (args.soraTrimSec) {
+        filters.push(`[soracat]trim=0:${args.soraTrimSec},setpts=PTS-STARTPTS[soratrim]`);
+        soraChain = 'soratrim';
+      }
+      if (args.brandBg) {
+        const brandIdx = args.segments.length;
+        filters.push(
+          `[${brandIdx}:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},fps=${REEL_DIMENSIONS.fps},format=yuv420p[brand]`,
+        );
+        filters.push(`[${soraChain}][brand]concat=n=2:v=1:a=0[vfinal]`);
+        videoChainLabel = 'vfinal';
+      } else {
+        videoChainLabel = soraChain;
+      }
+    }
+
+    const totalDur =
+      (args.soraTrimSec ?? args.segments.reduce((sum, _, i) => sum + (i === 0 ? 12 : 12), 0)) +
+      (args.brandBg?.durationSec ?? 0);
+
+    cmd
+      .complexFilter(filters, [videoChainLabel])
+      .outputOptions([
+        '-c:v',
+        'libx264',
+        '-preset',
+        'medium',
+        '-crf',
+        '20',
+        '-pix_fmt',
+        'yuv420p',
+        '-r',
+        String(REEL_DIMENSIONS.fps),
+        '-an',
+      ])
+      .output(outputPath)
+      .on('end', () => resolve({ outputPath, durationSec: totalDur }))
+      .on('error', (err, _stdout, stderr) => {
+        const tail = (stderr ?? '').split('\n').slice(-20).join('\n');
+        reject(new Error(`concatVideoSegments: ${err.message}\n--- stderr ---\n${tail}`));
+      })
+      .run();
+  });
+}
+
 export interface OneShotBeat {
   /** Plain text overlay for this beat (word-by-word reveal still applies). */
   text: string;
@@ -666,6 +785,10 @@ export interface OneShotBeat {
   endSec: number;
   /** Where the caption sits within the frame. */
   position: 'top' | 'bottom' | 'center';
+  /** When true the drawbox behind the text is transparent — used for the
+   *  brand-bg trailing scene where the colored background IS the visual
+   *  and a black caption rectangle would compete with it. */
+  isBrand?: boolean;
 }
 
 export interface OneShotSfxHit {
@@ -770,8 +893,9 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
         const fontSize = overlayFontSize(beat.position);
         const beatStart = beat.startSec.toFixed(3);
         const beatEnd = beat.endSec.toFixed(3);
+        const boxAlpha = beat.isBrand ? '00' : '88';
         overlayParts.push(
-          `drawbox=${captionBoxRect(beat.position)}:color=0x00000088:t=fill:enable='between(t,${beatStart},${beatEnd})'`,
+          `drawbox=${captionBoxRect(beat.position)}:color=0x000000${boxAlpha}:t=fill:enable='between(t,${beatStart},${beatEnd})'`,
         );
         for (const snap of snaps) {
           const enable = `:enable='between(t,${snap.startSec.toFixed(3)},${snap.endSec.toFixed(3)})'`;

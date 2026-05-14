@@ -21,10 +21,6 @@ export const SORA_ENGINE_CENTS_PER_SEC = {
   'sora-pro-1024p': 50,
 } as const;
 
-/** All Sora engines run through the one-shot path (one 12s clip). Multi-
- *  scene Sora is dead code; the estimator bills against the single clip. */
-export const SORA_ONE_SHOT_SEC = 12;
-
 /** Snap a requested duration to the nearest supported Sora step. Ties round up. */
 export function snapSoraDuration(seconds: number): SoraDuration {
   let best: SoraDuration = SORA_VALID_DURATIONS[0];
@@ -37,6 +33,29 @@ export function snapSoraDuration(seconds: number): SoraDuration {
     }
   }
   return best;
+}
+
+/**
+ * Pack a target number of seconds into Sora's valid 4/8/12 segment slots,
+ * greedy-largest-first. Mirrors planSoraSegments in server/ai/openaiVideo.ts
+ * (client-safe duplicate so the cost preview can compute multi-segment
+ * billing without a server roundtrip).
+ *
+ *   19s → [12, 8]   (sum 20)
+ *   25s → [12, 12, 4] (sum 28)
+ */
+export function planSoraSegments(targetSec: number): SoraDuration[] {
+  if (targetSec <= 0) return [];
+  const segs: SoraDuration[] = [];
+  let remaining = targetSec;
+  while (remaining > 12) {
+    segs.push(12);
+    remaining -= 12;
+  }
+  if (remaining > 8) segs.push(12);
+  else if (remaining > 4) segs.push(8);
+  else if (remaining > 0) segs.push(4);
+  return segs;
 }
 
 export interface ReelCostScene {
@@ -65,14 +84,19 @@ export interface ReelCostBreakdown {
  * Pre-render cost estimate. Same shape returned to server-side cap check
  * and client-side preview so the two never disagree:
  *   ffmpeg              → ~14¢/image-scene (Flux Pro inline) + TTS + 1¢ compose
- *   sora-base           → ~10¢/sec × 12s one-shot + TTS + 1¢ compose
- *   sora-pro-720p       → ~30¢/sec × 12s one-shot + TTS + 1¢ compose
- *   sora-pro-1024p      → ~50¢/sec × 12s one-shot + TTS + 1¢ compose
+ *   sora-*              → Σ(rate × segDur) over planSoraSegments(imageSec) + TTS + 1¢ compose
  *
- * The Sora engines all bill against ONE 12s clip — the worker runs the
- * one-shot path for any sora-* engine. The estimator does not include
- * music or SFX yet (negligible: ~$0.30 + ~$0.15 typical at ElevenLabs
- * Music/SFX rates; well under the rounding noise on cap enforcement).
+ * Sora engines render the image-backed portion of the timeline as a chain
+ * of 4/8/12s segments (videos.create + videos.extend). Billing matches:
+ * a 19s reel renders as [12, 8] and pays for 20 segment-seconds at the
+ * engine's rate. Brand-bg scenes never go to Sora — they're a looped
+ * solid-color PNG with 0¢ marginal video cost.
+ *
+ * Music + SFX are still excluded from the estimate (negligible: ~$0.30 +
+ * ~$0.15 typical at ElevenLabs rates; well under the rounding noise on
+ * cap enforcement). The actual breakdown persisted in
+ * generation.params.costBreakdown DOES include them, populated by the
+ * worker after the real render.
  */
 export function estimateReelCost(engine: ReelEngine, scenes: ReelCostScene[]): ReelCostBreakdown {
   let tts = 0;
@@ -88,6 +112,12 @@ export function estimateReelCost(engine: ReelEngine, scenes: ReelCostScene[]): R
   }
 
   const rate = SORA_ENGINE_CENTS_PER_SEC[engine];
-  const video = rate * SORA_ONE_SHOT_SEC;
+  // Sora only renders the image-backed scenes — brand-bg is a looped PNG.
+  // Multi-segment: a 19s image portion costs 12+8 = 20 segment-seconds.
+  const imageSec = scenes
+    .filter((s) => s.background !== 'brand')
+    .reduce((sum, s) => sum + s.durationSec, 0);
+  const segPlan = planSoraSegments(imageSec);
+  const video = segPlan.reduce((sum, segDur) => sum + rate * segDur, 0);
   return { cents: tts + video + compose, parts: { tts, video, compose } };
 }

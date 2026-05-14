@@ -11,7 +11,10 @@ import { generateImage } from '@/server/ai/imageGen';
 import { getOpenAI } from '@/server/ai/openai';
 import {
   downloadSora,
+  extendSora,
+  planSoraSegments,
   pollSora,
+  type SoraDuration,
   type SoraJob,
   type SoraModel,
   type SoraSize,
@@ -31,6 +34,8 @@ import {
   buildOneShotAudioTrack,
   composeOneShot,
   composeReel,
+  concatVideoSegments,
+  ensureBrandBg,
   type OneShotBeat,
 } from '@/server/video/compose';
 import { ensureFfmpeg } from '@/server/video/ensureFfmpeg';
@@ -660,16 +665,25 @@ async function runSora(
  *   2. Submit ONE Sora job at 12s. Persist its id for BullMQ resume.
  *   3. Poll until done; download once.
  *   4. Render TTS narration the same way runFfmpeg/runSora do.
- *   5. composeOneShot the 12s clip with beat-timed drawtext overlays +
- *      a concatenated audio track padded to the beat windows.
+ *   5. composeOneShot the clip with beat-timed drawtext overlays + a
+ *      concatenated audio track padded to the real scene durations.
  *
- * Cost: Sora 2 Pro 720p × 12s × $0.30 = $3.60 + TTS + 1¢ compose.
+ * Multi-segment Sora: a single `videos.create` call is capped at 12s, so
+ * longer templates (Explainer-25s, Pitch-30s) used to silently truncate.
+ * We now plan the Sora portion as a chain of segments via planSoraSegments
+ * (e.g. 19s → [12, 8]). Segment 0 is created with the master prompt;
+ * each subsequent segment is `videos.extend`-ed from the previous one's
+ * completed video, preserving camera/style. Brand-bg scenes never go to
+ * Sora — they're rendered as a looped color PNG and concatenated after
+ * the Sora chain by concatVideoSegments.
+ *
+ * Cost: Σ soraCostCents(model, seg.durationSec, costRes) + TTS + music + SFX + 1¢ compose.
  *
  * The user-edited per-scene imagePrompt fields are intentionally NOT used —
- * Sora gets one master prompt for the whole reel. The PlanEditor's
- * per-scene imagePrompt inputs are decorative when engine is sora-*.
+ * Sora gets one master prompt (+ continuation cues) for the whole chain.
+ * The PlanEditor's per-scene imagePrompt inputs are decorative when
+ * engine is sora-*.
  */
-const SORA_ONE_SHOT_DURATION_SEC = 12;
 
 async function runSoraOneShot(
   data: VideoGenJobData,
@@ -686,94 +700,202 @@ async function runSoraOneShot(
     const costRes: '720' | '1024' = data.engine === 'sora-pro-1024p' ? '1024' : '720';
     const style = resolveVisualStyle(data.visualStyle);
 
-    // Map the plan's scene texts to evenly-spaced beat windows over the
-    // 12s clip. The visualStyle motion + this beat sheet are the master
-    // Sora prompt. Brand-bg scenes still get a beat window but no special
-    // visual treatment (the user can still pick a closing tagline scene).
-    const sceneTexts = data.plan.scenes.map((s) => s.text?.trim()).filter((t) => t && t.length > 0);
-    const beatCount = Math.max(1, sceneTexts.length);
-    const beatDur = SORA_ONE_SHOT_DURATION_SEC / beatCount;
-    const beatSheet = sceneTexts
-      .map((text, i) => `[${(i * beatDur).toFixed(1)}-${((i + 1) * beatDur).toFixed(1)}s] ${text}`)
+    // Split the timeline into Sora-rendered scenes (image-backed) and a
+    // trailing brand-bg phase (solid color, no Sora). Brand-bg scenes are
+    // always at the END of the template; if the user ever moves one to
+    // the middle, treat anything after the first brand-bg as brand too.
+    const firstBrandIdx = data.plan.scenes.findIndex((s) => s.background === 'brand');
+    const imageScenes =
+      firstBrandIdx === -1 ? data.plan.scenes : data.plan.scenes.slice(0, firstBrandIdx);
+    const brandScenes = firstBrandIdx === -1 ? [] : data.plan.scenes.slice(firstBrandIdx);
+    const imageSec = imageScenes.reduce((sum, s) => sum + s.durationSec, 0);
+    const brandSec = brandScenes.reduce((sum, s) => sum + s.durationSec, 0);
+    const totalDur = imageSec + brandSec;
+
+    // Plan the Sora segment chain. e.g. imageSec=19 → [12, 8] (sum 20).
+    // The final concat trims the Sora chain back to exactly imageSec.
+    const segPlan = planSoraSegments(imageSec);
+    if (segPlan.length === 0) {
+      throw new Error(
+        `runSoraOneShot: plan has no image scenes — Sora has nothing to generate (totalDur=${totalDur}s, brandSec=${brandSec}s)`,
+      );
+    }
+
+    // Master prompt drives the FIRST segment; extends reuse it with a
+    // continuation cue (see buildExtendPrompt). The beat sheet is the
+    // full reel timeline, not just the first 12s — gives Sora the whole
+    // visual arc so the extend's continuation lands in the right beat.
+    const sceneTextsWithOffsets: Array<{ text: string; start: number; end: number }> = [];
+    {
+      let cursor = 0;
+      for (const s of data.plan.scenes) {
+        const text = s.text?.trim();
+        if (text) {
+          sceneTextsWithOffsets.push({ text, start: cursor, end: cursor + s.durationSec });
+        }
+        cursor += s.durationSec;
+      }
+    }
+    const beatSheet = sceneTextsWithOffsets
+      .map((b) => `[${b.start.toFixed(0)}-${b.end.toFixed(0)}s] ${b.text}`)
       .join(' ');
     const masterPrompt = [
       style.promptMotion,
       '',
-      `Beat sheet (12s total, ${beatCount} beats of ${beatDur.toFixed(1)}s each): ${beatSheet}`,
+      `Beat sheet (${imageSec}s of Sora-rendered footage, ${segPlan.length} segment${segPlan.length > 1 ? 's' : ''}: ${segPlan.join('+')}): ${beatSheet}`,
       '',
-      'Sustain the locked visual style across all beats. The motion is continuous, with subtle pacing shifts as each beat lands. No cuts, no transitions, no camera moves — just the elements evolving in place over 12 seconds. CRITICAL: NO text, NO letters, NO words, NO numbers visible in the rendered video. NO real people, NO faces. The beat sheet is for pacing the visual rhythm only; the overlay text is added separately by our renderer.',
+      `Sustain the locked visual style for the full ${imageSec} seconds. The motion is one continuous shot, with subtle pacing shifts as each beat lands. No cuts, no transitions, no camera moves — just the elements evolving in place. CRITICAL: NO text, NO letters, NO words, NO numbers visible in the rendered video. NO real people, NO faces. The beat sheet is for pacing the visual rhythm only; the overlay text is added separately by our renderer.`,
     ].join(' ');
 
-    // Step 1+2: submit or resume.
-    let storedJobs = await getStoredSoraJobs(data.generationId);
-    if (storedJobs && storedJobs.length !== 1) storedJobs = null;
-    let job: ScheduledSoraJob | null = storedJobs?.[0] ?? null;
-
-    if (!job) {
-      const submitted = await submitSora({
-        model: soraModel,
-        prompt: masterPrompt,
-        aspectRatio: '9:16',
-        durationSec: SORA_ONE_SHOT_DURATION_SEC,
-        size: soraSize,
-      });
-      job = { ...submitted, retries: 0 };
-      await persistSoraJobs(data.generationId, [job]);
-      console.log(
-        `[reachy:video] gen ${data.generationId} one-shot submitted to ${soraModel} (${SORA_ONE_SHOT_DURATION_SEC}s, jobId=${submitted.jobId})`,
-      );
-    } else {
-      console.log(
-        `[reachy:video] gen ${data.generationId} resuming one-shot job from storage (jobId=${job.jobId}, retries=${job.retries})`,
+    // Step 1+2: submit (or resume) the segment chain.
+    //
+    // Storage shape: an array of ScheduledSoraJob with one entry per planned
+    // segment. Segment 0 is a `videos.create` call; segments 1..N-1 are
+    // `videos.extend` calls chained off the previous segment's jobId. On
+    // BullMQ retry we re-poll any already-submitted segments and only
+    // submit the ones that don't have a jobId yet.
+    const storedJobsRaw = await getStoredSoraJobs(data.generationId);
+    const storedMatches = storedJobsRaw && storedJobsRaw.length === segPlan.length;
+    const segmentJobs: Array<ScheduledSoraJob | null> = storedMatches
+      ? (storedJobsRaw ?? []).slice(0, segPlan.length)
+      : segPlan.map(() => null);
+    if (storedJobsRaw && !storedMatches) {
+      console.warn(
+        `[reachy:video] gen ${data.generationId} stored Sora segment count (${storedJobsRaw.length}) ≠ planned (${segPlan.length}); reseeding`,
       );
     }
 
-    // Step 3: poll until done.
-    const videoPath = join(tmp, 'sora-oneshot.mp4');
-    const startedAt = Date.now();
-    let lastProgress = 0;
-    while (true) {
-      if (Date.now() - startedAt > SORA_POLL_TIMEOUT_MS) {
-        throw new Error(`Sora one-shot polling timed out after ${SORA_POLL_TIMEOUT_MS / 1000}s`);
-      }
-      await new Promise((r) => setTimeout(r, SORA_POLL_INTERVAL_MS));
-      const status = await pollSora(job);
-      if (status.state === 'failed') {
-        const errMsg = status.errorMessage ?? 'unknown';
-        const isModerationBlock = MODERATION_BLOCK.test(errMsg);
-        if (isModerationBlock && job.retries < 1) {
-          // Same safe-prompt retry as the multi-scene path.
-          const safePrompt = buildSafeSoraPrompt(data.visualStyle);
-          console.warn(
-            `[reachy:video] gen ${data.generationId} one-shot blocked by Sora moderation — retrying with safe prompt`,
-          );
-          const replacement = await submitSora({
+    const segmentPaths: string[] = [];
+    for (let i = 0; i < segPlan.length; i++) {
+      const segDur = segPlan[i] as SoraDuration;
+      let job: ScheduledSoraJob | null = segmentJobs[i] ?? null;
+
+      if (!job) {
+        if (i === 0) {
+          const submitted = await submitSora({
             model: soraModel,
-            prompt: safePrompt,
+            prompt: masterPrompt,
             aspectRatio: '9:16',
-            durationSec: SORA_ONE_SHOT_DURATION_SEC,
+            durationSec: segDur,
             size: soraSize,
           });
-          job = { ...replacement, retries: job.retries + 1 };
-          await persistSoraJobs(data.generationId, [job]);
+          job = { ...submitted, retries: 0 };
           console.log(
-            `[reachy:video] gen ${data.generationId} one-shot resubmitted (jobId=${replacement.jobId})`,
+            `[reachy:video] gen ${data.generationId} sora segment 1/${segPlan.length} submitted (${segDur}s, ${soraModel}, jobId=${submitted.jobId})`,
           );
-          continue;
+        } else {
+          const prev = segmentJobs[i - 1];
+          if (!prev) {
+            throw new Error(
+              `runSoraOneShot: cannot extend segment ${i + 1} — previous segment has no jobId`,
+            );
+          }
+          const submitted = await extendSora({
+            model: soraModel,
+            sourceVideoId: prev.jobId,
+            prompt: buildExtendPrompt(masterPrompt, i, segPlan.length),
+            durationSec: segDur,
+          });
+          job = { ...submitted, retries: 0 };
+          console.log(
+            `[reachy:video] gen ${data.generationId} sora segment ${i + 1}/${segPlan.length} extended (${segDur}s, jobId=${submitted.jobId}, from=${prev.jobId})`,
+          );
         }
-        throw new Error(`Sora one-shot failed: ${errMsg}`);
-      }
-      if (status.state === 'done') {
-        const dl = await downloadSora(job.jobId);
-        await writeFile(videoPath, dl.buffer);
+        segmentJobs[i] = job;
+        await persistSoraJobs(data.generationId, segmentJobs);
+      } else {
         console.log(
-          `[reachy:video] gen ${data.generationId} one-shot downloaded (${dl.bytes} bytes)`,
+          `[reachy:video] gen ${data.generationId} sora segment ${i + 1}/${segPlan.length} resuming from storage (jobId=${job.jobId}, retries=${job.retries})`,
         );
-        break;
       }
-      lastProgress = status.progress ?? lastProgress;
-      onProgress?.(Math.min(0.85, (lastProgress / 100) * 0.85));
+
+      // Poll this segment to completion before moving on. Extends require
+      // the prior segment's terminal video state, so we can't parallelize.
+      const startedAt = Date.now();
+      let lastProgress = 0;
+      // Each segment polls within the global Sora timeout — chains can
+      // legitimately take 5-15 min for 25s reels.
+      while (true) {
+        if (Date.now() - startedAt > SORA_POLL_TIMEOUT_MS) {
+          throw new Error(
+            `Sora segment ${i + 1}/${segPlan.length} polling timed out after ${SORA_POLL_TIMEOUT_MS / 1000}s`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, SORA_POLL_INTERVAL_MS));
+        const status = await pollSora(job);
+        if (status.state === 'failed') {
+          const errMsg = status.errorMessage ?? 'unknown';
+          const isModerationBlock = MODERATION_BLOCK.test(errMsg);
+          // Moderation retry only on segment 0 — extends with a safe prompt
+          // would drift the visual style away from segment 0, defeating the
+          // whole point of chaining. If an extend gets blocked we bail.
+          if (i === 0 && isModerationBlock && job.retries < 1) {
+            const safePrompt = buildSafeSoraPrompt(data.visualStyle);
+            console.warn(
+              `[reachy:video] gen ${data.generationId} sora segment 1 blocked by moderation — retrying with safe prompt`,
+            );
+            const replacement = await submitSora({
+              model: soraModel,
+              prompt: safePrompt,
+              aspectRatio: '9:16',
+              durationSec: segDur,
+              size: soraSize,
+            });
+            job = { ...replacement, retries: job.retries + 1 };
+            segmentJobs[i] = job;
+            await persistSoraJobs(data.generationId, segmentJobs);
+            console.log(
+              `[reachy:video] gen ${data.generationId} sora segment 1 resubmitted (jobId=${replacement.jobId})`,
+            );
+            continue;
+          }
+          throw new Error(`Sora segment ${i + 1}/${segPlan.length} failed: ${errMsg}`);
+        }
+        if (status.state === 'done') {
+          const dl = await downloadSora(job.jobId);
+          const segPath = join(tmp, `sora-seg-${i}.mp4`);
+          await writeFile(segPath, dl.buffer);
+          segmentPaths.push(segPath);
+          console.log(
+            `[reachy:video] gen ${data.generationId} sora segment ${i + 1}/${segPlan.length} downloaded (${dl.bytes} bytes)`,
+          );
+          break;
+        }
+        lastProgress = status.progress ?? lastProgress;
+        // Progress: Sora-render phase owns 0-70%; compose owns 70-100%.
+        // Within Sora, each segment owns an equal slice of the 70%.
+        const segShare = 0.7 / segPlan.length;
+        const baseShare = segShare * i;
+        onProgress?.(baseShare + segShare * (lastProgress / 100));
+      }
     }
+
+    // Stitch segments + optional brand-bg into a single composite MP4.
+    let composedVideoPath: string;
+    if (segmentPaths.length === 1 && brandSec === 0) {
+      // Fast path: single Sora segment, no brand-bg → use it directly.
+      composedVideoPath = segmentPaths[0]!;
+    } else {
+      const brandBg =
+        brandSec > 0
+          ? {
+              pngPath: await ensureBrandBg(tmp, data.brandColorHex),
+              durationSec: brandSec,
+            }
+          : undefined;
+      const composite = await concatVideoSegments({
+        tmpDir: tmp,
+        segments: segmentPaths,
+        brandBg,
+        soraTrimSec: imageSec,
+        outputName: 'sora-composite.mp4',
+      });
+      composedVideoPath = composite.outputPath;
+      console.log(
+        `[reachy:video] gen ${data.generationId} sora composite assembled: ${segmentPaths.length} seg + ${brandSec}s brand = ${composite.durationSec}s`,
+      );
+    }
+    onProgress?.(0.7);
 
     // Step 4: TTS narration + ElevenLabs music + ElevenLabs SFX in PARALLEL.
     // All three hit the same provider over independent endpoints; running
@@ -786,7 +908,7 @@ async function runSoraOneShot(
       useElevenAudio
         ? generateMusic({
             visualStyle: data.visualStyle ?? 'editorial',
-            durationSec: SORA_ONE_SHOT_DURATION_SEC,
+            durationSec: totalDur,
           }).catch((err) => {
             console.warn(
               `[reachy:music] gen ${data.generationId} music failed — continuing without music: ${(err as Error).message}`,
@@ -795,7 +917,7 @@ async function runSoraOneShot(
           })
         : Promise.resolve(null),
       useElevenAudio
-        ? generateSfxBundleForReel(SORA_ONE_SHOT_DURATION_SEC).catch((err) => {
+        ? generateSfxBundleForReel(totalDur).catch((err) => {
             console.warn(
               `[reachy:sfx] gen ${data.generationId} sfx failed — continuing without sfx: ${(err as Error).message}`,
             );
@@ -804,14 +926,15 @@ async function runSoraOneShot(
         : Promise.resolve([] as Array<{ path: string; startSec: number; costCents: number }>),
     ]);
     // Concatenate per-scene TTS mp3s into one audio file aligned to the
-    // beat windows. apad each to its beat duration before concat so the
-    // overlay text + voice stay in sync.
+    // ACTUAL scene durations (not evenly-divided beats). apad each scene's
+    // narration to its scene duration before concat so the overlay text +
+    // voice stay in sync even when scenes are non-uniform (5,7,7,6 etc.).
     let audioPath: string | undefined;
     if (tts.sceneAudios) {
       audioPath = await buildOneShotAudioTrack({
         tmpDir: tmp,
         sceneAudios: tts.sceneAudios,
-        totalDurationSec: SORA_ONE_SHOT_DURATION_SEC,
+        sceneDurationsSec: data.plan.scenes.map((s) => s.durationSec),
       });
     }
 
@@ -831,24 +954,34 @@ async function runSoraOneShot(
 
     const sfxCostCents = sfxHits.reduce((sum, hit) => sum + hit.costCents, 0);
 
-    // Step 5: compose. One video input + N beat-timed overlays + audio mix.
-    const beats: OneShotBeat[] = data.plan.scenes.map((scene, i) => ({
-      text: scene.text ?? '',
-      startSec: i * beatDur,
-      endSec: (i + 1) * beatDur,
-      position: scene.textPosition,
-    }));
+    // Step 5: compose. One video input (composite) + N beat-timed overlays +
+    // audio mix. Beats use REAL cumulative scene offsets — for Explainer-25s
+    // that's 0-5 / 5-12 / 12-19 / 19-25, not evenly-divided thirds.
+    const beats: OneShotBeat[] = [];
+    {
+      let cursor = 0;
+      for (const scene of data.plan.scenes) {
+        beats.push({
+          text: scene.text ?? '',
+          startSec: cursor,
+          endSec: cursor + scene.durationSec,
+          position: scene.textPosition,
+          isBrand: scene.background === 'brand',
+        });
+        cursor += scene.durationSec;
+      }
+    }
 
     const outputPath = join(tmp, 'out.mp4');
     await composeOneShot({
-      videoPath,
+      videoPath: composedVideoPath,
       beats,
       audioPath,
       musicPath,
       sfxHits: sfxHits.map((h) => ({ path: h.path, startSec: h.startSec })),
-      durationSec: SORA_ONE_SHOT_DURATION_SEC,
+      durationSec: totalDur,
       outputPath,
-      onProgress: (pct) => onProgress?.(0.85 + pct * 0.15),
+      onProgress: (pct) => onProgress?.(0.7 + pct * 0.3),
     });
 
     // ffprobe BEFORE the finally block reaps tmp — see EngineResult.probed.
@@ -857,13 +990,22 @@ async function runSoraOneShot(
     // already deleted the file. ENOENT every single render.
     const probed = await ffprobe(outputPath);
     const buffer = await readFile(outputPath);
-    const videoCostCents = soraCostCents(soraModel, SORA_ONE_SHOT_DURATION_SEC, costRes);
+    // Cost: sum the cost of EACH planned segment at the model + resolution
+    // rate. (Sora bills per second per segment; a 12s + 8s chain costs
+    // exactly what 20s of single-shot would, if the API allowed it.)
+    const videoCostCents = segPlan.reduce(
+      (sum, segDur) => sum + soraCostCents(soraModel, segDur, costRes),
+      0,
+    );
     const costCents = 1 + videoCostCents + tts.ttsCostCents + musicCostCents + sfxCostCents;
+    console.log(
+      `[reachy:video] gen ${data.generationId} costs: video=${videoCostCents}¢ (${segPlan.join('+')}s @ ${soraModel}/${costRes}) tts=${tts.ttsCostCents}¢ music=${musicCostCents}¢ sfx=${sfxCostCents}¢ → total=${costCents}¢`,
+    );
     return {
       buffer,
       bytes: buffer.length,
       probed,
-      expectedDurationSec: SORA_ONE_SHOT_DURATION_SEC,
+      expectedDurationSec: totalDur,
       costCents,
       costBreakdown: {
         cents: costCents,
@@ -879,6 +1021,26 @@ async function runSoraOneShot(
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Continuation cue appended to each Sora extension prompt. Per OpenAI's
+ * sora-2 guide, an extend works best when the new prompt names the same
+ * subject + visual style and adds "continue smoothly from the previous
+ * frame, same camera, same pacing". Without this the extension can hard-
+ * cut into a different look — which would defeat the whole point of
+ * chaining segments to break the 12s ceiling.
+ */
+function buildExtendPrompt(
+  masterPrompt: string,
+  segmentIndex: number,
+  totalSegments: number,
+): string {
+  return [
+    masterPrompt,
+    '',
+    `[Continuation ${segmentIndex + 1} of ${totalSegments}] Continue smoothly from the previous frame. Preserve the exact visual style, camera framing, and pacing established in the prior segment. The scene is one continuous shot — no cut, no transition, no re-establishing camera move. CRITICAL: NO text, NO letters, NO words, NO numbers visible. NO real people, NO faces.`,
+  ].join(' ');
 }
 
 /**
