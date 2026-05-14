@@ -1,18 +1,62 @@
 import 'server-only';
 import sharp from 'sharp';
 import type { ImageFormat, ImageFormatSpec, ImageProvider } from '@/lib/image-formats';
+import { estimateImageCost, type ImageModelId, type QualityTier } from '@/lib/image-models';
 import { getFal } from './fal';
 import { getFormat } from './formats';
 import { getOpenAI } from './openai';
 
-export type { ImageProvider };
+/**
+ * ─────────────────────────────────────────────────────────────────────────
+ * Provider catalog snapshot — 2026-05-14 (refresh before adding models).
+ * The full per-model capability table lives in src/lib/image-models.ts;
+ * this header just captures the API-level facts the dispatch needs.
+ *
+ * OpenAI (`openai.images.generate` / `openai.images.edit`):
+ *   Active flagship   : gpt-image-2          (released 2026-04-21)
+ *   Active prev-flagship: gpt-image-1.5      (released 2025-12-16)
+ *   Active legacy     : gpt-image-1
+ *   Active budget     : gpt-image-1-mini
+ *   REMOVED 2026-05-12: dall-e-3, dall-e-2 — both return errors now.
+ *
+ *   Parameters honored by all four gpt-image-* models:
+ *     model        — exact ID string above
+ *     prompt       — text prompt
+ *     n            — 1..10 per request
+ *     size         — '1024x1024' | '1024x1536' | '1536x1024' | 'auto'
+ *                    (gpt-image-2 additionally supports many custom sizes)
+ *     quality      — 'low' | 'medium' | 'high' | 'auto'
+ *     output_format       — 'png' | 'jpeg' | 'webp'
+ *     output_compression  — 0..100 for jpeg/webp (we don't use yet)
+ *     background          — 'transparent' supported on gpt-image-1 family
+ *                            ONLY (gpt-image-2 dropped transparent bg)
+ *
+ *   Edit endpoint accepts up to 16 reference images; sweet spot is 1-4.
+ *
+ * fal.ai (`fal.subscribe(modelId, …)`):
+ *   Current entries: flux-2-pro, flux-2-flex, recraft-v3, nano-banana-2,
+ *   ideogram/v3 (best for typography).
+ *   `quality` is not honored — passed through but ignored on the wire.
+ *   Image size is requested as { width, height }; the model may return
+ *   close-but-not-exact dimensions, so sharp resize below is the safety
+ *   net for every fal call.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+
+export type { ImageModelId, ImageProvider, QualityTier };
 
 export interface GenerateImageInput {
   prompt: string;
   format: ImageFormat;
   provider: ImageProvider;
-  model: string; // 'gpt-image-1' for openai; 'fal-ai/flux-2-pro' etc. for fal
+  /** Model ID — see src/lib/image-models.ts for the catalog. Accepts a
+   *  free string for backwards-compat with legacy generation rows; the
+   *  validator at the action boundary is the gate. */
+  model: ImageModelId | string;
   n: 1 | 2 | 4;
+  /** OpenAI-family quality tier. fal entries ignore this. Defaults to
+   *  'medium' when omitted so legacy callers don't change behavior. */
+  quality?: QualityTier;
 }
 
 export interface GenerateImageResult {
@@ -63,33 +107,35 @@ async function fetchToBuffer(url: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
-// Approximate cents per image. Tune as providers update pricing; this is for
-// recording an estimate, not invoicing.
-const COST_CENTS_PER_IMAGE: Record<string, number> = {
-  'gpt-image-1': 7,
-  'fal-ai/flux-2-pro': 4,
-  'fal-ai/flux-2-flex': 3,
-  'fal-ai/flux/dev': 1,
-  'fal-ai/nano-banana-2': 5,
-  'fal-ai/recraft-v3': 4,
-};
-
-function estimateCost(model: string, n: number): number {
-  const per = COST_CENTS_PER_IMAGE[model] ?? 5;
-  return per * n;
+/**
+ * Cost lookup — delegates to the typed catalog in src/lib/image-models.ts
+ * when the model id is recognized, falls back to a flat 5¢ estimate for
+ * legacy generation rows whose model string isn't in the catalog (e.g. a
+ * row from before the catalog existed). The server-side cap check uses
+ * the same helper, so client preview and worker billing stay in sync.
+ */
+function estimateCost(model: string, quality: QualityTier, n: number): number {
+  try {
+    return estimateImageCost(model as ImageModelId, quality, n);
+  } catch {
+    return Math.max(1, 5 * n);
+  }
 }
 
 async function openaiImage(input: GenerateImageInput): Promise<GenerateImageResult> {
   const spec = getFormat(input.format);
   const openai = getOpenAI();
   const size = pickOpenAISize(spec);
+  // Quality tier defaults to 'medium' for callers (worker, video pipeline)
+  // that don't supply one. Garcia's image form passes the user's selection.
+  const quality = input.quality ?? 'medium';
 
   const result = await openai.images.generate({
     model: input.model,
     prompt: input.prompt,
     n: input.n,
     size,
-    quality: 'medium',
+    quality,
   });
 
   if (!result.data || result.data.length === 0) {
@@ -112,7 +158,7 @@ async function openaiImage(input: GenerateImageInput): Promise<GenerateImageResu
 
   return {
     buffers,
-    costCents: estimateCost(input.model, input.n),
+    costCents: estimateCost(input.model, quality, input.n),
     contentType: 'image/png',
   };
 }
@@ -154,9 +200,11 @@ async function falImage(input: GenerateImageInput): Promise<GenerateImageResult>
     buffers.push(resized.buffer);
   }
 
+  // fal.ai entries ignore the quality param — pass medium so the cost
+  // estimator returns the entry's flat per-image figure.
   return {
     buffers,
-    costCents: estimateCost(input.model, input.n),
+    costCents: estimateCost(input.model, input.quality ?? 'medium', input.n),
     contentType: 'image/png',
   };
 }
@@ -167,4 +215,4 @@ export async function generateImage(input: GenerateImageInput): Promise<Generate
   throw new Error(`Unknown image provider: ${input.provider satisfies never}`);
 }
 
-export { IMAGE_PROVIDERS } from '@/lib/image-formats';
+export { IMAGE_MODELS_BY_PROVIDER } from '@/lib/image-models';

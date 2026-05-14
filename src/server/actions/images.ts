@@ -3,6 +3,8 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { QUALITY_TIERS, type QualityTier } from '@/lib/image-models';
+import { VISUAL_STYLE_KEYS, type VisualStyleKey } from '@/lib/visual-styles-meta';
 import { IMAGE_FORMAT_KEYS, type ImageFormat } from '@/server/ai/formats';
 import type { ImageProvider } from '@/server/ai/imageGen';
 import { buildImagePrompt } from '@/server/ai/promptBuilder';
@@ -23,6 +25,14 @@ const enqueueInput = z.object({
   model: z.string().trim().min(2).max(80),
   n: z.union([z.literal(1), z.literal(2), z.literal(4)]),
   language: z.enum(['en', 'es']).default('en'),
+  /** OpenAI quality tier. fal.ai entries ignore this. Default 'medium'
+   *  matches behaviour before the tier was exposed. */
+  quality: z.enum(QUALITY_TIERS as unknown as [QualityTier, ...QualityTier[]]).default('medium'),
+  /** Optional one-off visualStyle override for this generation. When
+   *  omitted, buildImagePrompt falls back to the brand kit's style. */
+  visualStyleOverride: z
+    .enum(VISUAL_STYLE_KEYS as unknown as [VisualStyleKey, ...VisualStyleKey[]])
+    .optional(),
 });
 
 export type EnqueueImageGenerationInput = z.infer<typeof enqueueInput>;
@@ -68,6 +78,7 @@ export async function enqueueImageGeneration(
     project: { name: proj.name, audience: proj.audience, tone: proj.tone },
     brandKit: kit ?? null,
     language: parsed.data.language,
+    visualStyleOverride: parsed.data.visualStyleOverride,
   });
 
   // Insert generation row first so the worker has a target to update.
@@ -85,6 +96,8 @@ export async function enqueueImageGeneration(
         idea: parsed.data.idea,
         n: parsed.data.n,
         language: parsed.data.language,
+        quality: parsed.data.quality,
+        visualStyleOverride: parsed.data.visualStyleOverride ?? null,
       },
     })
     .returning();
@@ -104,6 +117,7 @@ export async function enqueueImageGeneration(
         provider: parsed.data.provider as ImageProvider,
         model: parsed.data.model,
         n: parsed.data.n,
+        quality: parsed.data.quality,
       },
       { jobId: gen.id },
     );

@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 import { GenerateImageForm } from '@/components/app/generate-image-form';
 import { MonoEyebrow } from '@/components/editorial';
+import type { VisualStyleKey } from '@/lib/visual-styles-meta';
 import { getBrandKitForProject } from '@/server/actions/brandKits';
 import { getProjectBySlug } from '@/server/actions/projects';
 import { isFalConfigured } from '@/server/ai/fal';
@@ -32,6 +33,7 @@ export default async function GenerateImagePage({ params }: GeneratePageProps) {
     <GenerateImagePageContent
       projectId={project.id}
       hasBrandKit={Boolean(bundle?.brandKit)}
+      brandVisualStyle={(bundle?.brandKit?.visualStyle ?? null) as VisualStyleKey | null}
       providerAvailability={{
         openai: isOpenAIConfigured(),
         fal: isFalConfigured(),
@@ -44,11 +46,13 @@ export default async function GenerateImagePage({ params }: GeneratePageProps) {
 function GenerateImagePageContent({
   projectId,
   hasBrandKit,
+  brandVisualStyle,
   providerAvailability,
   r2Configured,
 }: {
   projectId: string;
   hasBrandKit: boolean;
+  brandVisualStyle: VisualStyleKey | null;
   providerAvailability: { openai: boolean; fal: boolean };
   r2Configured: boolean;
 }) {
@@ -82,6 +86,7 @@ function GenerateImagePageContent({
         projectId={projectId}
         providerAvailability={providerAvailability}
         r2Configured={r2Configured}
+        brandVisualStyle={brandVisualStyle}
       />
     </div>
   );

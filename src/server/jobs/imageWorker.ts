@@ -32,10 +32,13 @@ export function startImageWorker(): Worker<ImageGenJobData> {
   const worker = new Worker<ImageGenJobData>(
     QUEUE_NAMES.imageGen,
     async (job) => {
-      const { generationId, projectId, prompt, format, provider, model, n } = job.data;
+      const { generationId, projectId, prompt, format, provider, model, n, quality } = job.data;
       const fm = getFormat(format);
 
-      await db.update(generation).set({ status: 'running' }).where(eq(generation.id, generationId));
+      await db
+        .update(generation)
+        .set({ status: 'running', errorMessage: null, finishedAt: null })
+        .where(eq(generation.id, generationId));
 
       // Idempotency: wipe any rows from a prior failed attempt so we never
       // double-charge the archive when BullMQ retries this job.
@@ -44,7 +47,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
       }
 
       try {
-        const result = await generateImage({ prompt, format, provider, model, n });
+        const result = await generateImage({ prompt, format, provider, model, n, quality });
 
         // One round-trip insert instead of N. Order is preserved by the array
         // index so `${i+1}.png` keys still align with row order.

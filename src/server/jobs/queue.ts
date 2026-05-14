@@ -1,5 +1,6 @@
 import 'server-only';
 import { Queue } from 'bullmq';
+import type { QualityTier } from '@/lib/image-models';
 import type { ImageFormat } from '@/server/ai/formats';
 import type { ImageProvider } from '@/server/ai/imageGen';
 import { createBullConnection, QUEUE_NAMES } from './connection';
@@ -12,6 +13,10 @@ export interface ImageGenJobData {
   provider: ImageProvider;
   model: string;
   n: 1 | 2 | 4;
+  /** OpenAI quality tier. Omitted (or 'medium') matches pre-tier behavior;
+   *  ignored by fal.ai entries. The form persists user's pick to
+   *  localStorage and threads it here on each enqueue. */
+  quality?: QualityTier;
 }
 
 let cached: Queue<ImageGenJobData> | null = null;
