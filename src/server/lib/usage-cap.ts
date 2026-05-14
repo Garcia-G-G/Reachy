@@ -5,14 +5,18 @@ import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
 
 /**
- * Per-user-per-day caps to bound LLM/image cost in a private beta. The first
- * indie hacker who fat-fingers a loop should not be able to drain Garcia's
- * card. Tune these once we ship pricing tiers.
+ * Per-user-per-day caps. Set ridiculously high (effectively off) for the
+ * 2026-05-14 max-quality push — Garcia is iterating on demo renders at
+ * $3-$6 each and the previous 10/day video cap kept tripping. The
+ * checkDailyUsage plumbing stays in place so we can dial these back
+ * when public pricing tiers ship; today they just don't fire.
+ *
+ * Original beta caps were image: 50, copy: 100, video: 10.
  */
 export const USAGE_CAPS_PER_DAY = {
-  image: 50,
-  copy: 100,
-  video: 10,
+  image: 10_000,
+  copy: 10_000,
+  video: 10_000,
 } as const;
 
 export type CappedType = keyof typeof USAGE_CAPS_PER_DAY;
