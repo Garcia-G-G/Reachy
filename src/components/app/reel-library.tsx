@@ -77,7 +77,12 @@ function ReelCard({ reel }: { reel: ReelLibraryRow }) {
           {reel.tagline || tplLabel}
         </p>
         <p className="mono-eyebrow text-ink-3">
-          {date} · {tplLabel} · {reel.engine === 'veo' ? 'Veo' : 'FFmpeg'}
+          {date} · {tplLabel} ·{' '}
+          {reel.engine === 'sora-pro-720p'
+            ? 'Sora 2 Pro'
+            : reel.engine === 'sora-base'
+              ? 'Sora 2'
+              : 'FFmpeg'}
           {typeof reel.durationSec === 'number' && ` · ${reel.durationSec}s`}
           {typeof reel.costCents === 'number' && ` · ${reel.costCents}¢`}
         </p>

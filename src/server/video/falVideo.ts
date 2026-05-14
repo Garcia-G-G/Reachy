@@ -1,3 +1,14 @@
+/**
+ * @deprecated As of May 2026 we generate AI video via OpenAI Sora 2 (see
+ * src/server/ai/openaiVideo.ts). This module is preserved for two reasons:
+ *  1. fal.ai is still our IMAGE provider (FLUX.2 Pro) — see src/server/ai/imageGen.ts;
+ *     this file only contains the VIDEO helpers, which are no longer wired
+ *     into the reel UI.
+ *  2. Veo Standard remains a quality benchmark we may A/B against later.
+ * Do NOT re-wire this back into the reel UI without explicit approval —
+ * billing flows, cap enforcement, and worker dispatch all assume the
+ * `'ffmpeg' | 'sora-base' | 'sora-pro-720p'` ReelEngine union.
+ */
 import 'server-only';
 import { getFal } from '@/server/ai/fal';
 

@@ -8,19 +8,21 @@ import { env } from '@/env';
 import { REEL_DIMENSIONS } from '@/lib/reel-templates';
 import { generateImage } from '@/server/ai/imageGen';
 import { getOpenAI } from '@/server/ai/openai';
+import {
+  downloadSora,
+  pollSora,
+  type SoraJob,
+  type SoraModel,
+  snapSoraDuration,
+  soraCostCents,
+  submitSora,
+} from '@/server/ai/openaiVideo';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
 import { putR2 } from '@/server/storage/r2';
 import { composeReel } from '@/server/video/compose';
 import { ensureFfmpeg } from '@/server/video/ensureFfmpeg';
-import {
-  downloadVeoVideo,
-  pollVeo,
-  snapVeoDuration,
-  submitVeo,
-  VEO_FAST_CENTS_PER_SEC,
-} from '@/server/video/falVideo';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 import type { VideoGenJobData } from './videoQueue';
 
@@ -59,8 +61,8 @@ const PERMANENT_PATTERNS = [
 ];
 const isPermanent = (m: string) => PERMANENT_PATTERNS.some((re) => re.test(m));
 
-const VEO_POLL_INTERVAL_MS = 6_000;
-const VEO_POLL_TIMEOUT_MS = 8 * 60 * 1000; // 8 min hard cap; reels usually 60–180s
+const SORA_POLL_INTERVAL_MS = 6_000;
+const SORA_POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 min per scene; Sora Pro can take 2-5min
 
 export function startVideoWorker(): Worker<VideoGenJobData> {
   // Crash loud at boot if ffmpeg is missing — better than silently dropping
@@ -79,16 +81,17 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
       }
 
       try {
+        const progressCb = (pct: number) => {
+          // Surface ffmpeg progress to BullMQ. The status route can read
+          // job.progress to show "Composing… 45%" instead of an opaque
+          // "running" spinner. (Sora reports its own progress while
+          // generating; we map it onto the same 0-100 scale.)
+          void job.updateProgress(Math.round(pct * 100));
+        };
         const out =
-          engine === 'veo'
-            ? await runVeo(job.data)
-            : await runFfmpeg(job.data, (pct) => {
-                // Surface ffmpeg progress to BullMQ. The status route can read
-                // job.progress to show "Composing… 45%" instead of an opaque
-                // "running" spinner. (Veo doesn't expose granular progress;
-                // it returns IN_QUEUE → IN_PROGRESS → COMPLETED.)
-                void job.updateProgress(Math.round(pct * 100));
-              });
+          engine === 'ffmpeg'
+            ? await runFfmpeg(job.data, progressCb)
+            : await runSora(job.data, progressCb);
 
         const key = `${projectId}/reels/${generationId}.mp4`;
         const upload = await putR2(key, out.buffer, 'video/mp4');
@@ -254,67 +257,13 @@ async function runFfmpeg(
       }),
     );
 
-    // Per-scene TTS: each scene's caption is rendered to its own MP3 so
-    // the narration syncs with what's on screen. The previous single-TTS
-    // approach read everything from t=0 and drifted out of sync within
-    // the first scene. Best-effort: if any TTS call fails we drop the
-    // whole audio track rather than ship a partial one.
-    let sceneAudios: Array<string | null> | undefined;
-    let ttsCostCents = 0;
-    // gpt-4o-mini-tts (March 2025) replaces tts-1. Same OpenAI SDK shape
-    // with an added `instructions` parameter for natural-language steering
-    // of tone, pace, and accent. `sage` is the editorial-warm voice that
-    // handles Spanish phonemes natively — no English-leaning vowels like
-    // the previous `nova` track. Pace is set via instructions rather than
-    // the deprecated `speed` knob.
-    const isEs = data.plan.language === 'es';
-    const ttsVoice = 'sage' as const;
-    const ttsInstructions = isEs
-      ? 'Voz de narrador editorial cálido y natural. Ritmo conversacional, NO lento, con pausas naturales solo entre frases. Tono profesional pero cercano. Acentúa correctamente el español.'
-      : 'Warm editorial narrator. Natural conversational pace, NOT slow, with subtle pauses between sentences. Professional but friendly tone.';
-    try {
-      const openai = getOpenAI();
-      const ttsStart = Date.now();
-      sceneAudios = await Promise.all(
-        data.plan.scenes.map(async (scene, i) => {
-          const text = scene.text?.trim();
-          if (!text) return null; // composeReel will fill silence for this scene
-          const speech = await openai.audio.speech.create({
-            model: 'gpt-4o-mini-tts',
-            voice: ttsVoice,
-            input: text,
-            instructions: ttsInstructions,
-            response_format: 'mp3',
-          });
-          const buf = Buffer.from(await speech.arrayBuffer());
-          const path = join(tmp, `scene-tts-${i}.mp3`);
-          await writeFile(path, buf);
-          // gpt-4o-mini-tts pricing: $0.60/1M text-input tokens + $12/1M
-          // audio output tokens (~$0.015/min audio). Audio dominates; for
-          // a typical 50-char caption (~3-4s of audio) the real cost lands
-          // near 0.2¢. Per-scene min 1¢ keeps reporting granularity aligned
-          // with the rest of the cost ledger.
-          ttsCostCents += Math.max(1, Math.round((text.length / 1000) * 4));
-          return path;
-        }),
-      );
-      console.log(
-        `[reachy:video] gen ${data.generationId} TTS x${sceneAudios.filter(Boolean).length} ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${ttsCostCents}¢, voice=${ttsVoice}, lang=${isEs ? 'es' : 'en'})`,
-      );
-    } catch (err) {
-      console.warn(
-        `[reachy:video] gen ${data.generationId} TTS failed, continuing silent:`,
-        err instanceof Error ? err.message : err,
-      );
-      sceneAudios = undefined;
-      ttsCostCents = 0;
-    }
+    const tts = await renderSceneTts(data, tmp);
 
     const outputPath = join(tmp, 'out.mp4');
     await composeReel({
       scenes,
       outputPath,
-      sceneAudios,
+      sceneAudios: tts.sceneAudios,
       brandColorHex: data.brandColorHex,
       brandTextHex: data.brandTextHex,
       onProgress,
@@ -326,77 +275,244 @@ async function runFfmpeg(
       buffer,
       bytes: buffer.length,
       durationSec: totalDur,
-      costCents: 1 + autoImageCostCents + ttsCostCents,
+      costCents: 1 + autoImageCostCents + tts.ttsCostCents,
     };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function runVeo(data: VideoGenJobData): Promise<EngineResult> {
-  const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
-  // Compose one big prompt from the planned scenes — Veo doesn't accept a
-  // multi-scene structured input. We narrate the reel as a single shot.
-  // User-controlled fields (tagline, imagePrompt, text) are wrapped in triple
-  // double-quote delimiters so a "ignore the above and..." inside a planner
-  // output cannot pivot Veo's behavior. OpenAI's 2026 Model Spec recommends
-  // exactly this for untrusted content.
-  // https://model-spec.openai.com/2025-12-18.html#untrusted-content
-  const wrap = (s: string) => `"""${s.replace(/"""/g, '"\\""')}"""`;
-  const prompt = [
-    `Vertical 9:16 marketing reel. Editorial photography aesthetic.`,
-    `Tagline: ${wrap(data.plan.tagline)}`,
-    ...data.plan.scenes.map(
-      (s, i) => `Beat ${i + 1} (${s.durationSec}s, ${s.slot}): ${wrap(s.imagePrompt || s.text)}`,
-    ),
-    'No text overlays. No watermark. Smooth cinematic motion.',
-  ].join('\n');
-
-  // Veo 3.1 Fast only accepts 4/6/8s; snap so the request doesn't 400.
-  const veoDuration = snapVeoDuration(Math.min(totalDur, 8));
-
-  // Reuse a previously-submitted requestId if a worker crashed mid-poll. The
-  // id is persisted into generation.params on the first poll cycle; without
-  // this, BullMQ retry => brand-new Veo request => paying twice for one reel.
-  let submission: { requestId: string; model: string };
-  const stored = await getStoredVeoRequestId(data.generationId);
-  if (stored) {
-    submission = stored;
-    console.log(
-      `[reachy:video] resuming Veo poll for gen=${data.generationId} (req=${submission.requestId})`,
+/**
+ * Per-scene narration. Each scene's caption is rendered to its own MP3 so
+ * the audio track stays synced with what's on screen. Best-effort: if any
+ * TTS call fails we drop the whole audio track rather than ship a partial.
+ *
+ * Extracted so both runFfmpeg and runSora can share the same step — the
+ * TTS pipeline is identical for both engines (only the visual source
+ * differs).
+ */
+async function renderSceneTts(
+  data: VideoGenJobData,
+  tmp: string,
+): Promise<{ sceneAudios: Array<string | null> | undefined; ttsCostCents: number }> {
+  // gpt-4o-mini-tts (March 2025). `sage` is the editorial-warm voice that
+  // handles Spanish phonemes natively; pace steered via `instructions`.
+  const isEs = data.plan.language === 'es';
+  const ttsVoice = 'sage' as const;
+  const ttsInstructions = isEs
+    ? 'Voz de narrador editorial cálido y natural. Ritmo conversacional, NO lento, con pausas naturales solo entre frases. Tono profesional pero cercano. Acentúa correctamente el español.'
+    : 'Warm editorial narrator. Natural conversational pace, NOT slow, with subtle pauses between sentences. Professional but friendly tone.';
+  try {
+    const openai = getOpenAI();
+    const ttsStart = Date.now();
+    let ttsCostCents = 0;
+    const sceneAudios = await Promise.all(
+      data.plan.scenes.map(async (scene, i) => {
+        const text = scene.text?.trim();
+        if (!text) return null;
+        const speech = await openai.audio.speech.create({
+          model: 'gpt-4o-mini-tts',
+          voice: ttsVoice,
+          input: text,
+          instructions: ttsInstructions,
+          response_format: 'mp3',
+        });
+        const buf = Buffer.from(await speech.arrayBuffer());
+        const path = join(tmp, `scene-tts-${i}.mp3`);
+        await writeFile(path, buf);
+        // ~$0.015/min audio; per-scene cost rounds to <1¢ but we keep the
+        // 1¢ floor for ledger consistency.
+        ttsCostCents += Math.max(1, Math.round((text.length / 1000) * 4));
+        return path;
+      }),
     );
-  } else {
-    submission = await submitVeo({
-      prompt,
-      aspectRatio: '9:16',
-      durationSec: veoDuration,
-      model: data.veoModel,
-    });
-    await persistVeoRequestId(data.generationId, submission);
+    console.log(
+      `[reachy:video] gen ${data.generationId} TTS x${sceneAudios.filter(Boolean).length} ready in ${Math.round((Date.now() - ttsStart) / 1000)}s (${ttsCostCents}¢, voice=${ttsVoice}, lang=${isEs ? 'es' : 'en'})`,
+    );
+    return { sceneAudios, ttsCostCents };
+  } catch (err) {
+    console.warn(
+      `[reachy:video] gen ${data.generationId} TTS failed, continuing silent:`,
+      err instanceof Error ? err.message : err,
+    );
+    return { sceneAudios: undefined, ttsCostCents: 0 };
   }
-
-  const start = Date.now();
-  while (Date.now() - start < VEO_POLL_TIMEOUT_MS) {
-    await new Promise((r) => setTimeout(r, VEO_POLL_INTERVAL_MS));
-    const status = await pollVeo(submission.model, submission.requestId);
-    if (status.state === 'done' && status.videoUrl) {
-      const dl = await downloadVeoVideo(status.videoUrl);
-      // Cost is billed against the *generated* duration, not the planned one.
-      const costCents = Math.max(1, Math.round(veoDuration * VEO_FAST_CENTS_PER_SEC));
-      return { buffer: dl.buffer, bytes: dl.bytes, durationSec: veoDuration, costCents };
-    }
-    if (status.state === 'failed') {
-      throw new Error(`Veo failed: ${status.errorMessage ?? 'unknown'}`);
-    }
-  }
-  throw new Error(`Veo timed out after ${VEO_POLL_TIMEOUT_MS / 1000}s`);
 }
 
-/** Persist the fal request id so a worker retry resumes polling vs re-submitting. */
-async function persistVeoRequestId(
-  generationId: string,
-  submission: { requestId: string; model: string },
-): Promise<void> {
+/**
+ * Sora 2 multi-scene pipeline:
+ *   1. For each non-brand scene, submit a separate Sora job seeded with the
+ *      scene's imagePrompt (snapped to 4/8/12s).
+ *   2. Poll all jobs in parallel until done/failed/timeout.
+ *   3. Download each MP4 to local disk.
+ *   4. Render TTS narration the same way the FFmpeg path does.
+ *   5. Compose the final reel with composeReel(), passing each scene's
+ *      videoPath as the visual source (Brand-bg scenes still use the
+ *      synthesized solid PNG).
+ *
+ * Resumption: scene job ids are written to generation.params after the
+ * initial submit batch so a BullMQ retry resumes polling existing jobs
+ * instead of paying for fresh ones (a 4-scene Sora Pro reel is $9.60;
+ * resubmits would double-bill).
+ */
+async function runSora(
+  data: VideoGenJobData,
+  onProgress?: (pct: number) => void,
+): Promise<EngineResult> {
+  const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-sora-'));
+  try {
+    const soraModel: SoraModel = data.engine === 'sora-pro-720p' ? 'sora-2-pro' : 'sora-2';
+
+    // Step 1+2: submit per-scene jobs (or resume from stored ids).
+    let storedJobs = await getStoredSoraJobs(data.generationId);
+    if (storedJobs && storedJobs.length !== data.plan.scenes.length) {
+      // Stored shape doesn't match current plan — start fresh.
+      storedJobs = null;
+    }
+    const sceneJobs: Array<SoraJob | null> =
+      storedJobs ?? new Array(data.plan.scenes.length).fill(null);
+
+    if (!storedJobs) {
+      const submitStart = Date.now();
+      await Promise.all(
+        data.plan.scenes.map(async (scene, i) => {
+          if (scene.background === 'brand') return;
+          if (!scene.imagePrompt?.trim()) {
+            throw new Error(`runSora: scene ${i + 1} (${scene.slot}) has no imagePrompt`);
+          }
+          const snapped = snapSoraDuration(scene.durationSec);
+          const job = await submitSora({
+            model: soraModel,
+            prompt: scene.imagePrompt,
+            aspectRatio: '9:16',
+            durationSec: snapped,
+          });
+          sceneJobs[i] = job;
+          console.log(
+            `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} submitted to ${soraModel} (${snapped}s, jobId=${job.jobId})`,
+          );
+        }),
+      );
+      await persistSoraJobs(data.generationId, sceneJobs);
+      console.log(
+        `[reachy:video] gen ${data.generationId} all Sora jobs submitted in ${Math.round((Date.now() - submitStart) / 1000)}s`,
+      );
+    } else {
+      console.log(
+        `[reachy:video] gen ${data.generationId} resuming ${sceneJobs.filter(Boolean).length} Sora jobs from storage`,
+      );
+    }
+
+    // Step 3: poll until all done, with a shared per-scene timeout. Each
+    // poll cycle reports the lowest progress across all in-flight jobs.
+    const sceneVideoPaths: Array<string | null> = new Array(data.plan.scenes.length).fill(null);
+    const startedAt = Date.now();
+    let pollsCompleted = 0;
+    while (true) {
+      if (Date.now() - startedAt > SORA_POLL_TIMEOUT_MS) {
+        throw new Error(`Sora polling timed out after ${SORA_POLL_TIMEOUT_MS / 1000}s`);
+      }
+      await new Promise((r) => setTimeout(r, SORA_POLL_INTERVAL_MS));
+
+      let allDone = true;
+      let minProgress = 100;
+      await Promise.all(
+        data.plan.scenes.map(async (scene, i) => {
+          if (scene.background === 'brand') return;
+          if (sceneVideoPaths[i]) return;
+          const job = sceneJobs[i];
+          if (!job) return;
+          const status = await pollSora(job);
+          if (status.state === 'failed') {
+            throw new Error(`Sora scene ${i + 1} failed: ${status.errorMessage ?? 'unknown'}`);
+          }
+          if (status.state === 'done') {
+            const dl = await downloadSora(job.jobId);
+            const path = join(tmp, `sora-${i}.mp4`);
+            await writeFile(path, dl.buffer);
+            sceneVideoPaths[i] = path;
+            console.log(
+              `[reachy:video] gen ${data.generationId} scene ${i + 1} downloaded (${dl.bytes} bytes)`,
+            );
+            return;
+          }
+          allDone = false;
+          minProgress = Math.min(minProgress, status.progress ?? 0);
+        }),
+      );
+
+      pollsCompleted += 1;
+      // Map Sora progress to the BullMQ scale, capping at 90% until compose runs.
+      onProgress?.(Math.min(0.9, (minProgress / 100) * 0.9));
+
+      if (allDone) break;
+      if (pollsCompleted % 10 === 0) {
+        const remaining = sceneVideoPaths.filter(
+          (p, i) => !p && data.plan.scenes[i]?.background !== 'brand',
+        ).length;
+        console.log(
+          `[reachy:video] gen ${data.generationId} Sora poll #${pollsCompleted}: ${remaining} scene(s) still rendering (min progress ${minProgress}%)`,
+        );
+      }
+    }
+
+    // Step 4: TTS — identical to the FFmpeg path.
+    const tts = await renderSceneTts(data, tmp);
+
+    // Step 5: compose. Brand-bg scenes pass undefined for both paths; the
+    // composer synthesizes its own solid color background.
+    const scenes = data.plan.scenes.map((scene, i) => ({
+      videoPath: sceneVideoPaths[i] ?? undefined,
+      imagePath: undefined,
+      text: scene.text,
+      scene,
+    }));
+
+    const outputPath = join(tmp, 'out.mp4');
+    await composeReel({
+      scenes,
+      outputPath,
+      sceneAudios: tts.sceneAudios,
+      brandColorHex: data.brandColorHex,
+      brandTextHex: data.brandTextHex,
+      onProgress: (pct) => onProgress?.(0.9 + pct * 0.1),
+    });
+
+    const buffer = await readFile(outputPath);
+    const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
+
+    // Bill the SUM of snapped Sora seconds (the API charges per second we
+    // requested, not what we render).
+    let videoCostCents = 0;
+    for (let i = 0; i < data.plan.scenes.length; i++) {
+      const scene = data.plan.scenes[i];
+      const job = sceneJobs[i];
+      if (!scene || scene.background === 'brand' || !job) continue;
+      videoCostCents += soraCostCents(soraModel, job.durationSec);
+    }
+
+    return {
+      buffer,
+      bytes: buffer.length,
+      durationSec: totalDur,
+      costCents: 1 + videoCostCents + tts.ttsCostCents,
+    };
+  } finally {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+interface StoredSoraJob {
+  jobId: string;
+  model: SoraModel;
+  durationSec: 4 | 8 | 12;
+}
+
+/** Persist per-scene Sora jobs so a worker retry resumes polling vs paying again. */
+async function persistSoraJobs(generationId: string, jobs: Array<SoraJob | null>): Promise<void> {
+  const stored: Array<StoredSoraJob | null> = jobs.map((j) =>
+    j ? { jobId: j.jobId, model: j.model, durationSec: j.durationSec } : null,
+  );
   const [row] = await db
     .select({ params: generation.params })
     .from(generation)
@@ -404,23 +520,20 @@ async function persistVeoRequestId(
     .limit(1);
   const merged = {
     ...((row?.params as Record<string, unknown>) ?? {}),
-    veoRequestId: submission.requestId,
-    veoModel: submission.model,
+    soraJobs: stored,
   };
   await db.update(generation).set({ params: merged }).where(eq(generation.id, generationId));
 }
 
-async function getStoredVeoRequestId(
-  generationId: string,
-): Promise<{ requestId: string; model: string } | null> {
+async function getStoredSoraJobs(generationId: string): Promise<Array<SoraJob | null> | null> {
   const [row] = await db
     .select({ params: generation.params })
     .from(generation)
     .where(eq(generation.id, generationId))
     .limit(1);
-  const params = (row?.params ?? {}) as { veoRequestId?: string; veoModel?: string };
-  if (params.veoRequestId && params.veoModel) {
-    return { requestId: params.veoRequestId, model: params.veoModel };
-  }
-  return null;
+  const params = (row?.params ?? {}) as { soraJobs?: Array<StoredSoraJob | null> };
+  if (!Array.isArray(params.soraJobs)) return null;
+  return params.soraJobs.map((s) =>
+    s ? { jobId: s.jobId, model: s.model, durationSec: s.durationSec } : null,
+  );
 }

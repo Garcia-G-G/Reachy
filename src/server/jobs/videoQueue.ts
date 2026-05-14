@@ -18,8 +18,6 @@ export interface VideoGenJobData {
   brandTextHex: string;
   /** For engine='ffmpeg': absolute R2 publicUrl of each image-backed scene's image. */
   sceneImageUrls?: Array<string | null>;
-  /** For engine='veo': model id (e.g. fal-ai/veo3.1/fast). */
-  veoModel?: string;
 }
 
 let cached: Queue<VideoGenJobData> | null = null;

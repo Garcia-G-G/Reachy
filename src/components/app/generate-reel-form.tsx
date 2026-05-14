@@ -3,8 +3,10 @@
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
+import { estimateReelCost, MAX_REEL_COST_CENTS } from '@/lib/reel-cost';
 import {
   type PlannedScene,
+  REEL_ENGINES,
   REEL_TEMPLATE_KEYS,
   REEL_TEMPLATES,
   type ReelEngine,
@@ -96,10 +98,13 @@ export function GenerateReelForm({
     });
   }, [template]);
 
-  // Engine is auto-derived from the chosen type — the user no longer picks
-  // it. Visual maps to Veo (single cinematic shot); everything multi-scene
-  // maps to FFmpeg composition.
-  const engine: ReelEngine = TYPE_DEFAULT_ENGINE[template];
+  // Engine is user-selectable; default flips when template changes (some
+  // templates default to Sora 2 Pro 720p for flagship demos; cheaper shapes
+  // default to FFmpeg).
+  const [engine, setEngine] = useState<ReelEngine>(TYPE_DEFAULT_ENGINE['informative-25s']);
+  useEffect(() => {
+    setEngine(TYPE_DEFAULT_ENGINE[template]);
+  }, [template]);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -196,10 +201,9 @@ export function GenerateReelForm({
   }
 
   function onCompose(plan: ReelPlan) {
-    if (engine === 'veo' && !falConfigured) {
-      toast.error(t('errorNoFal'));
-      return;
-    }
+    // Sora uses the same OPENAI_API_KEY — falConfigured is no longer
+    // wired to anything except the deprecated fal video engine.
+    void falConfigured;
     if (!r2Configured) {
       toast.error(t('errorNoR2'));
       return;
@@ -280,12 +284,61 @@ export function GenerateReelForm({
                 );
               })}
             </div>
-            <p className="mono-eyebrow mt-2 text-ink-3">
-              {t('engineHint', {
-                engine: t(`engines.${engine}.label`),
-                cost: engine === 'veo' ? t('engineCostVeo') : t('engineCostFfmpeg'),
+          </fieldset>
+
+          <fieldset className="space-y-3">
+            <legend className="mono-eyebrow mb-3 block">{t('fieldEngine')}</legend>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {REEL_ENGINES.map((eng) => {
+                const checked = engine === eng.id;
+                const previewScenes = REEL_TEMPLATES[template].scenes.map((s, i) => ({
+                  durationSec: s.durationSec,
+                  background: s.background ?? 'image',
+                  // In script mode use the user's typed line; in AI mode
+                  // assume an average 50-char caption per scene so the
+                  // estimate isn't 0 before the planner runs.
+                  text: mode === 'script' ? (customScript[i] ?? '') : 'x'.repeat(50),
+                }));
+                const cost = estimateReelCost(eng.id, previewScenes);
+                const overBudget = cost.cents > MAX_REEL_COST_CENTS;
+                const dollars = (cost.cents / 100).toFixed(2);
+                return (
+                  <label
+                    key={eng.id}
+                    className={`flex cursor-pointer gap-3 border p-4 transition-colors ${
+                      overBudget
+                        ? 'cursor-not-allowed border-rule opacity-50'
+                        : checked
+                          ? 'border-ink bg-paper-2'
+                          : 'border-rule hover:border-ink'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reelEngine"
+                      value={eng.id}
+                      checked={checked}
+                      onChange={() => setEngine(eng.id)}
+                      disabled={planningDisabled || overBudget}
+                      className="mt-1 accent-ink"
+                    />
+                    <span className="block">
+                      <span
+                        className="block"
+                        style={{
+                          fontFamily: 'var(--font-fraunces), Georgia, serif',
+                          fontSize: 16,
+                        }}
+                      >
+                        {eng.label}
+                      </span>
+                      <span className="mono-eyebrow text-ink-3 mt-1 block">{eng.tagline}</span>
+                      <span className="mono-eyebrow mt-2 block">≈ ${dollars}</span>
+                    </span>
+                  </label>
+                );
               })}
-            </p>
+            </div>
           </fieldset>
 
           <fieldset className="space-y-3">
@@ -404,9 +457,6 @@ export function GenerateReelForm({
           </fieldset>
 
           {!openaiConfigured && <p className="mono-eyebrow text-accent">{t('errorNoOpenAI')}</p>}
-          {engine === 'veo' && !falConfigured && (
-            <p className="mono-eyebrow text-accent">{t('errorNoFal')}</p>
-          )}
           {!r2Configured && <p className="mono-eyebrow text-accent">{t('errorNoR2')}</p>}
 
           <button
@@ -560,12 +610,12 @@ function PlanEditor({
 
 function ComposingPanel({ engine, status }: { engine: ReelEngine; status: 'queued' | 'running' }) {
   const t = useTranslations('Reels');
-  const caption =
-    engine === 'veo'
-      ? t('composingVeo')
-      : status === 'queued'
-        ? t('queuedCaption')
-        : t('composingFfmpeg');
+  const isSora = engine === 'sora-base' || engine === 'sora-pro-720p';
+  const caption = isSora
+    ? t('composingSora')
+    : status === 'queued'
+      ? t('queuedCaption')
+      : t('composingFfmpeg');
   return (
     <div className="border border-ink p-8 text-center">
       <span className="mx-auto mb-4 block h-2 w-2 animate-pulse bg-accent" aria-hidden />
@@ -590,7 +640,8 @@ function DonePanel({
     <div className="space-y-6">
       <header className="flex items-baseline justify-between border-b border-rule pb-2">
         <span className="mono-eyebrow text-ink-3">
-          {t('doneCaption')} — {engine === 'veo' ? 'Veo 3.1' : 'FFmpeg'}
+          {t('doneCaption')} —{' '}
+          {engine === 'sora-pro-720p' ? 'Sora 2 Pro' : engine === 'sora-base' ? 'Sora 2' : 'FFmpeg'}
         </span>
         {typeof costCents === 'number' && (
           <span className="mono-eyebrow text-ink-3">{t('costNote', { cents: costCents })}</span>

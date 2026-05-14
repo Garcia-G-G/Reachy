@@ -163,40 +163,54 @@ export const REEL_DIMENSIONS = { width: 1080, height: 1920, fps: 30 } as const;
 /** xfade transition length. Each scene's effective on-screen time is durationSec - 0.4. */
 export const REEL_TRANSITION_SEC = 0.4;
 
-export type ReelEngine = 'ffmpeg' | 'veo';
+export type ReelEngine = 'ffmpeg' | 'sora-base' | 'sora-pro-720p';
 
-export const REEL_ENGINES: ReadonlyArray<{ id: ReelEngine; label: string; tagline: string }> = [
+export const REEL_ENGINES: ReadonlyArray<{
+  id: ReelEngine;
+  label: string;
+  tagline: string;
+  /**
+   * Marginal cost per generated second of video (cents). FFmpeg bills
+   * image-gen + TTS separately so its per-second cost is 0 here; the
+   * estimator adds the image+TTS components downstream.
+   */
+  secondsCost: number;
+}> = [
   {
     id: 'ffmpeg',
     label: 'FFmpeg composition',
-    tagline: 'Stitches your generated images with text overlays. Cheap and fast.',
+    tagline: 'AI images stitched with text overlays + TTS. Cheap and fast.',
+    secondsCost: 0,
   },
   {
-    id: 'veo',
-    label: 'Veo 3.1 Fast',
-    tagline: 'Generates the entire reel from one prompt. Slower (~3 min), more impactful.',
+    id: 'sora-base',
+    label: 'Sora 2 (base)',
+    tagline: '720p OpenAI native AI video. Animated. ~$0.10/s.',
+    secondsCost: 10,
+  },
+  {
+    id: 'sora-pro-720p',
+    label: 'Sora 2 Pro 720p',
+    tagline: 'Premium quality, full motion. ~$0.30/s. Default for flagship reels.',
+    secondsCost: 30,
   },
 ];
 
 /**
- * Engine auto-pick per type. Visual is the only Veo candidate — its
- * single-mood-shot framing matches Veo's "one prompt → one 8s clip"
- * behavior. Everything else has multi-scene structure with text overlays
- * that FFmpeg composition renders crisply (Veo snaps duration to 8s max
- * and ignores per-scene overlays, so a multi-beat reel under Veo loses
- * most of its choreography).
+ * Engine auto-pick per type. Teaching-first templates (informative-25s,
+ * pitch-30s) default to Sora 2 Pro 720p because those are the shapes we
+ * use for flagship demos. Short feature/launch/visual/testimonial stay
+ * on FFmpeg for cost reasons (a 16s mood reel at Sora Pro is $4.80, vs
+ * ~6¢ on FFmpeg with Flux stills + TTS). Sora 2 base remains available
+ * as the user-selected cheaper option in the UI.
  */
 export const TYPE_DEFAULT_ENGINE: Record<ReelTemplateKey, ReelEngine> = {
-  'pitch-30s': 'ffmpeg',
-  'feature-15s': 'ffmpeg',
-  'launch-20s': 'ffmpeg',
-  'informative-25s': 'ffmpeg',
-  // Visual stays on FFmpeg multi-scene for cost reasons: Veo even at Fast
-  // tier with audio is $1.20 per 8s clip, vs ~6¢ for a 16s FFmpeg reel
-  // with Flux/dev stills + Ken Burns motion + per-scene TTS. Cinematic
-  // feel comes from the zoompan + xfade pacing, not Veo specifically.
-  'visual-12s': 'ffmpeg',
+  'informative-25s': 'sora-pro-720p',
   'tutorial-30s': 'ffmpeg',
+  'feature-15s': 'ffmpeg',
+  'pitch-30s': 'sora-pro-720p',
+  'launch-20s': 'ffmpeg',
+  'visual-12s': 'ffmpeg',
   'testimonial-20s': 'ffmpeg',
 };
 

@@ -7,8 +7,14 @@ import sharp from 'sharp';
 import { type PlannedScene, REEL_DIMENSIONS, REEL_TRANSITION_SEC } from '@/lib/reel-templates';
 
 export interface ComposeSceneInput {
-  /** Path to the still image (PNG/JPG) used as the background. Required when scene.background='image'. */
+  /** Path to the still image (PNG/JPG) used as the background. Used when
+   *  scene.background='image' AND no videoPath is provided. */
   imagePath?: string;
+  /** Path to a pre-rendered MP4 (e.g. a Sora generation) for this scene.
+   *  When set, the scene uses the video as its visual source instead of a
+   *  still image — no Ken Burns zoompan is applied (the video has its own
+   *  motion). Drawtext + drawbox + TTS audio still layer on top. */
+  videoPath?: string;
   /** Plain text headline to overlay; pass empty string to skip drawtext. */
   text: string;
   /** Slot data passed through from the planner. */
@@ -85,11 +91,11 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
     // negligible (1080×1920 solid color compresses to <2KB).
     const brandBgPath = await ensureBrandBg(tmp, brandColorHex);
 
-    // Validate up front (any missing imagePath would fail the ffmpeg run
+    // Validate up front (any missing source would fail the ffmpeg run
     // halfway through with a noisy stack — surface a clean rejection).
     for (const [i, s] of scenes.entries()) {
-      if (s.scene.background === 'image' && !s.imagePath) {
-        throw new Error(`composeReel: scene ${i} is image-backed but imagePath missing`);
+      if (s.scene.background === 'image' && !s.imagePath && !s.videoPath) {
+        throw new Error(`composeReel: scene ${i} is image-backed but imagePath/videoPath missing`);
       }
     }
 
@@ -97,11 +103,19 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
       const cmd = ffmpeg();
 
       // Each scene becomes one input. Brand-bg scenes use the synthesized
-      // solid-color PNG; image scenes use the per-scene still.
+      // solid-color PNG; image scenes use the per-scene still (looped); video
+      // scenes (e.g. Sora MP4 per scene) use the file directly with -t trim.
       for (const s of scenes) {
-        const inputPath = s.scene.background === 'brand' ? brandBgPath : s.imagePath;
-        if (!inputPath) continue; // unreachable after the validation above
-        cmd.input(inputPath).inputOptions(['-loop', '1', '-t', String(s.scene.durationSec)]);
+        if (s.scene.background === 'brand') {
+          cmd.input(brandBgPath).inputOptions(['-loop', '1', '-t', String(s.scene.durationSec)]);
+          continue;
+        }
+        if (s.videoPath) {
+          cmd.input(s.videoPath).inputOptions(['-t', String(s.scene.durationSec)]);
+          continue;
+        }
+        if (!s.imagePath) continue; // unreachable after the validation above
+        cmd.input(s.imagePath).inputOptions(['-loop', '1', '-t', String(s.scene.durationSec)]);
       }
       // Per-scene audio inputs follow the video inputs. We add one ffmpeg
       // input per non-null entry; null slots later get anullsrc silence
@@ -125,40 +139,42 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
       scenes.forEach((s, i) => {
         const snapshots = sceneSnapshots[i];
         const isBrand = s.scene.background === 'brand';
+        const isVideo = !isBrand && !!s.videoPath;
         const textColor = isBrand ? normalizeHex(brandTextHex) : 'white';
         const overlayY = drawtextY(s.scene.textPosition);
         const fontSize = overlayFontSize(s.scene.textPosition);
         const boxAlpha = isBrand ? '00' : '88';
 
-        // For image scenes we run the full pipeline. Brand-bg scenes only
-        // need to be scaled to the final dims and have yuv420p applied — no
-        // Ken Burns on a flat color.
+        // Three flavors of base chain:
+        //  • brand-bg: solid-color PNG looped — just scale + fps + format.
+        //  • video (Sora MP4): the source already has motion. Scale to 9:16
+        //    (Sora outputs 720x1280, we render at 1080x1920), no zoompan.
+        //  • image still: Ken Burns zoompan over the scene duration.
         //
         // zoompan duration trap: without an explicit `:fps=N`, zoompan
-        // emits `d` frames PER INPUT FRAME. With `-loop 1 -t 5` the input
-        // is already 5 seconds of looped frames (~125 frames at the loop's
-        // default rate) and zoompan multiplies that by d=150 → 18,750
-        // output frames per scene → ~24-minute reels. Pinning `:fps=30`
-        // makes zoompan output exactly `d` frames at 30 Hz, i.e. the
-        // intended scene duration.
-        //
-        // Brand-bg chain must ALSO declare fps=30 explicitly — without it
-        // the image chain ends up on timebase 1/30 (from zoompan:fps=30)
-        // and the brand chain on timebase 1/25 (the input loop default),
-        // and xfade refuses to blend mismatched timebases with:
+        // emits `d` frames PER INPUT FRAME, multiplying the looped input
+        // by `d` and producing ~24-minute reels per scene. Pinning fps=30
+        // forces exact frame counts. All three chains end with explicit
+        // fps=30 so xfade does not reject mismatched timebases:
         //   "First input link main timebase (1/30) do not match the
         //    corresponding second input link xfade timebase (1/25)"
         //
         // Source: https://ffmpeg.org/ffmpeg-filters.html#zoompan
         const baseChain = isBrand
           ? `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},fps=${REEL_DIMENSIONS.fps},format=yuv420p`
-          : [
-              `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase`,
-              `crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}`,
-              // Slow zoom-in over the scene duration. d= is in frames at fps.
-              `zoompan=z='min(zoom+0.0008,1.15)':d=${s.scene.durationSec * REEL_DIMENSIONS.fps}:s=${REEL_DIMENSIONS.width}x${REEL_DIMENSIONS.height}:fps=${REEL_DIMENSIONS.fps}`,
-              `format=yuv420p`,
-            ].join(',');
+          : isVideo
+            ? [
+                `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase`,
+                `crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}`,
+                `fps=${REEL_DIMENSIONS.fps}`,
+                `format=yuv420p`,
+              ].join(',')
+            : [
+                `scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase`,
+                `crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}`,
+                `zoompan=z='min(zoom+0.0008,1.15)':d=${s.scene.durationSec * REEL_DIMENSIONS.fps}:s=${REEL_DIMENSIONS.width}x${REEL_DIMENSIONS.height}:fps=${REEL_DIMENSIONS.fps}`,
+                `format=yuv420p`,
+              ].join(',');
 
         // expansion=none disables drawtext's %{...} expression evaluator on
         // the textfile contents — without it a user-supplied scene text like

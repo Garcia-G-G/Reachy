@@ -177,7 +177,7 @@
     "cancel": "Start over",
     "queuedCaption": "Queued — sit tight.",
     "composingFfmpeg": "Composing — about a minute.",
-    "composingVeo": "Veo is rendering — usually 2–4 minutes.",
+    "composingSora": "Sora is rendering each scene — usually 2–5 minutes per scene.",
     "doneCaption": "Done.",
     "failedCaption": "Failed.",
     "download": "Download MP4",

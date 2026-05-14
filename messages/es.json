@@ -177,7 +177,7 @@
     "cancel": "Empezar de cero",
     "queuedCaption": "En cola — espera un momento.",
     "composingFfmpeg": "Componiendo — un minuto aprox.",
-    "composingVeo": "Veo está renderizando — normalmente 2–4 minutos.",
+    "composingSora": "Sora está renderizando cada escena — normalmente 2–5 minutos por escena.",
     "doneCaption": "Listo.",
     "failedCaption": "Falló.",
     "download": "Descargar MP4",

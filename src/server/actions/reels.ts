@@ -3,6 +3,7 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { estimateReelCost, MAX_REEL_COST_CENTS } from '@/lib/reel-cost';
 import {
   REEL_TEMPLATE_KEYS,
   REEL_TEMPLATES,
@@ -92,7 +93,7 @@ const httpsUrl = z
 
 const composeInput = z.object({
   projectId: z.string().uuid(),
-  engine: z.enum(['ffmpeg', 'veo']),
+  engine: z.enum(['ffmpeg', 'sora-base', 'sora-pro-720p']),
   plan: planSchema,
   /** For engine='ffmpeg': one URL per scene (`null` for brand-bg scenes). */
   sceneImageUrls: z.array(httpsUrl.nullable()).optional(),
@@ -202,6 +203,23 @@ export async function composeReelAction(input: ComposeReelInput): Promise<Action
     }
   }
 
+  // Hard $20 cap. Runs after schema validation so a missing field never
+  // gets blamed on cost; runs before insert+enqueue so a runaway plan
+  // never burns tokens. estimateReelCost is in src/lib/reel-cost.ts so
+  // the client form and this action share one source of truth.
+  const estimate = estimateReelCost(parsed.data.engine, parsed.data.plan.scenes);
+  if (estimate.cents > MAX_REEL_COST_CENTS) {
+    return { ok: false, error: `over-budget:${estimate.cents}` };
+  }
+
+  const isSora = parsed.data.engine === 'sora-base' || parsed.data.engine === 'sora-pro-720p';
+  const soraModelId =
+    parsed.data.engine === 'sora-pro-720p'
+      ? 'sora-2-pro'
+      : parsed.data.engine === 'sora-base'
+        ? 'sora-2'
+        : null;
+
   const [gen] = await db
     .insert(generation)
     .values({
@@ -209,8 +227,8 @@ export async function composeReelAction(input: ComposeReelInput): Promise<Action
       type: 'video',
       format: parsed.data.plan.template,
       status: 'queued',
-      provider: parsed.data.engine === 'veo' ? 'fal' : 'ffmpeg',
-      model: parsed.data.engine === 'veo' ? 'fal-ai/veo3.1/fast' : 'ffmpeg',
+      provider: isSora ? 'openai' : 'ffmpeg',
+      model: soraModelId ?? 'ffmpeg',
       prompt: parsed.data.plan.tagline,
       params: {
         engine: parsed.data.engine,
