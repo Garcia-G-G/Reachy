@@ -95,10 +95,23 @@ const httpsUrl = z
     message: 'sceneImageUrl must be http(s)',
   });
 
+const VISUAL_STYLE_VALUES = [
+  'editorial',
+  'paper-cutout',
+  'flat-2d',
+  'infographic',
+  'isometric',
+  'abstract',
+] as const;
+
 const composeInput = z.object({
   projectId: z.string().uuid(),
   engine: z.enum(['ffmpeg', 'sora-base', 'sora-pro-720p']),
   plan: planSchema,
+  /** Per-reel visual style override. When provided, supersedes the project's
+   *  brandKit.visualStyle (the form prefills with the brand-kit value but
+   *  the user can pick a different one for this single render). */
+  visualStyle: z.enum(VISUAL_STYLE_VALUES).optional(),
   /** For engine='ffmpeg': one URL per scene (`null` for brand-bg scenes). */
   sceneImageUrls: z.array(httpsUrl.nullable()).optional(),
 });
@@ -254,7 +267,10 @@ export async function composeReelAction(input: ComposeReelInput): Promise<Action
         plan: parsed.data.plan,
         brandColorHex,
         brandTextHex,
-        visualStyle: kit?.visualStyle ?? 'editorial',
+        // Per-reel override > brand-kit > 'editorial' (legacy default). The
+        // worker uses this to look up promptMotion / promptStatic and to
+        // resolve the background-music track.
+        visualStyle: parsed.data.visualStyle ?? kit?.visualStyle ?? 'editorial',
         sceneImageUrls: parsed.data.sceneImageUrls,
       },
       { jobId: gen.id },

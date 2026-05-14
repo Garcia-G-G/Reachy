@@ -63,7 +63,15 @@ export async function ffprobe(filePath: string): Promise<ProbeResult> {
     throw new Error(`ffprobe: file not found at ${filePath}`);
   }
   return new Promise((resolve, reject) => {
-    const argv = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', filePath];
+    const argv = [
+      '-v',
+      'error',
+      '-print_format',
+      'json',
+      '-show_format',
+      '-show_streams',
+      filePath,
+    ];
     console.log(`[reachy:debug-trace] ffprobe spawn ffprobe ${argv.join(' ')}`);
     const child = spawn('ffprobe', argv);
     let stdout = '';

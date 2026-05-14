@@ -8,6 +8,7 @@ import { getBrandKitForProject } from '@/server/actions/brandKits';
 import { getProjectBySlug } from '@/server/actions/projects';
 import { isFalConfigured } from '@/server/ai/fal';
 import { isOpenAIConfigured } from '@/server/ai/openai';
+import { DEFAULT_VISUAL_STYLE, type VisualStyleKey } from '@/server/ai/visualStyles';
 import { isR2Configured } from '@/server/storage/r2';
 
 interface ReelPageProps {
@@ -27,11 +28,14 @@ export default async function GenerateReelPage({ params }: ReelPageProps) {
   if (!project) notFound();
 
   const bundle = await getBrandKitForProject(project.id);
+  const initialVisualStyle: VisualStyleKey =
+    (bundle?.brandKit?.visualStyle as VisualStyleKey | undefined) ?? DEFAULT_VISUAL_STYLE;
 
   return (
     <Content
       projectId={project.id}
       hasBrandKit={Boolean(bundle?.brandKit)}
+      initialVisualStyle={initialVisualStyle}
       openaiConfigured={isOpenAIConfigured()}
       falConfigured={isFalConfigured()}
       r2Configured={isR2Configured()}
@@ -42,12 +46,14 @@ export default async function GenerateReelPage({ params }: ReelPageProps) {
 function Content({
   projectId,
   hasBrandKit,
+  initialVisualStyle,
   openaiConfigured,
   falConfigured,
   r2Configured,
 }: {
   projectId: string;
   hasBrandKit: boolean;
+  initialVisualStyle: VisualStyleKey;
   openaiConfigured: boolean;
   falConfigured: boolean;
   r2Configured: boolean;
@@ -80,6 +86,7 @@ function Content({
 
       <GenerateReelForm
         projectId={projectId}
+        initialVisualStyle={initialVisualStyle}
         openaiConfigured={openaiConfigured}
         falConfigured={falConfigured}
         r2Configured={r2Configured}

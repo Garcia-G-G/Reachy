@@ -14,6 +14,11 @@ import {
   type ReelTemplateKey,
   TYPE_DEFAULT_ENGINE,
 } from '@/lib/reel-templates';
+import {
+  VISUAL_STYLE_KEYS,
+  VISUAL_STYLE_META,
+  type VisualStyleKey,
+} from '@/lib/visual-styles-meta';
 import { composeReelAction, planReelAction } from '@/server/actions/reels';
 
 type ReelMode = 'ai' | 'script';
@@ -29,6 +34,9 @@ const MODE_OPTIONS: ReadonlyArray<{
 
 interface GenerateReelFormProps {
   projectId: string;
+  /** Brand-kit visualStyle preselected on first render; the user can override
+   *  per-reel via the picker in the form. */
+  initialVisualStyle: VisualStyleKey;
   openaiConfigured: boolean;
   falConfigured: boolean;
   r2Configured: boolean;
@@ -73,6 +81,7 @@ type Phase =
 
 export function GenerateReelForm({
   projectId,
+  initialVisualStyle,
   openaiConfigured,
   falConfigured,
   r2Configured,
@@ -107,6 +116,11 @@ export function GenerateReelForm({
   useEffect(() => {
     setEngine(TYPE_DEFAULT_ENGINE[template]);
   }, [template]);
+
+  // VisualStyle is preselected from the brand kit (or the catalog default if
+  // the project doesn't have one yet). The user can override per-reel; the
+  // server action threads this through to the worker via VideoGenJobData.
+  const [visualStyle, setVisualStyle] = useState<VisualStyleKey>(initialVisualStyle);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -218,6 +232,7 @@ export function GenerateReelForm({
         projectId,
         engine,
         plan,
+        visualStyle,
       });
       if (!result.ok) {
         setPhase({ kind: 'failed', message: result.error });
@@ -338,6 +353,61 @@ export function GenerateReelForm({
                       </span>
                       <span className="mono-eyebrow text-ink-3 mt-1 block">{eng.tagline}</span>
                       <span className="mono-eyebrow mt-2 block">≈ ${dollars}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <fieldset className="space-y-3">
+            <legend className="mono-eyebrow mb-3 block">{t('fieldVisualStyle')}</legend>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {VISUAL_STYLE_KEYS.map((key) => {
+                const meta = VISUAL_STYLE_META[key];
+                const checked = visualStyle === key;
+                const soraSelected = engine === 'sora-base' || engine === 'sora-pro-720p';
+                // Empirically: editorial/paper-cutout/infographic produce
+                // near-static Sora output. We warn (not disable) so the user
+                // can still override if they're feeling adventurous.
+                const warnSora = soraSelected && !meta.soraFriendly;
+                return (
+                  <label
+                    key={key}
+                    title={warnSora ? t('visualStyleSoraWarning') : undefined}
+                    className={`flex cursor-pointer gap-3 border p-4 transition-colors ${
+                      checked
+                        ? 'border-ink bg-paper-2'
+                        : warnSora
+                          ? 'border-rule opacity-50 hover:border-ink'
+                          : 'border-rule hover:border-ink'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reelVisualStyle"
+                      value={key}
+                      checked={checked}
+                      onChange={() => setVisualStyle(key)}
+                      disabled={planningDisabled}
+                      className="mt-1 accent-ink"
+                    />
+                    <span className="block">
+                      <span
+                        className="block"
+                        style={{
+                          fontFamily: 'var(--font-fraunces), Georgia, serif',
+                          fontSize: 16,
+                        }}
+                      >
+                        {meta.label}
+                      </span>
+                      <span className="mono-eyebrow text-ink-3 mt-1 block">{meta.tagline}</span>
+                      {warnSora && (
+                        <span className="mono-eyebrow text-accent mt-2 block">
+                          {t('visualStyleSoraWarningShort')}
+                        </span>
+                      )}
                     </span>
                   </label>
                 );
