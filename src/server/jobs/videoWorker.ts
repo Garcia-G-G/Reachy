@@ -266,6 +266,7 @@ async function runFfmpeg(
       sceneAudios: tts.sceneAudios,
       brandColorHex: data.brandColorHex,
       brandTextHex: data.brandTextHex,
+      visualStyle: data.visualStyle,
       onProgress,
     });
 
@@ -475,6 +476,7 @@ async function runSora(
       sceneAudios: tts.sceneAudios,
       brandColorHex: data.brandColorHex,
       brandTextHex: data.brandTextHex,
+      visualStyle: data.visualStyle,
       onProgress: (pct) => onProgress?.(0.9 + pct * 0.1),
     });
 

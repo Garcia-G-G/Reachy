@@ -1,10 +1,11 @@
 import 'server-only';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import ffmpeg from 'fluent-ffmpeg';
 import sharp from 'sharp';
 import { type PlannedScene, REEL_DIMENSIONS, REEL_TRANSITION_SEC } from '@/lib/reel-templates';
+import type { VisualStyleKey } from '@/server/ai/visualStyles';
 
 export interface ComposeSceneInput {
   /** Path to the still image (PNG/JPG) used as the background. Used when
@@ -37,6 +38,10 @@ export interface ComposeReelArgs {
   brandColorHex: string;
   /** Brand text color hex used on top of the brand bg. */
   brandTextHex: string;
+  /** Visual style key — picks the background music track from public/music.
+   *  Falls back to 'editorial'. Music+SFX are skipped silently if the
+   *  corresponding files are zero-byte (placeholder) or missing. */
+  visualStyle?: VisualStyleKey;
   /** Optional onProgress callback ([0..1]). */
   onProgress?: (pct: number) => void;
 }
@@ -58,6 +63,13 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
 
   const fontFile = await resolveDrawtextFont();
   const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-'));
+
+  // Music + SFX are best-effort additions. If Garcia hasn't dropped the
+  // royalty-free MP3s into public/music or public/sfx yet (placeholder
+  // zero-byte files are committed to keep the pipeline compilable),
+  // resolveAudioAsset returns null and the filter chain skips that layer.
+  const musicPath = await resolveAudioAsset('music', `${args.visualStyle ?? 'editorial'}.mp3`);
+  const sfxPath = await resolveAudioAsset('sfx', 'transition.mp3');
 
   try {
     // Pre-write each scene's overlay text as a SEQUENCE of cumulative
@@ -122,8 +134,8 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
       // injected into the filter graph instead. Track which video-scene
       // index maps to which ffmpeg input index so we can reference it.
       const audioInputIdx: Array<number | null> = (sceneAudios ?? []).map(() => null);
+      let nextIdx = scenes.length;
       if (sceneAudios) {
-        let nextIdx = scenes.length;
         for (let i = 0; i < sceneAudios.length; i++) {
           const p = sceneAudios[i];
           if (p) {
@@ -133,6 +145,12 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
           }
         }
       }
+      // Music + SFX inputs follow scene audios. Their indices are used
+      // when we mix the final audio track.
+      const musicInputIdx = musicPath ? nextIdx++ : null;
+      const sfxInputIdx = sfxPath ? nextIdx++ : null;
+      if (musicPath) cmd.input(musicPath);
+      if (sfxPath) cmd.input(sfxPath);
 
       // Per-scene filter: scale → crop → zoompan (Ken Burns) → drawtext (if any) → fade
       const filters: string[] = [];
@@ -214,12 +232,15 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
 
       // Chain xfade between consecutive scenes. Each xfade consumes
       // REEL_TRANSITION_SEC of the previous scene; offset is the cumulative
-      // visible time so far minus that overlap.
+      // visible time so far minus that overlap. Also collect the
+      // transition timestamps so the SFX layer can fire at each one.
       let lastLabel = 'v0';
       let cumulative = scenes[0]?.scene.durationSec ?? 0;
+      const transitionTimestampsSec: number[] = [];
       for (let i = 1; i < scenes.length; i++) {
         const next = `vx${i}`;
         const offset = Math.max(0, cumulative - REEL_TRANSITION_SEC);
+        transitionTimestampsSec.push(offset);
         filters.push(
           `[${lastLabel}][v${i}]xfade=transition=fade:duration=${REEL_TRANSITION_SEC}:offset=${offset}[${next}]`,
         );
@@ -227,6 +248,7 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         const sceneDur = scenes[i]?.scene.durationSec ?? 0;
         cumulative += sceneDur - REEL_TRANSITION_SEC;
       }
+      const totalReelSec = scenes.reduce((sum, s) => sum + s.scene.durationSec, 0);
 
       // Build per-scene audio: each scene gets either its TTS clip padded
       // to scene.durationSec, or a generated silence of the same length.
@@ -257,8 +279,57 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         filters.push(`${audioSubLabels.join('')}concat=n=${scenes.length}:v=0:a=1[afinal]`);
         audioLabel = 'afinal';
       }
+
+      // Background music: looped to reel duration, attenuated to -22 LUFS-ish
+      // (volume=0.15 ≈ -16 dBFS — quiet enough to sit under TTS without
+      // ducking but audible during silence). Mixed into audioLabel via amix.
+      if (musicInputIdx !== null) {
+        filters.push(
+          `[${musicInputIdx}:a]aloop=loop=-1:size=2147483647,atrim=0:${totalReelSec},volume=0.15,asetpts=PTS-STARTPTS[amusic]`,
+        );
+        if (audioLabel) {
+          filters.push(
+            `[${audioLabel}][amusic]amix=inputs=2:duration=first:dropout_transition=0[afinal_m]`,
+          );
+          audioLabel = 'afinal_m';
+        } else {
+          audioLabel = 'amusic';
+        }
+      }
+
+      // Transition SFX: one short clip layered at each xfade timestamp,
+      // attenuated to -18 LUFS (volume=0.20). Split the source into N
+      // copies, delay each to its target offset, then amix them all
+      // into a single sfx track. Mixed into audioLabel last so SFX
+      // peaks over music+TTS at scene boundaries.
+      if (sfxInputIdx !== null && transitionTimestampsSec.length > 0) {
+        const n = transitionTimestampsSec.length;
+        const splitOut = Array.from({ length: n }, (_, i) => `[sfx_src${i}]`).join('');
+        filters.push(`[${sfxInputIdx}:a]asplit=${n}${splitOut}`);
+        const delayedLabels: string[] = [];
+        for (let i = 0; i < n; i++) {
+          const delayMs = Math.round((transitionTimestampsSec[i] ?? 0) * 1000);
+          const lbl = `sfx_d${i}`;
+          filters.push(`[sfx_src${i}]adelay=${delayMs}|${delayMs},volume=0.20[${lbl}]`);
+          delayedLabels.push(`[${lbl}]`);
+        }
+        // amix duration=first locks the SFX track to the duration of the
+        // first input — we explicitly atrim afterwards to the reel length.
+        filters.push(
+          `${delayedLabels.join('')}amix=inputs=${n}:duration=longest,atrim=0:${totalReelSec},asetpts=PTS-STARTPTS[asfx]`,
+        );
+        if (audioLabel) {
+          filters.push(
+            `[${audioLabel}][asfx]amix=inputs=2:duration=first:dropout_transition=0[afinal_ms]`,
+          );
+          audioLabel = 'afinal_ms';
+        } else {
+          audioLabel = 'asfx';
+        }
+      }
+
       const outputs = audioLabel ? [lastLabel, audioLabel] : [lastLabel];
-      const audioOpts = sceneAudios ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : ['-an'];
+      const audioOpts = audioLabel ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : ['-an'];
 
       cmd
         .complexFilter(filters, outputs)
@@ -470,6 +541,27 @@ function normalizeHex(hex: string): string {
  * Find a font file ffmpeg can read. We try, in order: a project-shipped font
  * (preferred for editorial consistency), then a few macOS / Linux fallbacks.
  */
+/**
+ * Resolve an audio asset under public/<dir>/<filename>. Returns the
+ * absolute path only if the file exists AND has non-zero size — Garcia
+ * commits zero-byte placeholders so the pipeline compiles before he
+ * drops royalty-free MP3s in, and we want the compose step to silently
+ * skip the layer until a real file lands.
+ *
+ * `public/` is resolved relative to process.cwd() — both `pnpm dev` and
+ * `pnpm worker` are launched from the project root, so this is stable.
+ */
+async function resolveAudioAsset(dir: 'music' | 'sfx', filename: string): Promise<string | null> {
+  try {
+    const path = resolvePath(process.cwd(), 'public', dir, filename);
+    const info = await stat(path);
+    if (!info.isFile() || info.size === 0) return null;
+    return path;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveDrawtextFont(): Promise<string> {
   // We don't bundle a font file yet — fall back to a known system font.
   // Comment about future improvement: copy Inter-Bold.ttf into public/fonts/

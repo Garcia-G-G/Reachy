@@ -1,11 +1,13 @@
 import 'server-only';
 import { Queue } from 'bullmq';
 import type { ReelEngine, ReelPlan } from '@/lib/reel-templates';
+import type { VisualStyleKey } from '@/server/ai/visualStyles';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 
 /**
  * Job payload for the video worker. The worker picks the engine: ffmpeg
- * composes from already-generated images; veo calls fal.ai and polls.
+ * composes from already-generated images; sora-* generates the visuals
+ * per scene via OpenAI Sora 2 and then composes.
  */
 export interface VideoGenJobData {
   generationId: string;
@@ -13,9 +15,12 @@ export interface VideoGenJobData {
   projectSlug: string;
   engine: ReelEngine;
   plan: ReelPlan;
-  /** Brand colors used by the FFmpeg engine for `background:'brand'` scenes. */
+  /** Brand colors used for `background:'brand'` scenes. */
   brandColorHex: string;
   brandTextHex: string;
+  /** Visual style — picks the background music track (public/music/<key>.mp3).
+   *  Defaults to 'editorial' if the project has no brandKit yet. */
+  visualStyle?: VisualStyleKey;
   /** For engine='ffmpeg': absolute R2 publicUrl of each image-backed scene's image. */
   sceneImageUrls?: Array<string | null>;
 }

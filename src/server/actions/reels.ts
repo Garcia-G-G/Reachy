@@ -249,6 +249,7 @@ export async function composeReelAction(input: ComposeReelInput): Promise<Action
         plan: parsed.data.plan,
         brandColorHex,
         brandTextHex,
+        visualStyle: kit?.visualStyle ?? 'editorial',
         sceneImageUrls: parsed.data.sceneImageUrls,
       },
       { jobId: gen.id },
