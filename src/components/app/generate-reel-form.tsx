@@ -187,6 +187,7 @@ export function GenerateReelForm({
         projectId,
         template,
         language,
+        engine,
         ...(mode === 'script'
           ? { customScript: customScript.map((line) => line.trim()) }
           : { idea: idea.trim() }),
@@ -459,6 +460,24 @@ export function GenerateReelForm({
           {!openaiConfigured && <p className="mono-eyebrow text-accent">{t('errorNoOpenAI')}</p>}
           {!r2Configured && <p className="mono-eyebrow text-accent">{t('errorNoR2')}</p>}
 
+          <p
+            className="text-ink-3"
+            style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 16 }}
+          >
+            {t('estimateNote', {
+              dollars: (
+                estimateReelCost(
+                  engine,
+                  REEL_TEMPLATES[template].scenes.map((s, i) => ({
+                    durationSec: s.durationSec,
+                    background: s.background ?? 'image',
+                    text: mode === 'script' ? (customScript[i] ?? '') : 'x'.repeat(50),
+                  })),
+                ).cents / 100
+              ).toFixed(2),
+            })}
+          </p>
+
           <button
             type="submit"
             disabled={submitDisabled}
@@ -529,7 +548,7 @@ function PlanEditor({
           {plan.tagline}
         </span>
         <span className="mono-eyebrow text-ink-3">
-          {t('planCostNote', { cents: planCostCents })}
+          {t('planCostNote', { dollars: (planCostCents / 100).toFixed(2) })}
         </span>
       </header>
 
@@ -644,7 +663,9 @@ function DonePanel({
           {engine === 'sora-pro-720p' ? 'Sora 2 Pro' : engine === 'sora-base' ? 'Sora 2' : 'FFmpeg'}
         </span>
         {typeof costCents === 'number' && (
-          <span className="mono-eyebrow text-ink-3">{t('costNote', { cents: costCents })}</span>
+          <span className="mono-eyebrow text-ink-3">
+            {t('costNote', { dollars: (costCents / 100).toFixed(2) })}
+          </span>
         )}
       </header>
       <div className="border border-ink">

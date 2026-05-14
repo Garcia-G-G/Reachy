@@ -32,6 +32,10 @@ const planInput = z
     /** Required in AI mode. When customScript is provided, this is ignored. */
     idea: z.string().trim().max(600).optional(),
     language: z.enum(['en', 'es']).default('en'),
+    /** Engine the plan will be composed with. Selects promptStatic vs
+     *  promptMotion in the visual-style fragment baked into each scene's
+     *  imagePrompt. Defaults to 'ffmpeg' (static) for backwards compat. */
+    engine: z.enum(['ffmpeg', 'sora-base', 'sora-pro-720p']).default('ffmpeg'),
     /**
      * Script mode: one literal overlay line per scene, in template order.
      * Length must match REEL_TEMPLATES[template].scenes.length. Each line
@@ -149,6 +153,7 @@ export async function planReelAction(
         websiteUrl: proj.websiteUrl,
       },
       brandKit: kit ?? null,
+      engine: parsed.data.engine,
       customScript: parsed.data.customScript,
     });
     // Attach the chosen language to the plan so the compose worker can

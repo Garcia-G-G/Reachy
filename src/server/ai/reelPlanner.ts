@@ -2,6 +2,7 @@ import 'server-only';
 import {
   type PlannedScene,
   REEL_TEMPLATES,
+  type ReelEngine,
   type ReelPlan,
   type ReelTemplateKey,
 } from '@/lib/reel-templates';
@@ -33,6 +34,15 @@ export interface PlanReelArgs {
   project: Pick<Project, 'name' | 'audience' | 'tone' | 'description' | 'websiteUrl'>;
   brandKit: BrandKit | null;
   model?: string;
+  /**
+   * Engine the plan will be composed with. Determines whether the planner
+   * bakes the visualStyle's `promptStatic` (FFmpeg / image-gen path) or
+   * `promptMotion` (Sora video path) into each scene's imagePrompt.
+   * Without this, Sora 2 reads "camera completely static" and renders a
+   * frozen frame. Defaults to 'ffmpeg' when omitted so older callers
+   * keep their static behavior.
+   */
+  engine?: ReelEngine;
   /**
    * Script mode: when present, the planner does NOT generate scene text.
    * Each entry is the literal overlay line for the matching scene index. The
@@ -70,10 +80,16 @@ function buildSystemPrompt(args: PlanReelArgs): string {
   const keywords = (args.brandKit?.keywords ?? []).slice(0, 12).join(', ');
   const audience = args.project.audience?.trim() || 'indie hackers and technical founders';
 
-  // Visual style is the difference between Veo generating a stressed person
+  // Visual style is the difference between Sora generating a stressed person
   // at a desk and an animated explainer with motion graphics. See
   // src/server/ai/visualStyles.ts. Defaults to 'editorial' when no brand kit.
   const style = resolveVisualStyle(args.brandKit?.visualStyle);
+  // Sora engines need motion language baked into the imagePrompt — without
+  // it Sora obediently produces frozen frames (camera-static prompts). The
+  // FFmpeg path uses the static composition, which the Ken Burns zoompan
+  // animates after the fact.
+  const isMotionEngine = args.engine === 'sora-base' || args.engine === 'sora-pro-720p';
+  const stylePrompt = isMotionEngine ? style.promptMotion : style.promptStatic;
 
   // Caption safe zones (drawtext y= positions in compose.ts):
   //   top    → y=160, 3-line max ~200px high → top 19% of frame
@@ -94,7 +110,7 @@ function buildSystemPrompt(args: PlanReelArgs): string {
         'Tu única tarea: redactar el `imagePrompt` de cada escena (qué se ve en pantalla detrás del texto) y un `tagline` corto para el reel.',
         '',
         `ESTILO VISUAL FIJO (${style.label}):`,
-        `  ${style.prompt}`,
+        `  ${stylePrompt}`,
         '',
         'Cada `imagePrompt` debe respetar ese estilo al pie de la letra y dejar libres los safe-zones (20% superior, 25% inferior) para los subtítulos.',
         'Cumple el JSON Schema entregado. No inventes campos. Mantén el orden de las escenas.',
@@ -112,7 +128,7 @@ function buildSystemPrompt(args: PlanReelArgs): string {
       'Texto sobre vídeo: máximo 6 palabras por escena, una frase corta que se lea en 2 segundos.',
       '',
       `ESTILO VISUAL FIJO (${style.label}):`,
-      `  ${style.prompt}`,
+      `  ${stylePrompt}`,
       '',
       'Cada `imagePrompt` que generes debe respetar ese estilo al pie de la letra.',
       'Cumple el JSON Schema entregado. No inventes campos. Mantén el orden de las escenas.',
@@ -131,7 +147,7 @@ function buildSystemPrompt(args: PlanReelArgs): string {
       'Your only job: write the `imagePrompt` for each scene (what appears on screen behind the text) and one short `tagline` for the reel.',
       '',
       `LOCKED VISUAL STYLE (${style.label}):`,
-      `  ${style.prompt}`,
+      `  ${stylePrompt}`,
       '',
       'Every `imagePrompt` must follow that style exactly and keep the safe zones (top 20%, bottom 25%) clear for captions.',
       'Respect the provided JSON schema. Do not invent fields. Keep scene order.',
@@ -150,7 +166,7 @@ function buildSystemPrompt(args: PlanReelArgs): string {
     'Overlay text: max 6 words per scene, one short line readable in 2 seconds.',
     '',
     `LOCKED VISUAL STYLE (${style.label}):`,
-    `  ${style.prompt}`,
+    `  ${stylePrompt}`,
     '',
     'Every `imagePrompt` you produce must follow that style exactly.',
     'Respect the provided JSON schema. Do not invent fields. Keep scene order.',
