@@ -71,6 +71,7 @@ export default async function LibraryPage({ params, searchParams }: LibraryPageP
     status: r.status,
     errorMessage: r.errorMessage,
     costCents: r.costCents,
+    costBreakdown: r.costBreakdown,
     createdAt: r.createdAt,
     finishedAt: r.finishedAt,
     videoUrl: r.videoUrl,

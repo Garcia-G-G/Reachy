@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
-import { estimateReelCost, MAX_REEL_COST_CENTS } from '@/lib/reel-cost';
+import { estimateReelCost, MAX_REEL_COST_CENTS, type ReelCostBreakdown } from '@/lib/reel-cost';
 import {
   type PlannedScene,
   REEL_ENGINES,
@@ -47,6 +47,7 @@ interface PollResponse {
   status: 'queued' | 'running' | 'done' | 'failed';
   errorMessage: string | null;
   costCents: number | null;
+  costBreakdown: ReelCostBreakdown | null;
   finishedAt: string | null;
   assets: AssetSummary[];
 }
@@ -65,6 +66,7 @@ type Phase =
       kind: 'done';
       videoUrl: string | null;
       costCents: number | null;
+      costBreakdown: ReelCostBreakdown | null;
       engine: ReelEngine;
     }
   | { kind: 'failed'; message: string };
@@ -148,6 +150,7 @@ export function GenerateReelForm({
             kind: 'done',
             videoUrl: json.assets[0]?.publicUrl ?? null,
             costCents: json.costCents,
+            costBreakdown: json.costBreakdown,
             engine: eng,
           });
         } else if (json.status === 'failed') {
@@ -510,6 +513,7 @@ export function GenerateReelForm({
         <DonePanel
           videoUrl={phase.videoUrl}
           costCents={phase.costCents}
+          costBreakdown={phase.costBreakdown}
           engine={phase.engine}
           onReset={onReset}
         />
@@ -646,18 +650,20 @@ function ComposingPanel({ engine, status }: { engine: ReelEngine; status: 'queue
 function DonePanel({
   videoUrl,
   costCents,
+  costBreakdown,
   engine,
   onReset,
 }: {
   videoUrl: string | null;
   costCents: number | null;
+  costBreakdown: ReelCostBreakdown | null;
   engine: ReelEngine;
   onReset: () => void;
 }) {
   const t = useTranslations('Reels');
   return (
     <div className="space-y-6">
-      <header className="flex items-baseline justify-between border-b border-rule pb-2">
+      <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-rule pb-2">
         <span className="mono-eyebrow text-ink-3">
           {t('doneCaption')} —{' '}
           {engine === 'sora-pro-720p' ? 'Sora 2 Pro' : engine === 'sora-base' ? 'Sora 2' : 'FFmpeg'}
@@ -665,6 +671,9 @@ function DonePanel({
         {typeof costCents === 'number' && (
           <span className="mono-eyebrow text-ink-3">
             {t('costNote', { dollars: (costCents / 100).toFixed(2) })}
+            {costBreakdown && (
+              <span className="text-ink-3"> · {formatCostBreakdown(costBreakdown, engine)}</span>
+            )}
           </span>
         )}
       </header>
@@ -696,4 +705,21 @@ function DonePanel({
       </div>
     </div>
   );
+}
+
+/** "Sora $6.00 · TTS $0.04 · compose $0.01" — same display the library uses. */
+function formatCostBreakdown(breakdown: ReelCostBreakdown, engine: ReelEngine): string {
+  const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const parts: string[] = [];
+  if (typeof breakdown.parts.video === 'number' && breakdown.parts.video > 0) {
+    const videoLabel =
+      engine === 'sora-pro-720p' ? 'Sora Pro' : engine === 'sora-base' ? 'Sora' : 'video';
+    parts.push(`${videoLabel} ${fmt(breakdown.parts.video)}`);
+  }
+  if (typeof breakdown.parts.images === 'number' && breakdown.parts.images > 0) {
+    parts.push(`images ${fmt(breakdown.parts.images)}`);
+  }
+  if (breakdown.parts.tts > 0) parts.push(`TTS ${fmt(breakdown.parts.tts)}`);
+  if (breakdown.parts.compose > 0) parts.push(`compose ${fmt(breakdown.parts.compose)}`);
+  return parts.join(' · ');
 }

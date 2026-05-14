@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { env } from '@/env';
+import type { ReelCostBreakdown } from '@/lib/reel-cost';
 import { REEL_DIMENSIONS } from '@/lib/reel-templates';
 import { generateImage } from '@/server/ai/imageGen';
 import { getOpenAI } from '@/server/ai/openai';
@@ -109,12 +110,26 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
           bytes: upload.bytes,
         });
 
+        // Merge costBreakdown into existing params (which already holds
+        // engine + plan from composeReelAction and, for sora-* engines,
+        // soraJobs from the resumption path). The status API reads
+        // params.costBreakdown so the done panel can show component costs.
+        const [existing] = await db
+          .select({ params: generation.params })
+          .from(generation)
+          .where(eq(generation.id, generationId))
+          .limit(1);
+        const mergedParams = {
+          ...((existing?.params as Record<string, unknown>) ?? {}),
+          costBreakdown: out.costBreakdown,
+        };
         await db
           .update(generation)
           .set({
             status: 'done',
             finishedAt: new Date(),
             costCents: out.costCents,
+            params: mergedParams,
           })
           .where(eq(generation.id, generationId));
 
@@ -171,6 +186,11 @@ interface EngineResult {
   bytes: number;
   durationSec: number;
   costCents: number;
+  /** Per-component cost breakdown — same shape returned by estimateReelCost
+   *  so the client and server agree on TTS / video-gen / image-gen / compose
+   *  attribution. Persisted into generation.params.costBreakdown so the UI
+   *  can show "Cost: $6.05 (Sora $6.00 · TTS $0.04 · compose $0.01)". */
+  costBreakdown: ReelCostBreakdown;
 }
 
 async function runFfmpeg(
@@ -272,11 +292,16 @@ async function runFfmpeg(
 
     const buffer = await readFile(outputPath);
     const totalDur = data.plan.scenes.reduce((sum, s) => sum + s.durationSec, 0);
+    const costCents = 1 + autoImageCostCents + tts.ttsCostCents;
     return {
       buffer,
       bytes: buffer.length,
       durationSec: totalDur,
-      costCents: 1 + autoImageCostCents + tts.ttsCostCents,
+      costCents,
+      costBreakdown: {
+        cents: costCents,
+        parts: { tts: tts.ttsCostCents, images: autoImageCostCents, compose: 1 },
+      },
     };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
@@ -493,11 +518,16 @@ async function runSora(
       videoCostCents += soraCostCents(soraModel, job.durationSec);
     }
 
+    const costCents = 1 + videoCostCents + tts.ttsCostCents;
     return {
       buffer,
       bytes: buffer.length,
       durationSec: totalDur,
-      costCents: 1 + videoCostCents + tts.ttsCostCents,
+      costCents,
+      costBreakdown: {
+        cents: costCents,
+        parts: { tts: tts.ttsCostCents, video: videoCostCents, compose: 1 },
+      },
     };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});

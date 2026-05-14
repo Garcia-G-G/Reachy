@@ -3,7 +3,7 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { estimateReelCost, MAX_REEL_COST_CENTS } from '@/lib/reel-cost';
+import { estimateReelCost, MAX_REEL_COST_CENTS, type ReelCostBreakdown } from '@/lib/reel-cost';
 import {
   REEL_TEMPLATE_KEYS,
   REEL_TEMPLATES,
@@ -282,6 +282,9 @@ export interface ReelGenerationView {
   status: 'queued' | 'running' | 'done' | 'failed';
   errorMessage: string | null;
   costCents: number | null;
+  /** Per-component breakdown (Sora + TTS + compose, or images + TTS + compose).
+   *  Null for reels rendered before this field was introduced. */
+  costBreakdown: ReelCostBreakdown | null;
   createdAt: string;
   finishedAt: string | null;
   videoUrl: string | null;
@@ -318,13 +321,18 @@ export async function listReelsForProject(projectId: string): Promise<ReelGenera
 
   return gens.map((g) => {
     const a = byGen.get(g.id);
-    const params = (g.params ?? {}) as { engine?: ReelEngine; plan?: ReelPlan };
+    const params = (g.params ?? {}) as {
+      engine?: ReelEngine;
+      plan?: ReelPlan;
+      costBreakdown?: ReelCostBreakdown;
+    };
     return {
       generationId: g.id,
       template: g.format as ReelTemplateKey,
       status: g.status,
       errorMessage: g.errorMessage,
       costCents: g.costCents,
+      costBreakdown: params.costBreakdown ?? null,
       createdAt: g.createdAt.toISOString(),
       finishedAt: g.finishedAt?.toISOString() ?? null,
       videoUrl: a?.publicUrl ?? null,

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import type { ReelCostBreakdown } from '@/lib/reel-cost';
 import { REEL_TEMPLATES, type ReelEngine, type ReelTemplateKey } from '@/lib/reel-templates';
 
 export interface ReelLibraryRow {
@@ -9,6 +10,7 @@ export interface ReelLibraryRow {
   status: 'queued' | 'running' | 'done' | 'failed';
   errorMessage: string | null;
   costCents: number | null;
+  costBreakdown: ReelCostBreakdown | null;
   createdAt: string;
   finishedAt: string | null;
   videoUrl: string | null;
@@ -84,8 +86,13 @@ function ReelCard({ reel }: { reel: ReelLibraryRow }) {
               ? 'Sora 2'
               : 'FFmpeg'}
           {typeof reel.durationSec === 'number' && ` · ${reel.durationSec}s`}
-          {typeof reel.costCents === 'number' && ` · ${reel.costCents}¢`}
+          {typeof reel.costCents === 'number' && ` · $${(reel.costCents / 100).toFixed(2)}`}
         </p>
+        {reel.costBreakdown && (
+          <p className="mono-eyebrow text-ink-3">
+            {formatLibraryCostBreakdown(reel.costBreakdown, reel.engine)}
+          </p>
+        )}
       </div>
 
       {reel.videoUrl && (
@@ -121,4 +128,20 @@ function formatDate(iso: string): string {
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
+function formatLibraryCostBreakdown(breakdown: ReelCostBreakdown, engine: ReelEngine): string {
+  const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const parts: string[] = [];
+  if (typeof breakdown.parts.video === 'number' && breakdown.parts.video > 0) {
+    const label =
+      engine === 'sora-pro-720p' ? 'Sora Pro' : engine === 'sora-base' ? 'Sora' : 'video';
+    parts.push(`${label} ${fmt(breakdown.parts.video)}`);
+  }
+  if (typeof breakdown.parts.images === 'number' && breakdown.parts.images > 0) {
+    parts.push(`images ${fmt(breakdown.parts.images)}`);
+  }
+  if (breakdown.parts.tts > 0) parts.push(`TTS ${fmt(breakdown.parts.tts)}`);
+  if (breakdown.parts.compose > 0) parts.push(`compose ${fmt(breakdown.parts.compose)}`);
+  return parts.join(' · ');
 }

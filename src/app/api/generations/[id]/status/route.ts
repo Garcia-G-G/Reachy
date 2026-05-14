@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { ReelCostBreakdown } from '@/lib/reel-cost';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
@@ -59,6 +60,7 @@ export async function GET(_req: Request, { params }: RouteContext) {
       costCents: generation.costCents,
       finishedAt: generation.finishedAt,
       projectId: generation.projectId,
+      params: generation.params,
     })
     .from(generation)
     .innerJoin(project, eq(project.id, generation.projectId))
@@ -81,12 +83,18 @@ export async function GET(_req: Request, { params }: RouteContext) {
     .from(asset)
     .where(eq(asset.generationId, gen.id));
 
+  // Per-component cost attribution (e.g. Sora $6 + TTS $0.04 + compose $0.01).
+  // The worker writes this into generation.params on success — see videoWorker.ts.
+  const genParams = (gen.params ?? {}) as { costBreakdown?: ReelCostBreakdown };
+  const costBreakdown = genParams.costBreakdown ?? null;
+
   return NextResponse.json(
     {
       id: gen.id,
       status: gen.status,
       errorMessage: gen.errorMessage,
       costCents: gen.costCents,
+      costBreakdown,
       finishedAt: gen.finishedAt,
       assets,
     },
