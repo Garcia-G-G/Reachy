@@ -257,15 +257,19 @@ export async function composeImage(args: ComposeImageArgs): Promise<Buffer> {
     .toBuffer();
 
   // sharp rasterizes the SVG using the @font-face data URLs embedded in
-  // it. The `density` knob controls the SVG-to-raster DPI; 144 keeps text
-  // crisp at typical reel/post sizes without bloating render time.
+  // it. The SVG already declares `width` and `height` in pixels matching
+  // the target, so we let sharp use the default 72 DPI density — anything
+  // higher up-samples the SVG past the background dimensions and trips
+  // libvips's "Image to composite must have same dimensions or smaller"
+  // guard (was: density:144 doubled the overlay to 2160px). Vector text
+  // stays crisp at 72 DPI because it's still rendered from the font
+  // outlines, not raster.
   return sharp(resizedBackground)
     .composite([
       {
         input: Buffer.from(svg),
         top: 0,
         left: 0,
-        density: 144,
       },
     ])
     .png({ compressionLevel: 6 })
