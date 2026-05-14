@@ -89,9 +89,6 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
     QUEUE_NAMES.videoGen,
     async (job) => {
       const { generationId, projectId, projectSlug, engine, plan } = job.data;
-      console.log(
-        `[reachy:debug-trace] worker pickup generationId=${generationId} engine=${engine} template=${plan.template} sceneCount=${plan.scenes.length} attemptsMade=${job.attemptsMade}`,
-      );
       await db.update(generation).set({ status: 'running' }).where(eq(generation.id, generationId));
 
       // Idempotency: a retry should leave no stale partial assets behind.
@@ -132,15 +129,8 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
           `[reachy:video] gen ${generationId} ffprobe: ${probed.durationSec.toFixed(2)}s ${probed.videoCodec} ${probed.width}x${probed.height} @ ${probed.fps}fps (expected ${expected.toFixed(2)}s)`,
         );
 
-        console.log(
-          `[reachy:debug-trace] worker uploading to R2 generationId=${generationId} bytes=${out.bytes}`,
-        );
-        const r2Start = Date.now();
         const key = `${projectId}/reels/${generationId}.mp4`;
         const upload = await putR2(key, out.buffer, 'video/mp4');
-        console.log(
-          `[reachy:debug-trace] worker R2 ok key=${upload.key} bytes=${upload.bytes} elapsedMs=${Date.now() - r2Start}`,
-        );
 
         await db.insert(asset).values({
           generationId,
@@ -686,9 +676,6 @@ async function runSoraOneShot(
   onProgress?: (pct: number) => void,
 ): Promise<EngineResult> {
   const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-oneshot-'));
-  console.log(
-    `[reachy:debug-trace] runSoraOneShot enter generationId=${data.generationId} engine=${data.engine} tmp=${tmp}`,
-  );
   try {
     // Engine → (Sora model, output size, cost-tier key). Pro 1024p is the
     // premium tier ($0.50/s) for flagship demos; Pro 720p is the cheaper
@@ -780,9 +767,6 @@ async function runSoraOneShot(
         const dl = await downloadSora(job.jobId);
         await writeFile(videoPath, dl.buffer);
         console.log(
-          `[reachy:debug-trace] runSoraOneShot wrote Sora MP4 path=${videoPath} bytes=${dl.bytes}`,
-        );
-        console.log(
           `[reachy:video] gen ${data.generationId} one-shot downloaded (${dl.bytes} bytes)`,
         );
         break;
@@ -841,7 +825,7 @@ async function runSoraOneShot(
       await writeFile(musicPath, music.buffer);
       musicCostCents = music.costCents;
       console.log(
-        `[reachy:music] gen ${data.generationId} music written path=${musicPath} bytes=${music.bytes}`,
+        `[reachy:music] gen ${data.generationId} music ready bytes=${music.bytes} costCents=${music.costCents}`,
       );
     }
 
@@ -856,10 +840,6 @@ async function runSoraOneShot(
     }));
 
     const outputPath = join(tmp, 'out.mp4');
-    console.log(
-      `[reachy:debug-trace] runSoraOneShot -> composeOneShot beats=${beats.length} hasAudio=${Boolean(audioPath)} hasMusic=${Boolean(musicPath)} sfxHits=${sfxHits.length} duration=${SORA_ONE_SHOT_DURATION_SEC}s outputPath=${outputPath}`,
-    );
-    const composeStart = Date.now();
     await composeOneShot({
       videoPath,
       beats,
@@ -870,18 +850,12 @@ async function runSoraOneShot(
       outputPath,
       onProgress: (pct) => onProgress?.(0.85 + pct * 0.15),
     });
-    console.log(
-      `[reachy:debug-trace] runSoraOneShot composeOneShot done elapsedMs=${Date.now() - composeStart}`,
-    );
 
     // ffprobe BEFORE the finally block reaps tmp — see EngineResult.probed.
     // This is the bug fix: previously the outer worker called ffprobe on
     // outputPath after we returned, but our `finally { rm(tmp) }` had
     // already deleted the file. ENOENT every single render.
     const probed = await ffprobe(outputPath);
-    console.log(
-      `[reachy:debug-trace] runSoraOneShot ffprobe done duration=${probed.durationSec.toFixed(2)}s width=${probed.width} height=${probed.height} codec=${probed.videoCodec}`,
-    );
     const buffer = await readFile(outputPath);
     const videoCostCents = soraCostCents(soraModel, SORA_ONE_SHOT_DURATION_SEC, costRes);
     const costCents = 1 + videoCostCents + tts.ttsCostCents + musicCostCents + sfxCostCents;

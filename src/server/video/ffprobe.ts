@@ -42,23 +42,18 @@ interface RawProbe {
  * fluent-ffmpeg works — both `pnpm dev` and the worker rely on it.
  */
 export async function ffprobe(filePath: string): Promise<ProbeResult> {
-  const startedAt = Date.now();
-  // debug-trace: pre-check that the file actually exists before probing.
-  // If it doesn't, ffprobe will fail with a less-obvious error and we'd
-  // miss the real issue (e.g. tmp-dir-was-cleaned-up race).
+  // Pre-check: if the file was reaped by an engine's `finally { rm(tmp) }`
+  // cleanup before we got here, ffprobe's error would be opaque. Throw a
+  // clean "file not found" up the call stack so the race regression
+  // (fixed in 1e9aded) stays visible if it ever returns.
   let exists = false;
-  let sizeBytes = 0;
   try {
     const { stat } = await import('node:fs/promises');
     const info = await stat(filePath);
     exists = info.isFile();
-    sizeBytes = info.size;
   } catch {
     // exists stays false
   }
-  console.log(
-    `[reachy:debug-trace] ffprobe enter path=${filePath} exists=${exists} sizeBytes=${sizeBytes}`,
-  );
   if (!exists) {
     throw new Error(`ffprobe: file not found at ${filePath}`);
   }
@@ -72,7 +67,6 @@ export async function ffprobe(filePath: string): Promise<ProbeResult> {
       '-show_streams',
       filePath,
     ];
-    console.log(`[reachy:debug-trace] ffprobe spawn ffprobe ${argv.join(' ')}`);
     const child = spawn('ffprobe', argv);
     let stdout = '';
     let stderr = '';
@@ -83,13 +77,7 @@ export async function ffprobe(filePath: string): Promise<ProbeResult> {
       stderr += chunk.toString();
     });
     child.on('close', (code) => {
-      const elapsedMs = Date.now() - startedAt;
-      console.log(
-        `[reachy:debug-trace] ffprobe close path=${filePath} exitCode=${code} elapsedMs=${elapsedMs}`,
-      );
       if (code !== 0) {
-        const tail = stderr.split('\n').slice(-5).join(' | ');
-        console.warn(`[reachy:debug-trace] ffprobe stderr tail: ${tail}`);
         reject(new Error(`ffprobe failed (code ${code}): ${stderr.trim()}`));
         return;
       }

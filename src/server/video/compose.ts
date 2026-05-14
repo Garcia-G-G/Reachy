@@ -703,9 +703,6 @@ export interface ComposeOneShotArgs {
  * `enable='between(t, startSec, endSec)'` ranges on the same input stream.
  */
 export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ outputPath: string }> {
-  console.log(
-    `[reachy:debug-trace] composeOneShot enter videoPath=${args.videoPath} beats=${args.beats.length} hasAudio=${Boolean(args.audioPath)} duration=${args.durationSec}s outputPath=${args.outputPath}`,
-  );
   const fontFile = await resolveDrawtextFont();
   const tmp = await mkdtemp(join(tmpdir(), 'reachy-reel-oneshot-'));
 
@@ -868,7 +865,6 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
         ])
         .output(args.outputPath)
         .on('start', (cmdline) => {
-          console.log(`[reachy:debug-trace] composeOneShot ffmpeg start argv:\n${cmdline}`);
           console.log(`[reachy:video] ffmpeg cmd (oneshot):\n${cmdline}`);
         })
         .on('progress', (info) => {
@@ -877,16 +873,10 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
           }
         })
         .on('end', () => {
-          console.log(
-            `[reachy:debug-trace] composeOneShot ffmpeg ok outputPath=${args.outputPath}`,
-          );
           resolve({ outputPath: args.outputPath });
         })
         .on('error', (err, _stdout, stderr) => {
           const tail = (stderr ?? '').split('\n').slice(-40).join('\n');
-          console.error(
-            `[reachy:debug-trace] composeOneShot ffmpeg ERROR: ${err.message}\n--- stderr tail ---\n${tail}`,
-          );
           reject(
             new Error(`${err.message}${tail ? `\n--- ffmpeg stderr (tail) ---\n${tail}` : ''}`),
           );
