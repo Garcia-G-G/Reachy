@@ -156,11 +156,15 @@ async function main() {
   console.log(`  engine:      ${engine}`);
   console.log(`  visualStyle: ${visualStyle}`);
   console.log(`  language:    es`);
-  console.log(`  scenes:      ${scenes.length} (${scenes.map((s) => `${s.durationSec}s`).join('/')})`);
+  console.log(
+    `  scenes:      ${scenes.length} (${scenes.map((s) => `${s.durationSec}s`).join('/')})`,
+  );
   console.log(`  expected:    ~$10.65 · ETA ~12-18 min`);
   console.log(``);
   console.log(`Watch progress:`);
-  console.log(`  PGPASSWORD=reachy psql -h localhost -p 5433 -U reachy -d reachy -c "SELECT status, params->'costBreakdown' FROM generation WHERE id='${gen.id}'"`);
+  console.log(
+    `  PGPASSWORD=reachy psql -h localhost -p 5433 -U reachy -d reachy -c "SELECT status, params->'costBreakdown' FROM generation WHERE id='${gen.id}'"`,
+  );
   await queue.close();
   process.exit(0);
 }

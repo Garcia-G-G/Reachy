@@ -712,16 +712,23 @@ export async function concatVideoSegments(
     // Normalize each Sora segment to 1080x1920 yuv420p 30fps. Sora delivers
     // 720x1280 or 1024x1792, both 9:16; force_original_aspect_ratio=increase
     // upscales without letterboxing.
+    // `setsar=1` is CRITICAL: Sora 2 Pro returns segments with slightly
+    // different SAR values across a chain (seg 0 = 1:1, seg 1 from
+    // videos.extend = 7680:7679). Numerically identical but FFmpeg's
+    // concat filter refuses to mix them and bails with "Input link
+    // parameters do not match the corresponding output link parameters"
+    // → encoder exits 234 before writing a single frame. Forcing
+    // SAR to 1:1 on every segment makes them concat-compatible.
     args.segments.forEach((_, i) => {
       filters.push(
-        `[${i}:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase,crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},fps=${REEL_DIMENSIONS.fps},format=yuv420p[v${i}]`,
+        `[${i}:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height}:force_original_aspect_ratio=increase,crop=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},setsar=1,fps=${REEL_DIMENSIONS.fps},format=yuv420p[v${i}]`,
       );
     });
     let videoChainLabel: string;
     if (args.segments.length === 0) {
       // Brand-only (degenerate edge case — usually we have ≥1 Sora segment).
       filters.push(
-        `[0:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},fps=${REEL_DIMENSIONS.fps},format=yuv420p[brand]`,
+        `[0:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},setsar=1,fps=${REEL_DIMENSIONS.fps},format=yuv420p[brand]`,
       );
       videoChainLabel = 'brand';
     } else if (args.segments.length === 1 && !args.brandBg) {
@@ -737,8 +744,12 @@ export async function concatVideoSegments(
       }
       if (args.brandBg) {
         const brandIdx = args.segments.length;
+        // Brand-bg PNG also gets `setsar=1` so it matches the Sora chain
+        // for the second concat — otherwise the PNG's SAR=1000:1000 (which
+        // some image stacks emit) would trigger the same mismatch error
+        // we just fixed on the Sora-to-Sora boundary.
         filters.push(
-          `[${brandIdx}:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},fps=${REEL_DIMENSIONS.fps},format=yuv420p[brand]`,
+          `[${brandIdx}:v]scale=${REEL_DIMENSIONS.width}:${REEL_DIMENSIONS.height},setsar=1,fps=${REEL_DIMENSIONS.fps},format=yuv420p[brand]`,
         );
         filters.push(`[${soraChain}][brand]concat=n=2:v=1:a=0[vfinal]`);
         videoChainLabel = 'vfinal';

@@ -79,11 +79,14 @@ const PERMANENT_PATTERNS = [
 const isPermanent = (m: string) => PERMANENT_PATTERNS.some((re) => re.test(m));
 
 const SORA_POLL_INTERVAL_MS = 6_000;
-// 15 min total. Sora 2 Pro takes 2-5 min per scene; this also has to fit a
-// possible moderation retry (resubmit takes another 2-5 min). If a reel
-// runs longer than this we throw and let BullMQ retry resume polling from
-// the persisted job ids.
-const SORA_POLL_TIMEOUT_MS = 15 * 60 * 1000;
+// 30 min per segment. Empirically Sora 2 Pro at 1024p takes 25-35 min per
+// 8-12s extend — was 15 min, but the demo-Gerardo render (2026-05-14) hit
+// the timeout on segment 2 and only completed because BullMQ retried.
+// Doubling to 30 min covers normal 1024p extends in one attempt; BullMQ
+// retry remains the safety net for genuinely stuck jobs. (720p Pro and
+// base Sora segments finish well under 10 min, so this is a no-op for
+// those engines.)
+const SORA_POLL_TIMEOUT_MS = 30 * 60 * 1000;
 
 export function startVideoWorker(): Worker<VideoGenJobData> {
   // Crash loud at boot if ffmpeg is missing — better than silently dropping
@@ -94,7 +97,15 @@ export function startVideoWorker(): Worker<VideoGenJobData> {
     QUEUE_NAMES.videoGen,
     async (job) => {
       const { generationId, projectId, projectSlug, engine, plan } = job.data;
-      await db.update(generation).set({ status: 'running' }).where(eq(generation.id, generationId));
+      // Clear stale error_message / finished_at from a previous failed
+      // attempt — otherwise the UI sees status='running' alongside a
+      // misleading "Sora segment 2 timed out" while the retry is happily
+      // re-polling. Status flips back to 'failed' below if the retry
+      // also fails.
+      await db
+        .update(generation)
+        .set({ status: 'running', errorMessage: null, finishedAt: null })
+        .where(eq(generation.id, generationId));
 
       // Idempotency: a retry should leave no stale partial assets behind.
       if (job.attemptsMade > 0) {
