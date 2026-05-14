@@ -26,17 +26,17 @@ import type { VisualStyleKey } from '@/lib/visual-styles-meta';
 
 const STYLE_TO_MUSIC_PROMPT: Record<VisualStyleKey, string> = {
   editorial:
-    'Calm editorial documentary score, gentle piano with subtle warm strings underneath, slow tempo around 72 BPM, premium magazine feel, no vocals, no drums on the downbeat, sits quietly under a narrator.',
+    'Modern editorial documentary score with a clear pulse — felted piano with warm string pad, light brushed percussion at around 88 BPM, premium magazine feel that gently propels the narration forward. No vocals. Should be audible and characterful under speech, not a whisper.',
   'paper-cutout':
-    'Warm acoustic indie folk, plucked nylon-string guitar with light shaker and brushed snare, cozy hand-made feel, mid-tempo around 95 BPM, no vocals, leaves room for a narrator on top.',
+    'Warm acoustic indie folk with momentum — plucked nylon guitar with hand claps, soft shaker, brushed snare on the backbeat at ~100 BPM, cozy hand-made feel that breathes alongside the narrator. No vocals. Present but supportive under speech.',
   'flat-2d':
-    'Upbeat playful explainer music, ukulele with light hand claps and soft synth pads, friendly and curious, around 110 BPM, no vocals, mixed quietly so a narrator stays clearly on top.',
+    'Upbeat playful explainer pop — ukulele, claps, kick on every beat, bright synth ostinato and twinkly bells at ~118 BPM. Friendly, curious, energetic. No vocals. Sits under the narrator but is unmistakably there.',
   infographic:
-    'Clean modern minimal electronic, subtle four-on-the-floor at 100 BPM with soft synth pads, data-driven and confident, no vocals, sits quietly under a narrator.',
+    'Confident modern minimal electronic — four-on-the-floor at ~108 BPM with crisp claps, plucked synth ostinato, warm sub-bass, light arpeggio over a brand-tech mood. No vocals. Data-driven and present, not ambient wallpaper.',
   isometric:
-    'Dreamy synthwave with soft arpeggios and warm pads, mid-tempo around 95 BPM, modern indie-tech ambient, no vocals, leaves space for spoken voice.',
+    'Bright modern indie-tech — soft arpeggios, warm pads, gentle four-on-the-floor at ~104 BPM, light bell accents, dreamy yet propulsive. No vocals. Audible and lively under the narrator.',
   abstract:
-    'Cinematic ambient drone with slowly evolving warm pads and subtle sub-bass, premium tech keynote feel, around 70 BPM, no percussion, no vocals, sits well under a narrator.',
+    'Cinematic premium tech-keynote score — evolving warm pads, slow build with a pulsing sub-bass at ~84 BPM, occasional brushed cinematic hit, crisp sense of forward motion. No vocals. Should feel rich and present, not background noise.',
 };
 
 let cached: ElevenLabsClient | null = null;

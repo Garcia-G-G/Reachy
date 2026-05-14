@@ -917,9 +917,15 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
       // amix them all into [afinal]. Single audio source → no amix.
       //
       // Volume balance:
+      // Levels — calibrated against amix with `normalize=0` (so per-source
+      // levels below are the ACTUAL post-mix levels; without this flag amix
+      // auto-divides by N, which made music at 0.15 effectively -26 dB and
+      // inaudible. Garcia heard "no music, no sfx, nothing" on the first
+      // listen; that was this bug, not a missing pipeline.
       //   TTS narration:   1.0   (foreground)
-      //   Music:           0.15  (≈-22 LUFS background, fits under voice)
-      //   SFX:             0.20  (≈-18 LUFS, brief enough to peak through)
+      //   Music:           0.30  (≈-10 dB under voice, present but ducked)
+      //   SFX:             0.70  (≈-3 dB under voice, punchy stingers)
+      // A dynaudnorm pass at the end gently limits any TTS+SFX peak overlap.
       const audioLabels: string[] = [];
       if (ttsInputIdx !== null) {
         filters.push(
@@ -929,7 +935,7 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
       }
       if (musicInputIdx !== null) {
         filters.push(
-          `[${musicInputIdx}:a]aloop=loop=-1:size=2147483647,atrim=0:${args.durationSec},asetpts=PTS-STARTPTS,volume=0.15[a_music]`,
+          `[${musicInputIdx}:a]aloop=loop=-1:size=2147483647,atrim=0:${args.durationSec},asetpts=PTS-STARTPTS,volume=0.30[a_music]`,
         );
         audioLabels.push('[a_music]');
       }
@@ -941,7 +947,7 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
         // past the reel end.
         const delayMs = Math.round(hit.startSec * 1000);
         filters.push(
-          `[${inputIdx}:a]adelay=${delayMs}|${delayMs},atrim=0:${args.durationSec},asetpts=PTS-STARTPTS,volume=0.20[a_sfx_${i}]`,
+          `[${inputIdx}:a]adelay=${delayMs}|${delayMs},atrim=0:${args.durationSec},asetpts=PTS-STARTPTS,volume=0.70[a_sfx_${i}]`,
         );
         audioLabels.push(`[a_sfx_${i}]`);
       });
@@ -961,11 +967,16 @@ export async function composeOneShot(args: ComposeOneShotArgs): Promise<{ output
         filterOutputs = ['vfinal', 'afinal'];
         audioOpts = ['-c:a', 'aac', '-b:a', '128k', '-shortest'];
       } else {
+        // CRITICAL: `normalize=0` keeps amix from dividing each source by N.
+        // Without it, music + SFX get scaled to inaudibility (the bug Garcia
+        // hit). `dynaudnorm` after amix gently auto-levels any peak collisions
+        // from TTS + SFX overlap; framelen=200ms is short enough that voice
+        // cuts through punchy stingers without pumping.
         filters.push(
-          `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0,atrim=0:${args.durationSec},asetpts=PTS-STARTPTS[afinal]`,
+          `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0:normalize=0,atrim=0:${args.durationSec},asetpts=PTS-STARTPTS,dynaudnorm=f=200:g=15:p=0.95[afinal]`,
         );
         filterOutputs = ['vfinal', 'afinal'];
-        audioOpts = ['-c:a', 'aac', '-b:a', '128k', '-shortest'];
+        audioOpts = ['-c:a', 'aac', '-b:a', '160k', '-shortest'];
       }
 
       cmd

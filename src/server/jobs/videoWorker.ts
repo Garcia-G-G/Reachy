@@ -744,7 +744,7 @@ async function runSoraOneShot(
       '',
       `Beat sheet (${imageSec}s of Sora-rendered footage, ${segPlan.length} segment${segPlan.length > 1 ? 's' : ''}: ${segPlan.join('+')}): ${beatSheet}`,
       '',
-      `Sustain the locked visual style for the full ${imageSec} seconds. The motion is one continuous shot, with subtle pacing shifts as each beat lands. No cuts, no transitions, no camera moves — just the elements evolving in place. CRITICAL: NO text, NO letters, NO words, NO numbers visible in the rendered video. NO real people, NO faces. The beat sheet is for pacing the visual rhythm only; the overlay text is added separately by our renderer.`,
+      `Sustain the locked visual style and ACTIVE motion for the full ${imageSec} seconds — every pixel should be alive across the entire clip, never freezing. The motion described in the style is continuous and confident; let it BREATHE the full duration. Subtle camera push-in or parallax is welcome; hard cuts and whip pans are not. CRITICAL: NO text, NO letters, NO words, NO numbers visible in the rendered video. NO real people, NO faces. The beat sheet is for pacing the visual rhythm — let the energy build with each beat — but the overlay text is added separately by our renderer, so do not render words inside the video.`,
     ].join(' ');
 
     // Step 1+2: submit (or resume) the segment chain.
@@ -1054,26 +1054,41 @@ async function generateSfxBundleForReel(
   totalDurationSec: number,
 ): Promise<Array<{ path: string; startSec: number; costCents: number }>> {
   const midpoint = totalDurationSec / 2;
-  const tailStart = Math.max(0, totalDurationSec - 0.6);
+  const tailStart = Math.max(0, totalDurationSec - 0.8);
+  // Punchy, audible stingers — earlier descriptions ("soft", "subtle",
+  // "gentle") asked ElevenLabs for whispers that vanished under the
+  // narration. These are written to be PRESENT: a confident hook at t=0,
+  // a satisfying transition mid-reel, a snappy outro hit. The disk cache
+  // keys on the description text + duration + promptInfluence, so changing
+  // the strings here also acts as a cache bust.
   const requests: Array<{ description: string; durationSec: number; startSec: number }> = [
     {
-      description: 'soft brief chime, editorial intro stinger, warm',
-      durationSec: 1.0,
+      description:
+        'bright modern intro stinger, crisp synth swell with a soft transient on the downbeat, confident and premium — feels like a product reveal moment, not a whisper',
+      durationSec: 1.2,
       startSec: 0,
     },
     {
-      description: 'subtle paper rustle transition swoosh, brief',
+      description:
+        'attention-grabbing transition whoosh with a satisfying bass thump on the tail, modern and editorial, energetic',
       durationSec: 1.0,
       startSec: midpoint,
     },
-    { description: 'gentle UI click, brief, premium outro', durationSec: 0.6, startSec: tailStart },
+    {
+      description:
+        'punchy outro snap with a short reverb tail, conclusive and crisp — the audio equivalent of a button press that confirms an action',
+      durationSec: 0.8,
+      startSec: tailStart,
+    },
   ];
   const results = await Promise.all(
     requests.map(async (req) => {
       const sfx = await generateSfx({
         description: req.description,
         durationSec: req.durationSec,
-        promptInfluence: 0.6,
+        // 0.85 (was 0.6) — keep the model close to our "punchy/bright/snap"
+        // language. Looser values regress toward generic ambient hits.
+        promptInfluence: 0.85,
       });
       return { path: sfx.path, startSec: req.startSec, costCents: sfx.costCents };
     }),
