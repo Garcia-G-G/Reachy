@@ -1,14 +1,27 @@
 import 'server-only';
 import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
+import { type BrandColors, composeImage, type PlannedCopy } from '@/server/ai/composeImage';
+import { planCopy } from '@/server/ai/copyPlanner';
 import { getFormat } from '@/server/ai/formats';
 import { generateImage } from '@/server/ai/imageGen';
+import { getLayout } from '@/server/ai/layoutTemplates';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
+import { brandKit } from '@/server/db/schema/brandKits';
 import { generation } from '@/server/db/schema/generations';
+import { project } from '@/server/db/schema/projects';
 import { putR2 } from '@/server/storage/r2';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 import type { ImageGenJobData } from './queue';
+
+/** Default brand color fallbacks — keep editorial palette so missing
+ *  brand kits still produce on-brand output instead of system grey. */
+const FALLBACK_COLORS: BrandColors = {
+  ink: '#14110D',
+  paper: '#F1EBDF',
+  accent: '#B6481A',
+};
 
 // Errors we don't want BullMQ to retry. OpenAI/fal will reject the same prompt
 // the second time too — retrying just burns the wallet a second time.
@@ -32,7 +45,19 @@ export function startImageWorker(): Worker<ImageGenJobData> {
   const worker = new Worker<ImageGenJobData>(
     QUEUE_NAMES.imageGen,
     async (job) => {
-      const { generationId, projectId, prompt, format, provider, model, n, quality } = job.data;
+      const {
+        generationId,
+        projectId,
+        prompt,
+        format,
+        provider,
+        model,
+        n,
+        quality,
+        layoutId,
+        idea,
+        language,
+      } = job.data;
       const fm = getFormat(format);
 
       await db
@@ -47,12 +72,78 @@ export function startImageWorker(): Worker<ImageGenJobData> {
       }
 
       try {
+        // Marketing-grade pipeline:
+        //   1. AI renders the BACKGROUND only (prompt has explicit "no text").
+        //   2. copyPlanner LLM-generates eyebrow/headline/etc. for the slots
+        //      this layout needs.
+        //   3. composeImage overlays brand-fontd typography on top with exact
+        //      brand hex colors.
+        // The video pipeline calls generateImage directly (no layoutId) so it
+        // keeps getting raw image scenes — overlay is opt-in via layoutId.
         const result = await generateImage({ prompt, format, provider, model, n, quality });
+
+        // Load project + brand kit ONCE for the compose step (n copies share
+        // the same brand). The compose branch only runs when layoutId is set.
+        const layout = layoutId ? getLayout({ layoutId }) : null;
+        let copy: PlannedCopy = {};
+        let colors: BrandColors = FALLBACK_COLORS;
+        let copyCostCents = 0;
+        let composeCostCents = 0;
+
+        if (layout) {
+          const [proj] = await db.select().from(project).where(eq(project.id, projectId)).limit(1);
+          const [kit] = proj
+            ? await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1)
+            : [];
+
+          if (kit) {
+            colors = {
+              ink: kit.primaryColor ?? FALLBACK_COLORS.ink,
+              paper: kit.bgColor ?? FALLBACK_COLORS.paper,
+              accent: kit.accentColor ?? FALLBACK_COLORS.accent,
+            };
+          }
+
+          const plan = await planCopy({
+            idea: idea ?? '',
+            layout,
+            language: language ?? 'en',
+            project: proj
+              ? { name: proj.name, audience: proj.audience, tone: proj.tone }
+              : { name: 'Project', audience: null, tone: null },
+            brandKit: kit ?? null,
+          });
+          copy = plan.copy;
+          copyCostCents = plan.costCents;
+          // 1¢ compose floor — keeps the ledger row from showing $0.00 for
+          // a step that consumed CPU. The actual sharp work is sub-cent.
+          composeCostCents = 1;
+        }
+
+        // Compose each buffer if we have a layout; otherwise keep raw output.
+        // We composite serially because sharp's pipeline is already CPU-bound
+        // — running n composites in parallel just thrashes the event loop.
+        const composedBuffers: Buffer[] = [];
+        if (layout) {
+          for (const raw of result.buffers) {
+            const composed = await composeImage({
+              background: raw,
+              width: fm.w,
+              height: fm.h,
+              layout,
+              copy,
+              colors,
+            });
+            composedBuffers.push(composed);
+          }
+        } else {
+          composedBuffers.push(...result.buffers);
+        }
 
         // One round-trip insert instead of N. Order is preserved by the array
         // index so `${i+1}.png` keys still align with row order.
         const rows: Array<typeof asset.$inferInsert> = [];
-        for (const [i, buf] of result.buffers.entries()) {
+        for (const [i, buf] of composedBuffers.entries()) {
           const key = `${projectId}/${generationId}/${i + 1}.png`;
           const upload = await putR2(key, buf, result.contentType);
           rows.push({
@@ -69,12 +160,46 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         }
         await db.insert(asset).values(rows);
 
+        // Total cost: AI-image cost (returned by generateImage) + copy
+        // planner LLM call + compose floor. Stored on the generation row
+        // so the UI's "Cost: X¢" tally reflects what the user actually
+        // paid this turn. Composition state (layout + copy + colors) is
+        // persisted in params so the re-render-overlay action can rebuild
+        // the same asset cheaply without re-querying the brand kit.
+        const totalCostCents = result.costCents + copyCostCents + composeCostCents;
+        const [existingGen] = await db
+          .select({ params: generation.params })
+          .from(generation)
+          .where(eq(generation.id, generationId))
+          .limit(1);
+        const mergedParams = {
+          ...((existingGen?.params as Record<string, unknown>) ?? {}),
+          ...(layout
+            ? {
+                composeState: {
+                  layoutId: layout.id,
+                  copy,
+                  colors,
+                },
+                costBreakdown: {
+                  cents: totalCostCents,
+                  parts: {
+                    image: result.costCents,
+                    copy: copyCostCents,
+                    compose: composeCostCents,
+                  },
+                },
+              }
+            : {}),
+        };
+
         await db
           .update(generation)
           .set({
             status: 'done',
             finishedAt: new Date(),
-            costCents: result.costCents,
+            costCents: totalCostCents,
+            params: mergedParams,
           })
           .where(eq(generation.id, generationId));
       } catch (err) {

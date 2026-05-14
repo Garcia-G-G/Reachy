@@ -3,6 +3,7 @@ import { Queue } from 'bullmq';
 import type { QualityTier } from '@/lib/image-models';
 import type { ImageFormat } from '@/server/ai/formats';
 import type { ImageProvider } from '@/server/ai/imageGen';
+import type { LayoutId } from '@/server/ai/layoutTemplates';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 
 export interface ImageGenJobData {
@@ -17,6 +18,18 @@ export interface ImageGenJobData {
    *  ignored by fal.ai entries. The form persists user's pick to
    *  localStorage and threads it here on each enqueue. */
   quality?: QualityTier;
+  /** Marketing-grade overlay layout. When set, the worker plans copy
+   *  with the LLM and composites brand-fontd typography on top of the
+   *  AI background. When undefined, the AI output is returned raw (used
+   *  by the video pipeline's scene image generation). */
+  layoutId?: LayoutId;
+  /** The user's raw idea — used by the copy planner. Stored separately
+   *  from `prompt` because `prompt` is what we send to the IMAGE model
+   *  (background-only directive) and `idea` is what we send to the LLM
+   *  for headline / eyebrow generation. */
+  idea?: string;
+  /** Language for the planned copy. */
+  language?: 'en' | 'es';
 }
 
 let cached: Queue<ImageGenJobData> | null = null;

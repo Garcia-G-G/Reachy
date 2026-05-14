@@ -47,7 +47,12 @@ export type ImageModelId = OpenAIImageModelId | FalImageModelId;
  *  use this parameter and ignore it. */
 export type QualityTier = 'low' | 'medium' | 'high' | 'auto';
 export const QUALITY_TIERS: readonly QualityTier[] = ['low', 'medium', 'high', 'auto'];
-export const DEFAULT_QUALITY_TIER: QualityTier = 'medium';
+// Default is `high` for the marketing-grade pipeline. The cost difference
+// vs medium (~4×) is justified by visibly sharper backgrounds — the
+// deterministic typography overlay needs a clean substrate to look like
+// a polished asset. Users can drop to medium/low explicitly when they're
+// iterating cheaply, or pick `auto` to let the model choose.
+export const DEFAULT_QUALITY_TIER: QualityTier = 'high';
 
 export interface ImageModelEntry {
   id: ImageModelId;

@@ -23,12 +23,20 @@ import {
   type QualityTier,
 } from '@/lib/image-models';
 import {
+  DEFAULT_LAYOUT_FOR_FORMAT,
+  LAYOUT_IDS,
+  LAYOUT_META,
+  LAYOUT_SLOTS,
+  type LayoutId,
+  type LayoutSlot,
+} from '@/lib/layout-meta';
+import {
   DEFAULT_VISUAL_STYLE,
   VISUAL_STYLE_KEYS,
   VISUAL_STYLE_META,
   type VisualStyleKey,
 } from '@/lib/visual-styles-meta';
-import { enqueueImageGeneration } from '@/server/actions/images';
+import { enqueueImageGeneration, rerenderOverlay } from '@/server/actions/images';
 
 interface GenerateImageFormProps {
   projectId: string;
@@ -133,9 +141,18 @@ export function GenerateImageForm({
   const [quality, setQuality] = useState<QualityTier>(persistedQuality);
   // null = use brand kit's visualStyle. Any key = one-off override.
   const [visualStyleOverride, setVisualStyleOverride] = useState<VisualStyleKey | null>(null);
+  // null = use per-format default. 'none' = raw AI output (no overlay).
+  // Any LayoutId = pick that layout.
+  const [layoutOverride, setLayoutOverride] = useState<LayoutId | 'none' | null>(null);
   const [n, setN] = useState<1 | 2 | 4>(1);
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
+  // Edit-copy modal state. Open when an asset id is set.
+  const [editTarget, setEditTarget] = useState<{
+    generationId: string;
+    assetId: string;
+    publicUrl: string | null;
+  } | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -237,6 +254,7 @@ export function GenerateImageForm({
         language: 'en',
         quality: effectiveQuality,
         visualStyleOverride: visualStyleOverride ?? undefined,
+        layoutId: layoutOverride ?? undefined,
       });
 
       if (!result.ok) {
@@ -432,6 +450,38 @@ export function GenerateImageForm({
           </select>
         </div>
 
+        <div>
+          <label htmlFor="gen-layout" className="mono-eyebrow mb-3 block">
+            Layout
+            <span className="ml-2 text-ink-3 normal-case">
+              — default for {IMAGE_FORMATS[format].label}:{' '}
+              <strong>{LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label}</strong>
+            </span>
+          </label>
+          <select
+            id="gen-layout"
+            value={layoutOverride ?? ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '') setLayoutOverride(null);
+              else if (v === 'none') setLayoutOverride('none');
+              else setLayoutOverride(v as LayoutId);
+            }}
+            disabled={formDisabled}
+            className="field cursor-pointer"
+          >
+            <option value="">
+              Format default ({LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label})
+            </option>
+            {LAYOUT_IDS.map((id) => (
+              <option key={id} value={id}>
+                {LAYOUT_META[id].label} — {LAYOUT_META[id].tagline}
+              </option>
+            ))}
+            <option value="none">No overlay (raw AI background)</option>
+          </select>
+        </div>
+
         <fieldset className="space-y-3">
           <legend className="mono-eyebrow mb-3 block">{t('fieldVariants')}</legend>
           <div className="flex gap-6">
@@ -485,8 +535,46 @@ export function GenerateImageForm({
       </form>
 
       <aside className="space-y-4">
-        <ResultPanel run={run} t={t} />
+        <ResultPanel
+          run={run}
+          t={t}
+          layoutId={layoutOverride ?? DEFAULT_LAYOUT_FOR_FORMAT[format]}
+          onEditCopy={(asset) =>
+            setEditTarget({
+              generationId: 'generationId' in run ? run.generationId : '',
+              assetId: asset.id,
+              publicUrl: asset.publicUrl,
+            })
+          }
+        />
       </aside>
+      {editTarget?.generationId && (
+        <EditCopyModal
+          target={editTarget}
+          layoutId={layoutOverride ?? DEFAULT_LAYOUT_FOR_FORMAT[format]}
+          onClose={() => setEditTarget(null)}
+          onRendered={(publicUrl, newAssetId) => {
+            setRun((current) => {
+              if (current.kind !== 'done') return current;
+              return {
+                ...current,
+                assets: [
+                  {
+                    id: newAssetId,
+                    publicUrl,
+                    width: current.assets[0]?.width ?? null,
+                    height: current.assets[0]?.height ?? null,
+                    storageKey: null,
+                  },
+                  ...current.assets,
+                ],
+              };
+            });
+            setEditTarget(null);
+            toast.success('Overlay re-rendered (no cost — typography only)');
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -494,9 +582,13 @@ export function GenerateImageForm({
 function ResultPanel({
   run,
   t,
+  layoutId,
+  onEditCopy,
 }: {
   run: RunState;
   t: ReturnType<typeof useTranslations<'Generate'>>;
+  layoutId: LayoutId | 'none';
+  onEditCopy: (asset: AssetSummary) => void;
 }) {
   if (run.kind === 'idle') return null;
 
@@ -523,6 +615,7 @@ function ResultPanel({
 
   const assets = run.assets;
   const grid = assets.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
+  const canEdit = layoutId !== 'none' && run.kind === 'done';
 
   return (
     <div className="space-y-4">
@@ -544,8 +637,20 @@ function ResultPanel({
                 </div>
               )}
             </div>
-            <figcaption className="mono-eyebrow text-ink-3">
-              {a.width ?? '?'} × {a.height ?? '?'}
+            <figcaption className="flex items-center justify-between gap-2">
+              <span className="mono-eyebrow text-ink-3">
+                {a.width ?? '?'} × {a.height ?? '?'}
+              </span>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => onEditCopy(a)}
+                  className="mono-eyebrow text-ink underline underline-offset-2 hover:text-accent"
+                  title="Re-render typography on this background (no AI cost)"
+                >
+                  Edit copy
+                </button>
+              )}
             </figcaption>
           </figure>
         ))}
@@ -556,6 +661,124 @@ function ResultPanel({
           {typeof run.costCents === 'number' && ` · ${t('costNote', { cents: run.costCents })}`}
         </p>
       )}
+    </div>
+  );
+}
+
+interface EditCopyModalProps {
+  target: { generationId: string; assetId: string; publicUrl: string | null };
+  layoutId: LayoutId | 'none';
+  onClose: () => void;
+  onRendered: (publicUrl: string, assetId: string) => void;
+}
+
+function EditCopyModal({ target, layoutId, onClose, onRendered }: EditCopyModalProps) {
+  // Layout 'none' shouldn't open the modal in the first place (the Edit
+  // Copy button is hidden), but defensively bail.
+  const slots: readonly LayoutSlot[] = layoutId === 'none' ? [] : LAYOUT_SLOTS[layoutId];
+  const [values, setValues] = useState<Record<LayoutSlot, string>>({
+    eyebrow: '',
+    headline: '',
+    subheadline: '',
+    cta: '',
+    wordmark: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleRender() {
+    setSubmitting(true);
+    try {
+      const result = await rerenderOverlay({
+        generationId: target.generationId,
+        assetId: target.assetId,
+        copy: {
+          eyebrow: values.eyebrow || undefined,
+          headline: values.headline || undefined,
+          subheadline: values.subheadline || undefined,
+          cta: values.cta || undefined,
+          wordmark: values.wordmark || undefined,
+        },
+      });
+      if (!result.ok) {
+        toast.error(`Re-render failed: ${result.error}`);
+        return;
+      }
+      if (!result.data.publicUrl) {
+        toast.error('Re-rendered but R2 returned no public URL');
+        return;
+      }
+      onRendered(result.data.publicUrl, result.data.assetId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/70 p-6"
+      role="dialog"
+      aria-modal
+      aria-label="Edit overlay copy"
+    >
+      {/* Backdrop button — covers the whole viewport and closes the modal
+          on click or Enter/Space. Using a real <button> instead of a
+          click-only <div> satisfies the a11y rules and gives keyboard
+          users a focusable exit. */}
+      <button
+        type="button"
+        aria-label="Close dialog"
+        className="absolute inset-0 cursor-default bg-transparent"
+        onClick={onClose}
+      />
+      <div className="relative w-full max-w-xl space-y-6 bg-paper p-8 border border-ink">
+        <div>
+          <h3 style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 28 }}>
+            Edit overlay copy
+          </h3>
+          <p className="mono-eyebrow mt-2 text-ink-3">
+            Re-renders typography on the existing background · $0.00 · {'<'} 1s
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {slots.map((slot) => (
+            <div key={slot}>
+              <label htmlFor={`copy-${slot}`} className="mono-eyebrow mb-2 block capitalize">
+                {slot}
+              </label>
+              <input
+                id={`copy-${slot}`}
+                type="text"
+                value={values[slot]}
+                onChange={(e) => setValues((v) => ({ ...v, [slot]: e.target.value }))}
+                className="field"
+                placeholder={`Enter the ${slot}…`}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 border-t border-ink-3/30 pt-6">
+          <button
+            type="button"
+            className="mono-eyebrow text-ink-3 hover:text-ink"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-ink disabled:opacity-50"
+            onClick={handleRender}
+            disabled={submitting}
+          >
+            {submitting ? 'Re-rendering…' : 'Re-render overlay'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
