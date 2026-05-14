@@ -233,33 +233,32 @@ export async function rerenderOverlay(
     .limit(1);
   if (!proj) return { ok: false, error: 'not-found' };
 
-  // Load the source asset to recompose. The asset row carries the
-  // public_url of the COMPOSED image (background + previous overlay).
-  // We re-fetch the COMPOSITE because that's what we have — re-overlaying
-  // on top of a previous overlay would stack typography. Acceptable for
-  // a first iteration; v2 will persist the raw background separately.
-  const [sourceAsset] = parsed.data.assetId
-    ? await db
-        .select()
-        .from(asset)
-        .where(and(eq(asset.id, parsed.data.assetId), eq(asset.generationId, sourceGen.id)))
-        .limit(1)
-    : await db
-        .select()
-        .from(asset)
-        .where(eq(asset.generationId, sourceGen.id))
-        .orderBy(desc(asset.createdAt))
-        .limit(1);
+  // Load the source asset row for dimensions. We also need its INDEX
+  // within the generation (1, 2, 3, …) so we can pick the matching raw
+  // background from composeState.rawAssets[].
+  const sourceAssets = await db
+    .select()
+    .from(asset)
+    .where(eq(asset.generationId, sourceGen.id))
+    .orderBy(asset.createdAt);
+  const sourceAssetIdx = parsed.data.assetId
+    ? sourceAssets.findIndex((a) => a.id === parsed.data.assetId)
+    : 0;
+  const sourceAsset = sourceAssetIdx >= 0 ? sourceAssets[sourceAssetIdx] : null;
   if (!sourceAsset?.publicUrl) {
     return { ok: false, error: 'no-source-asset' };
   }
 
-  // Recover the layout + colors used by the original render. Saved in
-  // params.composeState by the worker after a successful compose.
+  // Recover the layout + colors + raw bg pointer from the original
+  // render. composeState is written by the worker only on the
+  // overlay-enabled path, so a missing composeState means "this asset
+  // was a raw AI background, no typography to re-render".
   const sourceParams = (sourceGen.params ?? {}) as {
     composeState?: {
       layoutId?: LayoutId;
       colors?: BrandColors;
+      copy?: PlannedCopy;
+      rawAssets?: Array<{ key: string; publicUrl: string | null }>;
     };
   };
   const layoutId = sourceParams.composeState?.layoutId;
@@ -276,13 +275,17 @@ export async function rerenderOverlay(
     accent: '#B6481A',
   };
 
-  // Fetch the existing composite from R2 — this is the "background" the
-  // user wants to keep. Acceptable v1 trade-off (re-overlays on a
-  // previous overlay; v2 will store the raw background separately so
-  // we can layer crisply without stacking text on text).
+  // Fetch the RAW AI background (no previous overlay) — that's what
+  // makes "Edit copy" produce a clean replace instead of stacking text.
+  // Falls back to the composite if rawAssets is missing (legacy rows
+  // before this field was added) — those WILL stack on re-render and
+  // produce a clearly-buggy result that signals the user should regen.
+  const rawPointer = sourceParams.composeState?.rawAssets?.[sourceAssetIdx];
+  const backgroundUrl = rawPointer?.publicUrl ?? sourceAsset.publicUrl;
+
   let backgroundBuf: Buffer;
   try {
-    const res = await fetch(sourceAsset.publicUrl);
+    const res = await fetch(backgroundUrl);
     if (!res.ok) throw new Error(`fetch ${res.status} ${res.statusText}`);
     const arr = await res.arrayBuffer();
     backgroundBuf = Buffer.from(arr);
@@ -291,10 +294,22 @@ export async function rerenderOverlay(
     return { ok: false, error: `failed to fetch source asset: ${msg}` };
   }
 
+  // Merge user-supplied copy with the previously-rendered copy. The user
+  // edits one or two slots and expects the rest to stay — overwriting
+  // with empty strings is almost never what they want. Caller can pass
+  // an explicit empty string to clear a slot; undefined keeps it.
+  const previousCopy = sourceParams.composeState?.copy ?? {};
   const filteredCopy: PlannedCopy = {};
   for (const slot of layout.slots) {
-    const v = parsed.data.copy[slot];
-    if (v && v.length > 0) filteredCopy[slot] = v;
+    const incoming = parsed.data.copy[slot];
+    if (incoming !== undefined) {
+      // Empty string explicitly clears; non-empty replaces.
+      if (incoming.length > 0) filteredCopy[slot] = incoming;
+    } else {
+      // Untouched slot: keep the previous render's value.
+      const prior = previousCopy[slot];
+      if (prior) filteredCopy[slot] = prior;
+    }
   }
 
   let composed: Buffer;

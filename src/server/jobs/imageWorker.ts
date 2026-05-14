@@ -123,11 +123,34 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         // Compose each buffer if we have a layout; otherwise keep raw output.
         // We composite serially because sharp's pipeline is already CPU-bound
         // — running n composites in parallel just thrashes the event loop.
+        //
+        // Architecture note: when layout is set we ALSO upload the raw AI
+        // background separately (key suffix `-raw.png`). This is what
+        // rerenderOverlay reads when the user edits copy — otherwise new
+        // typography would stack on top of the previously-rendered typography
+        // (the visible bug Garcia hit on the first edit). Raw uploads cost
+        // microcents of R2 storage per asset; trivial.
         const composedBuffers: Buffer[] = [];
+        const rawUploads: Array<{ key: string; publicUrl: string | null }> = [];
+
         if (layout) {
-          for (const raw of result.buffers) {
+          // Resize raw backgrounds to the target dimensions BEFORE storing,
+          // so the re-render path doesn't need to redo cover/crop at compose
+          // time. The compose step downstream resizes again as a safety net,
+          // but the stored "raw" is already the right canvas.
+          const sharpMod = (await import('sharp')).default;
+          for (const [i, raw] of result.buffers.entries()) {
+            const sized = await sharpMod(raw, { failOn: 'none' })
+              .resize(fm.w, fm.h, { fit: 'cover', position: 'centre' })
+              .png({ compressionLevel: 6 })
+              .toBuffer();
+            // Store raw bg under {generationId}/{i+1}-raw.png.
+            const rawKey = `${projectId}/${generationId}/${i + 1}-raw.png`;
+            const rawUpload = await putR2(rawKey, sized, 'image/png');
+            rawUploads.push({ key: rawUpload.key, publicUrl: rawUpload.publicUrl });
+
             const composed = await composeImage({
-              background: raw,
+              background: sized,
               width: fm.w,
               height: fm.h,
               layout,
@@ -180,6 +203,10 @@ export function startImageWorker(): Worker<ImageGenJobData> {
                   layoutId: layout.id,
                   copy,
                   colors,
+                  // Parallel arrays to assets[] order — index i of rawUploads
+                  // is the raw background for asset i. rerenderOverlay uses
+                  // this to recompose without stacking text on text.
+                  rawAssets: rawUploads,
                 },
                 costBreakdown: {
                   cents: totalCostCents,

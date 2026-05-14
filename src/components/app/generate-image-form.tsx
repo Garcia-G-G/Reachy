@@ -55,11 +55,30 @@ interface AssetSummary {
   storageKey: string | null;
 }
 
+/** What the worker recorded about the typography overlay it composited.
+ *  Used by the Edit Copy modal to pre-populate slot inputs so users edit
+ *  rather than re-type. */
+interface ComposeStateSummary {
+  layoutId: string | null;
+  copy: Record<string, string | undefined>;
+}
+
 type RunState =
   | { kind: 'idle' }
   | { kind: 'queueing' }
-  | { kind: 'running'; generationId: string; status: 'queued' | 'running'; assets: AssetSummary[] }
-  | { kind: 'done'; generationId: string; assets: AssetSummary[]; costCents: number | null }
+  | {
+      kind: 'running';
+      generationId: string;
+      status: 'queued' | 'running';
+      assets: AssetSummary[];
+    }
+  | {
+      kind: 'done';
+      generationId: string;
+      assets: AssetSummary[];
+      costCents: number | null;
+      composeState: ComposeStateSummary | null;
+    }
   | { kind: 'failed'; message: string };
 
 const FORMAT_KEYS_BY_CATEGORY: Record<ImageFormatCategory, ImageFormat[]> = (() => {
@@ -200,6 +219,7 @@ export function GenerateImageForm({
           errorMessage: string | null;
           costCents: number | null;
           assets: AssetSummary[];
+          composeState: ComposeStateSummary | null;
         } = await res.json();
 
         if (json.status === 'done') {
@@ -209,6 +229,7 @@ export function GenerateImageForm({
             generationId,
             assets: json.assets,
             costCents: json.costCents,
+            composeState: json.composeState,
           });
         } else if (json.status === 'failed') {
           stopPolling();
@@ -551,7 +572,12 @@ export function GenerateImageForm({
       {editTarget?.generationId && (
         <EditCopyModal
           target={editTarget}
-          layoutId={layoutOverride ?? DEFAULT_LAYOUT_FOR_FORMAT[format]}
+          layoutId={
+            (run.kind === 'done' && (run.composeState?.layoutId as LayoutId | null)) ||
+            layoutOverride ||
+            DEFAULT_LAYOUT_FOR_FORMAT[format]
+          }
+          initialCopy={(run.kind === 'done' && run.composeState?.copy) || {}}
           onClose={() => setEditTarget(null)}
           onRendered={(publicUrl, newAssetId) => {
             setRun((current) => {
@@ -668,20 +694,23 @@ function ResultPanel({
 interface EditCopyModalProps {
   target: { generationId: string; assetId: string; publicUrl: string | null };
   layoutId: LayoutId | 'none';
+  /** Previous copy for this asset — pre-populates the inputs so users
+   *  edit a slot instead of having to retype every field. */
+  initialCopy: Record<string, string | undefined>;
   onClose: () => void;
   onRendered: (publicUrl: string, assetId: string) => void;
 }
 
-function EditCopyModal({ target, layoutId, onClose, onRendered }: EditCopyModalProps) {
+function EditCopyModal({ target, layoutId, initialCopy, onClose, onRendered }: EditCopyModalProps) {
   // Layout 'none' shouldn't open the modal in the first place (the Edit
   // Copy button is hidden), but defensively bail.
   const slots: readonly LayoutSlot[] = layoutId === 'none' ? [] : LAYOUT_SLOTS[layoutId];
   const [values, setValues] = useState<Record<LayoutSlot, string>>({
-    eyebrow: '',
-    headline: '',
-    subheadline: '',
-    cta: '',
-    wordmark: '',
+    eyebrow: initialCopy.eyebrow ?? '',
+    headline: initialCopy.headline ?? '',
+    subheadline: initialCopy.subheadline ?? '',
+    cta: initialCopy.cta ?? '',
+    wordmark: initialCopy.wordmark ?? '',
   });
   const [submitting, setSubmitting] = useState(false);
 

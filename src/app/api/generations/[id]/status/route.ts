@@ -85,8 +85,23 @@ export async function GET(_req: Request, { params }: RouteContext) {
 
   // Per-component cost attribution (e.g. Sora $6 + TTS $0.04 + compose $0.01).
   // The worker writes this into generation.params on success — see videoWorker.ts.
-  const genParams = (gen.params ?? {}) as { costBreakdown?: ReelCostBreakdown };
+  const genParams = (gen.params ?? {}) as {
+    costBreakdown?: ReelCostBreakdown;
+    composeState?: {
+      layoutId?: string;
+      copy?: Record<string, string | undefined>;
+    };
+  };
   const costBreakdown = genParams.costBreakdown ?? null;
+  // composeState is image-pipeline-only — drives the Edit Copy modal's
+  // pre-population (so users edit instead of rewrite the headline) and
+  // tells the UI which layout this asset belongs to.
+  const composeState = genParams.composeState
+    ? {
+        layoutId: genParams.composeState.layoutId ?? null,
+        copy: genParams.composeState.copy ?? {},
+      }
+    : null;
 
   return NextResponse.json(
     {
@@ -95,6 +110,7 @@ export async function GET(_req: Request, { params }: RouteContext) {
       errorMessage: gen.errorMessage,
       costCents: gen.costCents,
       costBreakdown,
+      composeState,
       finishedAt: gen.finishedAt,
       assets,
     },

@@ -1,8 +1,14 @@
 import 'server-only';
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
+import type { PlannedCopy } from './composeImage';
 import type { Layout, TextRole } from './layoutTemplates';
 import { getOpenAI } from './openai';
+
+// Re-export so callers that already import { PlannedCopy } from copyPlanner
+// continue to work. The single source of truth is composeImage.ts since
+// that's the type consumer.
+export type { PlannedCopy };
 
 /**
  * Structured-output copy planner for the marketing-grade image pipeline.
@@ -18,14 +24,6 @@ import { getOpenAI } from './openai';
  * with `strict: true` so the model is forced to return exactly the keys
  * we'll consume. Cost typically <1¢ per call (gpt-4o-mini, short outputs).
  */
-
-export interface PlannedCopy {
-  eyebrow?: string;
-  headline?: string;
-  subheadline?: string;
-  cta?: string;
-  wordmark?: string;
-}
 
 export interface PlanCopyArgs {
   idea: string;
