@@ -18,6 +18,7 @@ import {
   soraCostCents,
   submitSora,
 } from '@/server/ai/openaiVideo';
+import { resolveVisualStyle } from '@/server/ai/visualStyles';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
@@ -63,7 +64,11 @@ const PERMANENT_PATTERNS = [
 const isPermanent = (m: string) => PERMANENT_PATTERNS.some((re) => re.test(m));
 
 const SORA_POLL_INTERVAL_MS = 6_000;
-const SORA_POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 min per scene; Sora Pro can take 2-5min
+// 15 min total. Sora 2 Pro takes 2-5 min per scene; this also has to fit a
+// possible moderation retry (resubmit takes another 2-5 min). If a reel
+// runs longer than this we throw and let BullMQ retry resume polling from
+// the persisted job ids.
+const SORA_POLL_TIMEOUT_MS = 15 * 60 * 1000;
 
 export function startVideoWorker(): Worker<VideoGenJobData> {
   // Crash loud at boot if ffmpeg is missing — better than silently dropping
@@ -395,7 +400,7 @@ async function runSora(
       // Stored shape doesn't match current plan — start fresh.
       storedJobs = null;
     }
-    const sceneJobs: Array<SoraJob | null> =
+    const sceneJobs: Array<ScheduledSoraJob | null> =
       storedJobs ?? new Array(data.plan.scenes.length).fill(null);
 
     if (!storedJobs) {
@@ -413,7 +418,7 @@ async function runSora(
             aspectRatio: '9:16',
             durationSec: snapped,
           });
-          sceneJobs[i] = job;
+          sceneJobs[i] = { ...job, retries: 0 };
           console.log(
             `[reachy:video] gen ${data.generationId} scene ${i + 1}/${data.plan.scenes.length} submitted to ${soraModel} (${snapped}s, jobId=${job.jobId})`,
           );
@@ -442,6 +447,7 @@ async function runSora(
 
       let allDone = true;
       let minProgress = 100;
+      let needsRePersist = false;
       await Promise.all(
         data.plan.scenes.map(async (scene, i) => {
           if (scene.background === 'brand') return;
@@ -450,7 +456,36 @@ async function runSora(
           if (!job) return;
           const status = await pollSora(job);
           if (status.state === 'failed') {
-            throw new Error(`Sora scene ${i + 1} failed: ${status.errorMessage ?? 'unknown'}`);
+            const errMsg = status.errorMessage ?? 'unknown';
+            const isModerationBlock = MODERATION_BLOCK.test(errMsg);
+            if (isModerationBlock && job.retries < 1) {
+              // Re-submit this scene with the visualStyle's motion language
+              // alone, stripping the planner-generated narrative content that
+              // most likely triggered the block. Mark retries=1 so we don't
+              // loop if the safe prompt also fails. Persist immediately so a
+              // BullMQ worker restart resumes from the new job, not the
+              // already-blocked one (which would re-flag and loop forever).
+              const snapped = snapSoraDuration(scene.durationSec);
+              const safePrompt = buildSafeSoraPrompt(data.visualStyle);
+              console.warn(
+                `[reachy:video] gen ${data.generationId} scene ${i + 1} blocked by Sora moderation — retrying with safe prompt (${snapped}s)`,
+              );
+              const replacement = await submitSora({
+                model: soraModel,
+                prompt: safePrompt,
+                aspectRatio: '9:16',
+                durationSec: snapped,
+              });
+              sceneJobs[i] = { ...replacement, retries: job.retries + 1 };
+              needsRePersist = true;
+              allDone = false;
+              minProgress = 0;
+              console.log(
+                `[reachy:video] gen ${data.generationId} scene ${i + 1} resubmitted (jobId=${replacement.jobId})`,
+              );
+              return;
+            }
+            throw new Error(`Sora scene ${i + 1} failed: ${errMsg}`);
           }
           if (status.state === 'done') {
             const dl = await downloadSora(job.jobId);
@@ -466,6 +501,9 @@ async function runSora(
           minProgress = Math.min(minProgress, status.progress ?? 0);
         }),
       );
+      if (needsRePersist) {
+        await persistSoraJobs(data.generationId, sceneJobs);
+      }
 
       pollsCompleted += 1;
       // Map Sora progress to the BullMQ scale, capping at 90% until compose runs.
@@ -534,16 +572,29 @@ async function runSora(
   }
 }
 
+/**
+ * Worker-internal Sora job — SoraJob plus a `retries` count that tracks
+ * moderation-driven resubmissions. We persist this through generation.params
+ * so a BullMQ retry doesn't lose the retry state and re-resubmit a scene
+ * we already moderation-retried (which would loop indefinitely if the
+ * safer prompt ALSO gets flagged).
+ */
+type ScheduledSoraJob = SoraJob & { retries: number };
+
 interface StoredSoraJob {
   jobId: string;
   model: SoraModel;
   durationSec: 4 | 8 | 12;
+  retries?: number;
 }
 
 /** Persist per-scene Sora jobs so a worker retry resumes polling vs paying again. */
-async function persistSoraJobs(generationId: string, jobs: Array<SoraJob | null>): Promise<void> {
+async function persistSoraJobs(
+  generationId: string,
+  jobs: Array<ScheduledSoraJob | null>,
+): Promise<void> {
   const stored: Array<StoredSoraJob | null> = jobs.map((j) =>
-    j ? { jobId: j.jobId, model: j.model, durationSec: j.durationSec } : null,
+    j ? { jobId: j.jobId, model: j.model, durationSec: j.durationSec, retries: j.retries } : null,
   );
   const [row] = await db
     .select({ params: generation.params })
@@ -557,7 +608,9 @@ async function persistSoraJobs(generationId: string, jobs: Array<SoraJob | null>
   await db.update(generation).set({ params: merged }).where(eq(generation.id, generationId));
 }
 
-async function getStoredSoraJobs(generationId: string): Promise<Array<SoraJob | null> | null> {
+async function getStoredSoraJobs(
+  generationId: string,
+): Promise<Array<ScheduledSoraJob | null> | null> {
   const [row] = await db
     .select({ params: generation.params })
     .from(generation)
@@ -566,6 +619,27 @@ async function getStoredSoraJobs(generationId: string): Promise<Array<SoraJob | 
   const params = (row?.params ?? {}) as { soraJobs?: Array<StoredSoraJob | null> };
   if (!Array.isArray(params.soraJobs)) return null;
   return params.soraJobs.map((s) =>
-    s ? { jobId: s.jobId, model: s.model, durationSec: s.durationSec } : null,
+    s
+      ? { jobId: s.jobId, model: s.model, durationSec: s.durationSec, retries: s.retries ?? 0 }
+      : null,
   );
+}
+
+/**
+ * Sora moderation refusal — OpenAI returns "Your request was blocked by
+ * our moderation system." We retry such scenes ONCE with a moderation-safe
+ * fallback prompt (the visualStyle's motion language alone, stripped of
+ * the per-scene narrative content the planner generated, which is the
+ * most common trigger). The retry happens transparently to the user.
+ */
+const MODERATION_BLOCK =
+  /blocked by our moderation|moderation system|safety system|content policy/i;
+
+/** Build a moderation-safe Sora prompt: visualStyle motion + generic abstract subject. */
+function buildSafeSoraPrompt(visualStyle: string | null | undefined): string {
+  const style = resolveVisualStyle(visualStyle);
+  return [
+    style.promptMotion,
+    'Subject: a purely abstract motion-graphics scene matching the style above. No specific objects, no products, no people, no recognizable items, no readable text. Pure form, color, and motion only.',
+  ].join(' ');
 }
