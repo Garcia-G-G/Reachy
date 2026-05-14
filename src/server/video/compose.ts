@@ -349,6 +349,12 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
           ...audioOpts,
         ])
         .output(outputPath)
+        .on('start', (cmdline) => {
+          // Surface the full ffmpeg command so a filter-graph parse error
+          // (-22 EINVAL from fc#0) can be diagnosed from the worker log
+          // instead of from a truncated fluent-ffmpeg stderr tail.
+          console.log(`[reachy:video] ffmpeg cmd:\n${cmdline}`);
+        })
         .on('progress', (info) => {
           if (args.onProgress && typeof info.percent === 'number') {
             args.onProgress(Math.min(1, Math.max(0, info.percent / 100)));
@@ -358,9 +364,10 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         .on('error', (err, _stdout, stderr) => {
           // fluent-ffmpeg's err.message truncates to the last stderr chunk
           // (often just "Conversion failed!"), which hides the actual filter
-          // graph parse error. Surface the tail of stderr in the rejection so
-          // worker logs show what really broke.
-          const tail = (stderr ?? '').split('\n').slice(-12).join('\n');
+          // graph parse error. Surface a deeper tail of stderr in the
+          // rejection so worker logs show the actual filter parse error
+          // that precedes the "Could not open encoder before EOF" cascade.
+          const tail = (stderr ?? '').split('\n').slice(-40).join('\n');
           const message = `${err.message}${tail ? `\n--- ffmpeg stderr (tail) ---\n${tail}` : ''}`;
           reject(new Error(message));
         })
@@ -385,11 +392,16 @@ function drawtextY(pos: 'top' | 'bottom' | 'center'): string {
  * or 56pt corner with line_spacing=10 ≈ 280px). Keeping the rectangle
  * invariant across snapshots prevents the visible flicker the per-drawtext
  * `box=1` produced as cumulative lines re-wrapped.
+ *
+ * Uses `iw`/`ih` (input width/height) rather than `w`/`h` — drawbox's `w=`
+ * and `h=` parameters collide with the expression `w`/`h` variables and
+ * FFmpeg's filter parser rejects the chain with EINVAL. The drawbox docs
+ * example also uses `iw`/`ih` for this reason.
  */
 function captionBoxRect(pos: 'top' | 'bottom' | 'center'): string {
-  if (pos === 'top') return 'x=40:y=130:w=w-80:h=320';
-  if (pos === 'center') return 'x=40:y=(h-320)/2:w=w-80:h=320';
-  return 'x=40:y=h-440:w=w-80:h=320';
+  if (pos === 'top') return 'x=40:y=130:w=iw-80:h=320';
+  if (pos === 'center') return 'x=40:y=(ih-320)/2:w=iw-80:h=320';
+  return 'x=40:y=ih-440:w=iw-80:h=320';
 }
 
 async function ensureBrandBg(dir: string, hex: string): Promise<string> {
