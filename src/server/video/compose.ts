@@ -167,23 +167,28 @@ export async function composeReel(args: ComposeReelArgs): Promise<{ outputPath: 
         // https://ffmpeg.org/ffmpeg-filters.html#drawtext-1 ("expansion")
         //
         // Word-by-word reveal: at any moment in the scene exactly ONE of
-        // the cumulative snapshots is visible, selected by `enable=
-        // between(t,startSec,endSec)`. The first snapshot covers t=0; each
-        // subsequent snapshot adds more words. The box is rendered with the
-        // text, so it grows along with the cumulative line — visually
-        // matches an editorial typewriter reveal. Single-snapshot scenes
-        // (1-word captions, very short durations) emit one drawtext, same
-        // as the previous static behavior.
+        // the cumulative drawtext snapshots is visible, selected via
+        // `enable='between(t,startSec,endSec)'`. We render the caption
+        // background as a SINGLE persistent drawbox over the whole scene
+        // (fixed safe-zone rectangle per text position) so the box does
+        // not flicker as snapshots cycle — the previous per-snapshot
+        // `box=1` auto-fit caused visible flashing because each
+        // cumulative line wrapped to slightly different dimensions.
+        // Brand-bg scenes have boxAlpha='00' so the box is invisible
+        // anyway; we skip it for them.
         let draw = '';
         if (snapshots && snapshots.length > 0) {
+          const boxFilter = isBrand
+            ? ''
+            : `,drawbox=${captionBoxRect(s.scene.textPosition)}:color=0x000000${boxAlpha}:t=fill`;
           const parts = snapshots.map((snap) => {
             const enable =
               snapshots.length === 1
                 ? ''
                 : `:enable='between(t,${snap.startSec.toFixed(3)},${snap.endSec.toFixed(3)})'`;
-            return `drawtext=fontfile='${fontFile}':textfile='${snap.path}':expansion=none:fontsize=${fontSize}:fontcolor=${textColor}:x=(w-tw)/2:y=${overlayY}:line_spacing=10:box=1:boxcolor=0x000000${boxAlpha}:boxborderw=24${enable}`;
+            return `drawtext=fontfile='${fontFile}':textfile='${snap.path}':expansion=none:fontsize=${fontSize}:fontcolor=${textColor}:x=(w-tw)/2:y=${overlayY}:line_spacing=10${enable}`;
           });
-          draw = `,${parts.join(',')}`;
+          draw = `${boxFilter},${parts.join(',')}`;
         }
 
         const fade = `,fade=t=in:st=0:d=${REEL_TRANSITION_SEC},fade=t=out:st=${Math.max(0, s.scene.durationSec - REEL_TRANSITION_SEC)}:d=${REEL_TRANSITION_SEC}`;
@@ -284,6 +289,20 @@ function drawtextY(pos: 'top' | 'bottom' | 'center'): string {
   if (pos === 'top') return '160';
   if (pos === 'center') return '(h-th)/2';
   return 'h-th-220';
+}
+
+/**
+ * Fixed safe-zone rectangle behind the caption text, drawn once via drawbox
+ * for the whole scene instead of per-drawtext. Dimensions are conservative —
+ * wider and taller than any caption we render (max 3 lines × ~88pt center
+ * or 56pt corner with line_spacing=10 ≈ 280px). Keeping the rectangle
+ * invariant across snapshots prevents the visible flicker the per-drawtext
+ * `box=1` produced as cumulative lines re-wrapped.
+ */
+function captionBoxRect(pos: 'top' | 'bottom' | 'center'): string {
+  if (pos === 'top') return 'x=40:y=130:w=w-80:h=320';
+  if (pos === 'center') return 'x=40:y=(h-320)/2:w=w-80:h=320';
+  return 'x=40:y=h-440:w=w-80:h=320';
 }
 
 async function ensureBrandBg(dir: string, hex: string): Promise<string> {

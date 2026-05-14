@@ -270,8 +270,8 @@ async function runFfmpeg(
     const isEs = data.plan.language === 'es';
     const ttsVoice = 'sage' as const;
     const ttsInstructions = isEs
-      ? 'Voz de narrador editorial cálido. Calmado, claro, con pausas naturales. NO comercial, NO efusivo. Tono de revista impresa hablada. Acentúa correctamente las palabras en español.'
-      : 'Warm editorial narrator. Calm, clear, with natural pauses. NOT commercial, NOT effusive. Spoken-magazine tone.';
+      ? 'Voz de narrador editorial cálido y natural. Ritmo conversacional, NO lento, con pausas naturales solo entre frases. Tono profesional pero cercano. Acentúa correctamente el español.'
+      : 'Warm editorial narrator. Natural conversational pace, NOT slow, with subtle pauses between sentences. Professional but friendly tone.';
     try {
       const openai = getOpenAI();
       const ttsStart = Date.now();
