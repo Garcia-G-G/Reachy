@@ -2,10 +2,10 @@ import 'server-only';
 import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { type BrandColors, composeImage, type PlannedCopy } from '@/server/ai/composeImage';
-import { planCopy } from '@/server/ai/copyPlanner';
+import { planCopy, planCopySequence } from '@/server/ai/copyPlanner';
 import { getFormat } from '@/server/ai/formats';
 import { generateImage } from '@/server/ai/imageGen';
-import { getLayout } from '@/server/ai/layoutTemplates';
+import { getLayout, resolveSequenceHint } from '@/server/ai/layoutTemplates';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { brandKit } from '@/server/db/schema/brandKits';
@@ -59,8 +59,14 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         language,
         sourceRawUrl,
         tweakPrompt,
+        mode,
       } = job.data;
       const fm = getFormat(format);
+      // Sequence mode is gated on (a) explicit mode='sequence', (b) a
+      // layout (sequence without typography overlay has nothing to
+      // progress), and (c) n ≥ 2 (a one-frame sequence is just a
+      // generation). Anything else falls through to exploration.
+      const sequenceMode = mode === 'sequence' && Boolean(layoutId) && n >= 2;
 
       await db
         .update(generation)
@@ -73,7 +79,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
       // DB — tail the worker log and you can see exactly what each
       // generation row was running with.
       console.log(
-        `[reachy:image] gen ${generationId} provider=${provider} model=${model} quality=${quality ?? 'medium'} n=${n} layout=${layoutId ?? 'none'} variation=${sourceRawUrl ? 'yes' : 'no'}`,
+        `[reachy:image] gen ${generationId} provider=${provider} model=${model} quality=${quality ?? 'medium'} n=${n} layout=${layoutId ?? 'none'} variation=${sourceRawUrl ? 'yes' : 'no'} mode=${sequenceMode ? 'sequence' : 'exploration'}`,
       );
 
       // Idempotency: wipe any rows from a prior failed attempt so we never
@@ -84,15 +90,25 @@ export function startImageWorker(): Worker<ImageGenJobData> {
 
       try {
         // Marketing-grade pipeline:
-        //   1. AI renders the BACKGROUND only (prompt has explicit "no text").
+        //   1. AI renders the BACKGROUND (prompt forbids text in the pixels).
         //   2. copyPlanner LLM-generates eyebrow/headline/etc. for the slots
         //      this layout needs.
         //   3. composeImage overlays brand-fontd typography on top with exact
         //      brand hex colors.
+        //
+        // Two top-level branches:
+        //   • Exploration mode (default) — one images.generate (or .edit
+        //     when sourceRawUrl is set), N parallel outputs, one shared
+        //     PlannedCopy.
+        //   • Sequence mode               — N serial calls. Frame K uses
+        //     frame K-1 as the images.edit reference. Each frame gets its
+        //     OWN PlannedCopy (planned in one LLM call up-front).
+
         // Variation mode: when sourceRawUrl is set we fetch that bg from R2
         // and pass it to openai.images.edit. The model treats it as the
         // reference image for the new variant — keeps composition close to
-        // the source while honouring the tweakPrompt.
+        // the source while honouring the tweakPrompt. Variation mode is
+        // mutually exclusive with sequence mode at the action layer.
         let sourceImage: Buffer | undefined;
         if (sourceRawUrl) {
           const sourceRes = await fetch(sourceRawUrl);
@@ -111,39 +127,41 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               prompt,
             ].join(' ')
           : prompt;
-        const result = await generateImage({
-          prompt: editPrompt,
-          format,
-          provider,
-          model,
-          n,
-          quality,
-          sourceImage,
-        });
 
-        // Load project + brand kit ONCE for the compose step (n copies share
-        // the same brand). The compose branch only runs when layoutId is set.
+        // Load project + brand kit ONCE so both branches can share. The
+        // compose branch only runs when layoutId is set; sequence mode
+        // requires it.
         const layout = layoutId ? getLayout({ layoutId }) : null;
-        let copy: PlannedCopy = {};
+        const [proj] = await db.select().from(project).where(eq(project.id, projectId)).limit(1);
+        const [kit] = proj
+          ? await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1)
+          : [];
         let colors: BrandColors = FALLBACK_COLORS;
+        if (kit) {
+          colors = {
+            ink: kit.primaryColor ?? FALLBACK_COLORS.ink,
+            paper: kit.bgColor ?? FALLBACK_COLORS.paper,
+            accent: kit.accentColor ?? FALLBACK_COLORS.accent,
+          };
+        }
+
+        // Outputs the unified DB write below consumes regardless of branch.
+        const composedBuffers: Buffer[] = [];
+        const rawUploads: Array<{ key: string; publicUrl: string | null }> = [];
+        // For exploration: single PlannedCopy shared across all frames.
+        // For sequence:    PlannedCopy[] parallel to composedBuffers.
+        let copy: PlannedCopy = {};
+        let sequenceCopies: PlannedCopy[] | null = null;
+        let imageCostCents = 0;
         let copyCostCents = 0;
         let composeCostCents = 0;
+        let contentType: 'image/png' | 'image/jpeg' = 'image/png';
 
-        if (layout) {
-          const [proj] = await db.select().from(project).where(eq(project.id, projectId)).limit(1);
-          const [kit] = proj
-            ? await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1)
-            : [];
-
-          if (kit) {
-            colors = {
-              ink: kit.primaryColor ?? FALLBACK_COLORS.ink,
-              paper: kit.bgColor ?? FALLBACK_COLORS.paper,
-              accent: kit.accentColor ?? FALLBACK_COLORS.accent,
-            };
-          }
-
-          const plan = await planCopy({
+        if (sequenceMode && layout) {
+          // ── SEQUENCE MODE ────────────────────────────────────────────────
+          // Plan all N frames of copy in one LLM call so the narrative is
+          // coherent (set-up → punch). Each frame's compose uses copies[K].
+          const seqPlan = await planCopySequence({
             idea: idea ?? '',
             layout,
             language: language ?? 'en',
@@ -151,55 +169,118 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               ? { name: proj.name, audience: proj.audience, tone: proj.tone }
               : { name: 'Project', audience: null, tone: null },
             brandKit: kit ?? null,
+            frames: n,
           });
-          copy = plan.copy;
-          copyCostCents = plan.costCents;
-          // 1¢ compose floor — keeps the ledger row from showing $0.00 for
-          // a step that consumed CPU. The actual sharp work is sub-cent.
-          composeCostCents = 1;
-        }
+          sequenceCopies = seqPlan.copies;
+          copyCostCents = seqPlan.costCents;
+          composeCostCents = n; // 1¢ per frame compose floor.
 
-        // Compose each buffer if we have a layout; otherwise keep raw output.
-        // We composite serially because sharp's pipeline is already CPU-bound
-        // — running n composites in parallel just thrashes the event loop.
-        //
-        // Architecture note: when layout is set we ALSO upload the raw AI
-        // background separately (key suffix `-raw.png`). This is what
-        // rerenderOverlay reads when the user edits copy — otherwise new
-        // typography would stack on top of the previously-rendered typography
-        // (the visible bug Garcia hit on the first edit). Raw uploads cost
-        // microcents of R2 storage per asset; trivial.
-        const composedBuffers: Buffer[] = [];
-        const rawUploads: Array<{ key: string; publicUrl: string | null }> = [];
-
-        if (layout) {
-          // Resize raw backgrounds to the target dimensions BEFORE storing,
-          // so the re-render path doesn't need to redo cover/crop at compose
-          // time. The compose step downstream resizes again as a safety net,
-          // but the stored "raw" is already the right canvas.
           const sharpMod = (await import('sharp')).default;
-          for (const [i, raw] of result.buffers.entries()) {
-            const sized = await sharpMod(raw, { failOn: 'none' })
+          let previousFrameBuffer: Buffer | undefined;
+
+          for (let frameIdx = 0; frameIdx < n; frameIdx++) {
+            const result = await generateImage({
+              prompt,
+              format,
+              provider,
+              model,
+              n: 1,
+              quality,
+              // sourceImage carries the variation user-source path; in
+              // sequence mode we ONLY pass previousFrameBuffer via the
+              // sequence field (not as sourceImage) so the two flows
+              // don't fight inside imageGen. They're mutually exclusive
+              // at the action layer.
+              sequence: {
+                frameIndex: frameIdx,
+                totalFrames: n,
+                previousFrameBuffer,
+                sequenceHint: resolveSequenceHint(layout, frameIdx, n),
+              },
+            });
+            imageCostCents += result.costCents;
+            contentType = result.contentType;
+            const rawFrame = result.buffers[0];
+            if (!rawFrame) {
+              throw new Error(`sequence frame ${frameIdx + 1}/${n}: model returned no image`);
+            }
+            // Resize raw → upload raw → compose → push.
+            const sized = await sharpMod(rawFrame, { failOn: 'none' })
               .resize(fm.w, fm.h, { fit: 'cover', position: 'centre' })
               .png({ compressionLevel: 6 })
               .toBuffer();
-            // Store raw bg under {generationId}/{i+1}-raw.png.
-            const rawKey = `${projectId}/${generationId}/${i + 1}-raw.png`;
+            const rawKey = `${projectId}/${generationId}/${frameIdx + 1}-raw.png`;
             const rawUpload = await putR2(rawKey, sized, 'image/png');
             rawUploads.push({ key: rawUpload.key, publicUrl: rawUpload.publicUrl });
 
+            const frameCopy = sequenceCopies[frameIdx] ?? {};
             const composed = await composeImage({
               background: sized,
               width: fm.w,
               height: fm.h,
               layout,
-              copy,
+              copy: frameCopy,
               colors,
             });
             composedBuffers.push(composed);
+            previousFrameBuffer = sized;
+            console.log(
+              `[reachy:image] gen ${generationId} sequence frame ${frameIdx + 1}/${n} composed`,
+            );
           }
         } else {
-          composedBuffers.push(...result.buffers);
+          // ── EXPLORATION MODE (existing path) ─────────────────────────────
+          const result = await generateImage({
+            prompt: editPrompt,
+            format,
+            provider,
+            model,
+            n,
+            quality,
+            sourceImage,
+          });
+          imageCostCents = result.costCents;
+          contentType = result.contentType;
+
+          if (layout) {
+            const plan = await planCopy({
+              idea: idea ?? '',
+              layout,
+              language: language ?? 'en',
+              project: proj
+                ? { name: proj.name, audience: proj.audience, tone: proj.tone }
+                : { name: 'Project', audience: null, tone: null },
+              brandKit: kit ?? null,
+            });
+            copy = plan.copy;
+            copyCostCents = plan.costCents;
+            composeCostCents = 1;
+          }
+
+          if (layout) {
+            const sharpMod = (await import('sharp')).default;
+            for (const [i, raw] of result.buffers.entries()) {
+              const sized = await sharpMod(raw, { failOn: 'none' })
+                .resize(fm.w, fm.h, { fit: 'cover', position: 'centre' })
+                .png({ compressionLevel: 6 })
+                .toBuffer();
+              const rawKey = `${projectId}/${generationId}/${i + 1}-raw.png`;
+              const rawUpload = await putR2(rawKey, sized, 'image/png');
+              rawUploads.push({ key: rawUpload.key, publicUrl: rawUpload.publicUrl });
+
+              const composed = await composeImage({
+                background: sized,
+                width: fm.w,
+                height: fm.h,
+                layout,
+                copy,
+                colors,
+              });
+              composedBuffers.push(composed);
+            }
+          } else {
+            composedBuffers.push(...result.buffers);
+          }
         }
 
         // One round-trip insert instead of N. Order is preserved by the array
@@ -207,7 +288,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         const rows: Array<typeof asset.$inferInsert> = [];
         for (const [i, buf] of composedBuffers.entries()) {
           const key = `${projectId}/${generationId}/${i + 1}.png`;
-          const upload = await putR2(key, buf, result.contentType);
+          const upload = await putR2(key, buf, contentType);
           rows.push({
             generationId,
             projectId,
@@ -222,13 +303,13 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         }
         await db.insert(asset).values(rows);
 
-        // Total cost: AI-image cost (returned by generateImage) + copy
-        // planner LLM call + compose floor. Stored on the generation row
-        // so the UI's "Cost: X¢" tally reflects what the user actually
-        // paid this turn. Composition state (layout + copy + colors) is
+        // Total cost: AI-image cost (sum across all calls for sequence mode)
+        // + copy planner LLM call + compose floor. Persisted to the
+        // generation row so the UI's "Cost: X¢" tally reflects the wallet.
+        // Composition state (layout + copy + colors + raw pointers) is
         // persisted in params so the re-render-overlay action can rebuild
         // the same asset cheaply without re-querying the brand kit.
-        const totalCostCents = result.costCents + copyCostCents + composeCostCents;
+        const totalCostCents = imageCostCents + copyCostCents + composeCostCents;
         const [existingGen] = await db
           .select({ params: generation.params })
           .from(generation)
@@ -240,17 +321,33 @@ export function startImageWorker(): Worker<ImageGenJobData> {
             ? {
                 composeState: {
                   layoutId: layout.id,
-                  copy,
+                  // Exploration: single shared PlannedCopy.
+                  // Sequence: PlannedCopy[] parallel to assets[] / rawAssets.
+                  // The `mode` field discriminates so the form / re-render
+                  // action can read the right shape.
+                  mode: sequenceMode ? ('sequence' as const) : ('exploration' as const),
+                  copy: sequenceMode ? (sequenceCopies ?? []) : copy,
                   colors,
                   // Parallel arrays to assets[] order — index i of rawUploads
                   // is the raw background for asset i. rerenderOverlay uses
                   // this to recompose without stacking text on text.
                   rawAssets: rawUploads,
+                  // Sequence-specific metadata for the UI (so it can render
+                  // the [1]→[2]→[3] strip and pre-populate per-frame edit
+                  // copy from frameTexts[K]).
+                  ...(sequenceMode
+                    ? {
+                        sequenceMeta: {
+                          totalFrames: n,
+                          frameTexts: sequenceCopies ?? [],
+                        },
+                      }
+                    : {}),
                 },
                 costBreakdown: {
                   cents: totalCostCents,
                   parts: {
-                    image: result.costCents,
+                    image: imageCostCents,
                     copy: copyCostCents,
                     compose: composeCostCents,
                   },

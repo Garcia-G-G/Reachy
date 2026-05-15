@@ -135,6 +135,37 @@ export interface Layout {
    *  named TextBlock becomes a mask hole revealing the AI image; the
    *  rest of the canvas fills with `colors.paper`. */
   mask?: LayoutMask;
+  /** Sequence-mode continuity hint. Called per frame; the returned
+   *  string is appended to the AI prompt to drive intentional motion
+   *  from frame K-1 → K. Keeps the same palette + composition while
+   *  evolving ONE element subtly. Layout-defined so the motion
+   *  direction is editorial, not random. */
+  sequenceHint?: (frameIndex: number, totalFrames: number) => string;
+}
+
+/** Default continuity instruction used when a layout doesn't define
+ *  its own sequenceHint. Conservative — tells the model to preserve
+ *  the prior frame faithfully with only a small ambient evolution. */
+function genericSequenceHint(frameIndex: number, totalFrames: number): string {
+  return (
+    `Frame ${frameIndex + 1} of ${totalFrames} — direct continuation of the previous frame. ` +
+    `Preserve the EXACT palette, lighting direction, focal subject, and overall composition. ` +
+    `Allow only a subtle ambient evolution — slight light shift, gentle texture drift, ` +
+    `or marginal repositioning. The viewer should read this as the SAME scene, one beat later — ` +
+    `not a redesign.`
+  );
+}
+
+/** Public helper: resolve a layout's sequenceHint, falling back to the
+ *  generic continuity language when the layout doesn't define one.
+ *  imageGen / the worker use this directly. */
+export function resolveSequenceHint(
+  layout: Layout,
+  frameIndex: number,
+  totalFrames: number,
+): string {
+  if (layout.sequenceHint) return layout.sequenceHint(frameIndex, totalFrames);
+  return genericSequenceHint(frameIndex, totalFrames);
 }
 
 export type LayoutId =
@@ -469,6 +500,13 @@ const cardSoft: Layout = {
       letterSpacingEm: 0.22,
     },
   ],
+  sequenceHint: (frameIndex, totalFrames) =>
+    [
+      `Frame ${frameIndex + 1} of ${totalFrames} — continuation of the prior frame.`,
+      'The centered floating card masks the middle ~40% of the frame; that masked area is irrelevant.',
+      'In the VISIBLE HALO around the card: preserve the palette and overall composition; let the photographic texture/lighting drift slowly across frames (a gentle pan / focus pull / colour temperature shift).',
+      'Do NOT redesign the halo elements — evolve them.',
+    ].join(' '),
 };
 
 /**
@@ -734,6 +772,13 @@ const editorialCollage: Layout = {
       letterSpacingEm: 0.22,
     },
   ],
+  sequenceHint: (frameIndex, totalFrames) =>
+    [
+      `Frame ${frameIndex + 1} of ${totalFrames} — continuation of the prior frame.`,
+      'Preserve the EXACT palette, lighting, and overall composition.',
+      `Evolve ONE element: the focal subject in the right 40% migrates ~${Math.round((frameIndex / Math.max(1, totalFrames - 1)) * 15)}% toward the centre and grows slightly larger; the negative space on the left progressively contracts as text content arrives.`,
+      'Do NOT redesign. Read as a slow editorial pan: same scene, evolved beat.',
+    ].join(' '),
 };
 
 /**
@@ -791,6 +836,13 @@ const textMaskCutout: Layout = {
     },
   ],
   mask: { kind: 'text-fill-image', textBlock: 'headline' },
+  sequenceHint: (frameIndex, totalFrames) =>
+    [
+      `Frame ${frameIndex + 1} of ${totalFrames} — continuation of the prior frame.`,
+      'Preserve the EXACT palette and overall composition.',
+      'The image revealed inside the letterforms shifts perspective slightly, like a slow parallax pan — same scene, viewed from a marginally different angle. Bold gradients and chunky color blocks remain dominant.',
+      'No element should redraw — only shift position by ~5–10% across the frame.',
+    ].join(' '),
 };
 
 /**
@@ -889,6 +941,13 @@ const badgeStamp: Layout = {
       letterSpacingEm: 0.22,
     },
   ],
+  sequenceHint: (frameIndex, totalFrames) =>
+    [
+      `Frame ${frameIndex + 1} of ${totalFrames} — continuation of the prior frame.`,
+      'Preserve the EXACT palette, lighting direction, focal subject identity.',
+      `The photographic subject in the left 60% pulls into slightly tighter focus and shifts pose by ~5°. The right 40% bokeh tone evolves marginally (a touch warmer or cooler) as the sequence advances.`,
+      'No element should redraw — same scene, one beat later.',
+    ].join(' '),
 };
 
 export const LAYOUTS: Record<LayoutId, Layout> = {

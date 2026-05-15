@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 import { LayoutPreview } from '@/components/app/layout-previews';
 import {
@@ -64,10 +64,15 @@ interface AssetSummary {
 
 /** What the worker recorded about the typography overlay it composited.
  *  Used by the Edit Copy modal to pre-populate slot inputs so users edit
- *  rather than re-type. */
+ *  rather than re-type.
+ *
+ *  Mode 'sequence' carries copy as an ARRAY parallel to the assets[] —
+ *  the modal picks the matching frame index when Edit Copy fires on a
+ *  specific thumb. */
 interface ComposeStateSummary {
   layoutId: string | null;
-  copy: Record<string, string | undefined>;
+  mode: 'exploration' | 'sequence';
+  copy: Record<string, string | undefined> | Array<Record<string, string | undefined>>;
 }
 
 type RunState =
@@ -128,6 +133,51 @@ function formatCents(cents: number): string {
   return `${cents}¢`;
 }
 
+/**
+ * Fetch N asset URLs, zip them with sequential `01.png` … `NN.png`
+ * filenames, and trigger a browser download. Used by the sequence
+ * mode's "Download as carousel" button to produce something the user
+ * can drag-and-drop into an Instagram carousel upload.
+ *
+ * JSZip is well-tested for this and runs purely client-side. No server
+ * roundtrip, no extra R2 bandwidth beyond fetching the user's own
+ * assets back. Failure during a single asset fetch is tolerated —
+ * the zip just omits that frame and the user can retry.
+ */
+async function downloadAsCarousel(
+  assets: Array<{ id: string; publicUrl: string | null }>,
+  baseName: string,
+): Promise<void> {
+  const JSZipModule = await import('jszip');
+  const JSZip = JSZipModule.default ?? JSZipModule;
+  const zip = new JSZip();
+  let added = 0;
+  for (const [i, asset] of assets.entries()) {
+    if (!asset.publicUrl) continue;
+    try {
+      const res = await fetch(asset.publicUrl);
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      const idx = String(i + 1).padStart(2, '0');
+      zip.file(`${idx}.png`, blob);
+      added++;
+    } catch {
+      // skip — one bad asset shouldn't kill the whole zip.
+    }
+  }
+  if (added === 0) throw new Error('No frames available to zip');
+  const out = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(out);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${baseName}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  // Give the browser a tick to start the download before revoking.
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
 export function GenerateImageForm({
   projectId,
   providerAvailability,
@@ -176,6 +226,10 @@ export function GenerateImageForm({
   // null = use per-format default. 'none' = raw AI output (no overlay).
   // Any LayoutId = pick that layout.
   const [layoutOverride, setLayoutOverride] = useState<LayoutId | 'none' | null>(null);
+  // exploration = N independent attempts (default; today's behavior).
+  // sequence    = N frames generated serially; frame K uses K-1 as
+  //               images.edit source. The "carousel" mode.
+  const [mode, setMode] = useState<'exploration' | 'sequence'>('exploration');
   const [n, setN] = useState<1 | 2 | 4>(1);
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
@@ -297,6 +351,7 @@ export function GenerateImageForm({
         quality: effectiveQuality,
         visualStyleOverride: visualStyleOverride ?? undefined,
         layoutId: layoutOverride ?? undefined,
+        mode,
       });
 
       if (!result.ok) {
@@ -337,6 +392,7 @@ export function GenerateImageForm({
         quality: effectiveQuality,
         visualStyleOverride: visualStyleOverride ?? undefined,
         layoutId: layoutOverride ?? undefined,
+        mode,
       });
       if (!result.ok) {
         const msg = t('errorEnqueue');
@@ -599,10 +655,56 @@ export function GenerateImageForm({
           </div>
         </div>
 
+        {/* MODE: exploration (N independent attempts) vs sequence (N frames
+            that read as a build / carousel). Sequence mode requires a layout
+            and forces n ≥ 2. */}
+        <div>
+          <span className="mono-eyebrow mb-3 block">Modo</span>
+          <div className="inline-flex border border-ink">
+            <button
+              type="button"
+              onClick={() => setMode('exploration')}
+              disabled={formDisabled}
+              className="mono-eyebrow px-4 py-2 transition disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                background: mode === 'exploration' ? 'var(--ink, #14110D)' : 'transparent',
+                color: mode === 'exploration' ? 'var(--paper, #F1EBDF)' : 'inherit',
+              }}
+              aria-pressed={mode === 'exploration'}
+            >
+              Exploración
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('sequence');
+                // Sequence requires n ≥ 2; bump if user is on 1.
+                if (n === 1) setN(4);
+              }}
+              disabled={formDisabled}
+              className="mono-eyebrow border-ink border-l px-4 py-2 transition disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                background: mode === 'sequence' ? 'var(--ink, #14110D)' : 'transparent',
+                color: mode === 'sequence' ? 'var(--paper, #F1EBDF)' : 'inherit',
+              }}
+              aria-pressed={mode === 'sequence'}
+            >
+              Secuencia
+            </button>
+          </div>
+          {mode === 'sequence' && (
+            <p className="mono-eyebrow mt-2 text-ink-3">
+              4 frames generated serially · each evolves from the previous · IG carousel ready
+            </p>
+          )}
+        </div>
+
         <fieldset className="space-y-3">
-          <legend className="mono-eyebrow mb-3 block">{t('fieldVariants')}</legend>
+          <legend className="mono-eyebrow mb-3 block">
+            {mode === 'sequence' ? 'Frames' : t('fieldVariants')}
+          </legend>
           <div className="flex gap-6">
-            {[1, 2, 4].map((value) => (
+            {(mode === 'sequence' ? [2, 4] : [1, 2, 4]).map((value) => (
               <label key={value} className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="radio"
@@ -681,7 +783,20 @@ export function GenerateImageForm({
             layoutOverride ||
             DEFAULT_LAYOUT_FOR_FORMAT[format]
           }
-          initialCopy={(run.kind === 'done' && run.composeState?.copy) || {}}
+          // Pre-populate from the matching frame's copy when this row is a
+          // sequence. Find the asset's index inside run.assets so we pick
+          // the right element of composeState.copy (which is an array in
+          // sequence mode).
+          initialCopy={(() => {
+            if (run.kind !== 'done' || !run.composeState) return {};
+            const cs = run.composeState;
+            if (cs.mode === 'sequence' && Array.isArray(cs.copy)) {
+              const idx = run.assets.findIndex((a) => a.id === editTarget.assetId);
+              return cs.copy[Math.max(0, idx)] ?? {};
+            }
+            // Exploration: shared copy across the n variants.
+            return Array.isArray(cs.copy) ? (cs.copy[0] ?? {}) : (cs.copy ?? {});
+          })()}
           onClose={() => setEditTarget(null)}
           onRendered={(publicUrl, newAssetId) => {
             setRun((current) => {
@@ -747,6 +862,9 @@ function ResultPanel({
   onRegenerate: () => void;
   regenerateDisabled: boolean;
 }) {
+  // Treat as a sequence when the worker tagged the row as one. The strip
+  // gets → arrows between thumbs and the carousel download button shows up.
+  const isSequence = run.kind === 'done' && run.composeState?.mode === 'sequence';
   if (run.kind === 'idle') return null;
 
   // Aspect ratio drives the preview frame so a 9:16 reel cover doesn't
@@ -857,37 +975,62 @@ function ResultPanel({
             ↓ Download
           </a>
         )}
+        {isSequence && assets.length > 1 && (
+          <button
+            type="button"
+            onClick={() => {
+              const id = 'generationId' in run ? run.generationId.slice(0, 8) : 'sequence';
+              void downloadAsCarousel(assets, `reachy-carousel-${id}`).catch((err) => {
+                toast.error(
+                  `Carousel download failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              });
+            }}
+            className="mono-eyebrow border border-ink px-3 py-2 hover:bg-ink hover:text-paper"
+            title="Zip all frames as 01.png..NN.png for direct IG carousel upload"
+          >
+            ↓ Download as carousel
+          </button>
+        )}
       </div>
 
-      {/* Thumb strip — only show when there's more than one variant. */}
+      {/* Thumb strip — only show when there's more than one variant.
+          Sequence mode renders → arrows between thumbs to communicate
+          ordering; exploration mode renders a plain flex-wrap grid. */}
       {assets.length > 1 && (
-        <div className="mx-auto flex max-w-[600px] flex-wrap justify-center gap-3">
+        <div className="mx-auto flex max-w-[600px] flex-wrap items-center justify-center gap-3">
           {assets.map((a, i) => {
             const isActive = i === safeIdx;
             return (
-              <button
-                type="button"
-                key={a.id}
-                onClick={() => onSelectAsset(i)}
-                className="block overflow-hidden bg-paper-2"
-                style={{
-                  width: 80,
-                  aspectRatio: aspect,
-                  border: `1px solid ${isActive ? 'var(--ink, #14110D)' : 'transparent'}`,
-                  boxShadow: isActive ? selectedShadow : 'none',
-                  transition: 'box-shadow 120ms ease, border-color 120ms ease',
-                }}
-                aria-label={`Show variant ${i + 1}`}
-                aria-pressed={isActive}
-              >
-                {a.publicUrl ? (
-                  // Plain img is fine here — small, no need for next/image.
-                  // biome-ignore lint/performance/noImgElement: 80px thumb
-                  <img src={a.publicUrl} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <span className="block h-full w-full" />
+              <Fragment key={a.id}>
+                {isSequence && i > 0 && (
+                  <span className="mono-eyebrow text-ink-3" style={{ fontSize: 18 }} aria-hidden>
+                    →
+                  </span>
                 )}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectAsset(i)}
+                  className="block overflow-hidden bg-paper-2"
+                  style={{
+                    width: 80,
+                    aspectRatio: aspect,
+                    border: `1px solid ${isActive ? 'var(--ink, #14110D)' : 'transparent'}`,
+                    boxShadow: isActive ? selectedShadow : 'none',
+                    transition: 'box-shadow 120ms ease, border-color 120ms ease',
+                  }}
+                  aria-label={isSequence ? `Show frame ${i + 1}` : `Show variant ${i + 1}`}
+                  aria-pressed={isActive}
+                >
+                  {a.publicUrl ? (
+                    // Plain img is fine here — small, no need for next/image.
+                    // biome-ignore lint/performance/noImgElement: 80px thumb
+                    <img src={a.publicUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="block h-full w-full" />
+                  )}
+                </button>
+              </Fragment>
             );
           })}
         </div>

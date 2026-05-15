@@ -62,6 +62,19 @@ export interface GenerateImageInput {
    *  buffer instead of `images.generate`. The fal path ignores this.
    *  Used by the "More like this" variation flow. */
   sourceImage?: Buffer;
+  /** Sequence-mode signaling. When set, the dispatch appends a
+   *  per-frame continuity cue to the prompt and (frame > 0) routes
+   *  through images.edit using `previousFrameBuffer` as the reference.
+   *  The worker drives the serial loop; this is just the per-call
+   *  signal. */
+  sequence?: {
+    frameIndex: number;
+    totalFrames: number;
+    previousFrameBuffer?: Buffer;
+    /** Layout-defined motion hint for this frame. Concatenated to the
+     *  AI prompt; opaque text from the worker's perspective. */
+    sequenceHint?: string;
+  };
 }
 
 export interface GenerateImageResult {
@@ -135,24 +148,54 @@ async function openaiImage(input: GenerateImageInput): Promise<GenerateImageResu
   // that don't supply one. Garcia's image form passes the user's selection.
   const quality = input.quality ?? 'medium';
 
-  // Variation mode: when a sourceImage buffer is provided we call the
+  // Resolve the input image source:
+  //   • Variation mode (sourceImage)               → images.edit on the user's source.
+  //   • Sequence frame 1+ (previousFrameBuffer)    → images.edit on the prior frame.
+  //   • Frame 1 of a sequence OR plain generate    → images.generate.
+  // sequence.previousFrameBuffer wins when both happen to be set
+  // (variation mode doesn't combine with sequence at the action layer
+  // — the form forces one mode at a time).
+  const editSource = input.sequence?.previousFrameBuffer ?? input.sourceImage;
+
+  // Sequence-aware prompt augmentation. Frame 0 gets an "opening of
+  // a N-part sequence" cue so subsequent frames have something to
+  // build from compositionally. Frames 1..N get the layout's
+  // sequenceHint (or generic fallback) inlined into the edit prompt.
+  let dispatchPrompt = input.prompt;
+  if (input.sequence) {
+    const { frameIndex, totalFrames, sequenceHint } = input.sequence;
+    if (frameIndex === 0) {
+      dispatchPrompt =
+        `[OPENING FRAME] This is frame 1 of ${totalFrames} in a coherent sequence — ` +
+        `establish the composition cleanly. Subsequent frames will evolve from this image; ` +
+        `make sure the focal element, palette, and lighting are deliberate and reproducible. ` +
+        `${input.prompt}`;
+    } else {
+      dispatchPrompt =
+        `[CONTINUATION FRAME ${frameIndex + 1} of ${totalFrames}] ${sequenceHint ?? ''} ` +
+        `Honour the negative-space framing and the no-text rules from the prior frame. ` +
+        `${input.prompt}`;
+    }
+  }
+
+  // Variation mode: when an edit source is provided we call the
   // images.edit endpoint (gpt-image-* family supports it natively, up
   // to 16 reference images). Cost mirrors generate at the same tier
   // because OpenAI bills per output image regardless of endpoint.
   // The toFile helper wraps the Buffer with a filename so the SDK can
   // serialize it as multipart/form-data.
-  const result = input.sourceImage
+  const result = editSource
     ? await openai.images.edit({
         model: input.model,
-        image: await toFile(input.sourceImage, 'source.png', { type: 'image/png' }),
-        prompt: input.prompt,
+        image: await toFile(editSource, 'source.png', { type: 'image/png' }),
+        prompt: dispatchPrompt,
         n: input.n,
         size,
         quality,
       })
     : await openai.images.generate({
         model: input.model,
-        prompt: input.prompt,
+        prompt: dispatchPrompt,
         n: input.n,
         size,
         quality,

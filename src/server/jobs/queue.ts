@@ -38,6 +38,12 @@ export interface ImageGenJobData {
   /** Plain-English nudge appended to the combined edit prompt when in
    *  variation mode ("warmer, more centered, more negative space"). */
   tweakPrompt?: string;
+  /** Generation mode:
+   *    exploration → N independent attempts (current default).
+   *    sequence    → N frames generated serially; frame K uses frame
+   *                  K-1 as the images.edit source. The worker drives
+   *                  the serial loop + per-frame copy planning. */
+  mode?: 'exploration' | 'sequence';
 }
 
 let cached: Queue<ImageGenJobData> | null = null;

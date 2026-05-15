@@ -220,3 +220,157 @@ export async function planCopy(args: PlanCopyArgs): Promise<PlanCopyResult> {
     userPrompt,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sequence mode — planCopySequence
+// Plans N frames of copy as a NARRATIVE PROGRESSION rather than N
+// independent attempts. Each frame's PlannedCopy fills the same slot
+// shape as the layout; the LLM is instructed to:
+//   • read frames 1..N as a sequence (set-up → body → punch)
+//   • keep the wordmark IDENTICAL across all frames
+//   • optionally number the eyebrow as "№ 1/N · …" when the layout
+//     has an eyebrow slot
+//   • allow blank slots on intermediate frames for clean reveal beats
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface PlanCopySequenceArgs extends PlanCopyArgs {
+  /** Number of frames in the sequence. 2 or 4 in the current UI. */
+  frames: number;
+}
+
+export interface PlanCopySequenceResult {
+  /** One PlannedCopy per frame, in chronological order. Length === frames. */
+  copies: PlannedCopy[];
+  costCents: number;
+  systemPrompt: string;
+  userPrompt: string;
+}
+
+/** Build the array-of-objects schema for a sequence. Each item is a
+ *  copy object whose required keys match the layout slots. We use a
+ *  fixed-length array so the LLM can't return more or fewer frames. */
+function buildSequenceSchema(
+  layout: Layout,
+  frames: number,
+  language: 'en' | 'es',
+): { schemaName: string; schema: Record<string, unknown> } {
+  const itemSchema = buildSchema(layout, language).schema as {
+    type: string;
+    properties: Record<string, JsonSchemaProperty>;
+    required: string[];
+    additionalProperties: boolean;
+  };
+  return {
+    schemaName: `copy_seq_${layout.id.replace(/-/g, '_')}_${frames}`,
+    // OpenAI's structured output requires every property in `required` to
+    // be present and forbids `minItems` / `maxItems` for free arrays; the
+    // simplest reliable shape is an object wrapping a fixed-length tuple
+    // approximated as an array. We post-validate length on the client.
+    schema: {
+      type: 'object',
+      properties: {
+        frames: {
+          type: 'array',
+          description: `Exactly ${frames} frames, in chronological order — frame 1 sets up, frame ${frames} delivers the punch.`,
+          items: itemSchema,
+          minItems: frames,
+          maxItems: frames,
+        },
+      },
+      required: ['frames'],
+      additionalProperties: false,
+    },
+  };
+}
+
+function buildSequenceSystemPrompt(args: PlanCopySequenceArgs): string {
+  const lines: string[] = [
+    'You are the copywriter for a marketing-asset GENERATOR producing a SEQUENCE of N coherent frames — read as an Instagram carousel or short build.',
+    '',
+    'Strict sequence rules:',
+    `- The sequence has exactly ${args.frames} frames. Frame 1 SETS UP the idea; frame ${args.frames} LANDS the punch. Intermediate frames carry the build.`,
+    '- Wordmark (when the layout has one) is IDENTICAL across every frame — a constant brand stamp.',
+    '- When the layout has an eyebrow slot, number the eyebrows as "№ 1/' +
+      String(args.frames) +
+      ' · …", "№ 2/' +
+      String(args.frames) +
+      ' · …", … so the viewer reads the progression. Each numbered eyebrow gets a SHORT thematic suffix (1-3 words, uppercase).',
+    '- Headlines progress: tease in frame 1, develop in mid, resolve in the last. Same length / shape per frame so the typographic rhythm holds.',
+    '- Subheadlines may be EMPTY on clean reveal frames (intermediate frames where the visual carries the beat). When non-empty, 8-18 words.',
+    '- No exclamation marks. No emoji. No quotation marks around the output.',
+    '- Sentence case. Spanish or English per the user setting; do not mix languages mid-sequence.',
+    `- Output language: ${args.language === 'es' ? 'Spanish (es-MX, neutral Latin American)' : 'English (US)'}.`,
+    '',
+    `Layout: ${args.layout.label} (${args.layout.id}). Each frame fills these slots: ${args.layout.slots.join(', ')}.`,
+  ];
+  if (args.brandKit?.voice?.tone) {
+    lines.push('', `Brand voice tone: ${args.brandKit.voice.tone}.`);
+  }
+  if (args.brandKit?.voice?.doSay && args.brandKit.voice.doSay.length > 0) {
+    lines.push(`Words/phrases the brand LIKES: ${args.brandKit.voice.doSay.join(', ')}.`);
+  }
+  if (args.brandKit?.voice?.dontSay && args.brandKit.voice.dontSay.length > 0) {
+    lines.push(`Words/phrases the brand AVOIDS: ${args.brandKit.voice.dontSay.join(', ')}.`);
+  }
+  return lines.join('\n');
+}
+
+export async function planCopySequence(
+  args: PlanCopySequenceArgs,
+): Promise<PlanCopySequenceResult> {
+  if (args.frames < 2) {
+    throw new Error(`planCopySequence: frames must be ≥ 2 (got ${args.frames})`);
+  }
+  const model = args.model ?? 'gpt-4o-mini';
+  const systemPrompt = buildSequenceSystemPrompt(args);
+  const userPrompt = buildUserPrompt(args);
+  const { schemaName, schema } = buildSequenceSchema(args.layout, args.frames, args.language);
+
+  const openai = getOpenAI();
+  const completion = await openai.chat.completions.create({
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: schemaName,
+        schema,
+        strict: true,
+      },
+    },
+    temperature: 0.7,
+  });
+
+  const choice = completion.choices[0];
+  if (!choice) throw new Error('planCopySequence: OpenAI returned no choices');
+  if (choice.message.refusal) {
+    throw new Error(`planCopySequence: OpenAI refused — ${choice.message.refusal}`);
+  }
+  const content = choice.message.content;
+  if (!content) throw new Error('planCopySequence: OpenAI returned empty content');
+
+  let parsed: { frames: PlannedCopy[] };
+  try {
+    parsed = JSON.parse(content) as { frames: PlannedCopy[] };
+  } catch (err) {
+    throw new Error(
+      `planCopySequence: invalid JSON — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!Array.isArray(parsed.frames) || parsed.frames.length !== args.frames) {
+    throw new Error(
+      `planCopySequence: expected ${args.frames} frames, got ${parsed.frames?.length ?? 0}`,
+    );
+  }
+
+  const usage = completion.usage ?? { prompt_tokens: 0, completion_tokens: 0 };
+  return {
+    copies: parsed.frames,
+    costCents: estimateCopyCost(model, usage.prompt_tokens, usage.completion_tokens),
+    systemPrompt,
+    userPrompt,
+  };
+}

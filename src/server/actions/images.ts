@@ -48,6 +48,19 @@ const enqueueInput = z.object({
   layoutId: z
     .union([z.enum(LAYOUT_IDS as unknown as [LayoutId, ...LayoutId[]]), z.literal('none')])
     .optional(),
+  /** Generation mode.
+   *   exploration (default): N independent attempts at the same prompt.
+   *                          Backwards-compatible — fal models + raw
+   *                          layouts use this.
+   *   sequence:               N frames generated SERIALLY. Frame 1 is
+   *                          a fresh generation; frames 2..N use the
+   *                          previous frame as a reference (images.edit)
+   *                          + a layout-defined sequenceHint to drive
+   *                          intentional motion. Read as an IG carousel
+   *                          or short build (set-up → punch). Each
+   *                          frame gets its own PlannedCopy entry so
+   *                          typography progresses too. */
+  mode: z.enum(['exploration', 'sequence']).default('exploration'),
 });
 
 export type EnqueueImageGenerationInput = z.infer<typeof enqueueInput>;
@@ -125,6 +138,7 @@ export async function enqueueImageGeneration(
         quality: parsed.data.quality,
         visualStyleOverride: parsed.data.visualStyleOverride ?? null,
         layoutId: resolvedLayoutId,
+        mode: parsed.data.mode,
       },
     })
     .returning();
@@ -148,6 +162,7 @@ export async function enqueueImageGeneration(
         layoutId: layout ? layout.id : undefined,
         idea: parsed.data.idea,
         language: parsed.data.language,
+        mode: parsed.data.mode,
       },
       { jobId: gen.id },
     );
@@ -449,12 +464,20 @@ export async function rerenderOverlay(
   // render. composeState is written by the worker only on the
   // overlay-enabled path, so a missing composeState means "this asset
   // was a raw AI background, no typography to re-render".
+  //
+  // composeState.copy shape depends on composeState.mode:
+  //   exploration: a single PlannedCopy shared across all assets.
+  //   sequence:    PlannedCopy[] parallel to rawAssets[]/assets[]. The
+  //                modal pre-populates from frame[sourceAssetIdx]; we
+  //                only replace THAT frame's copy, leaving siblings
+  //                untouched.
   const sourceParams = (sourceGen.params ?? {}) as {
     composeState?: {
       layoutId?: LayoutId;
       colors?: BrandColors;
-      copy?: PlannedCopy;
+      copy?: PlannedCopy | PlannedCopy[];
       rawAssets?: Array<{ key: string; publicUrl: string | null }>;
+      mode?: 'exploration' | 'sequence';
     };
   };
   const layoutId = sourceParams.composeState?.layoutId;
@@ -470,6 +493,7 @@ export async function rerenderOverlay(
     paper: '#F1EBDF',
     accent: '#B6481A',
   };
+  const isSequenceSource = sourceParams.composeState?.mode === 'sequence';
 
   // Fetch the RAW AI background (no previous overlay) — that's what
   // makes "Edit copy" produce a clean replace instead of stacking text.
@@ -494,7 +518,18 @@ export async function rerenderOverlay(
   // edits one or two slots and expects the rest to stay — overwriting
   // with empty strings is almost never what they want. Caller can pass
   // an explicit empty string to clear a slot; undefined keeps it.
-  const previousCopy = sourceParams.composeState?.copy ?? {};
+  //
+  // Sequence: previousCopy is THIS FRAME's PlannedCopy[K], not the
+  // shared dict. The form's modal already pre-populates from the
+  // matching frame (see /api/generations/:id/status which returns
+  // composeState.copy as an array when mode='sequence').
+  const composeStateCopy = sourceParams.composeState?.copy;
+  const previousCopy: PlannedCopy = (() => {
+    if (Array.isArray(composeStateCopy)) {
+      return composeStateCopy[sourceAssetIdx] ?? {};
+    }
+    return composeStateCopy ?? {};
+  })();
   const filteredCopy: PlannedCopy = {};
   for (const slot of layout.slots) {
     const incoming = parsed.data.copy[slot];
@@ -525,6 +560,11 @@ export async function rerenderOverlay(
 
   // Persist as a NEW generation row + asset so the library shows it as
   // a distinct iteration. Free in $ terms — costCents=0, no AI call.
+  //
+  // For sequence sources: the new row carries a single-asset composeState
+  // (mode='exploration') because the result is one re-rendered frame, not
+  // a sequence. The user can still edit-copy on the new row — it'll be
+  // treated as exploration on the second pass.
   const [newGen] = await db
     .insert(generation)
     .values({
@@ -534,11 +574,12 @@ export async function rerenderOverlay(
       status: 'done',
       provider: sourceGen.provider,
       model: sourceGen.model,
-      prompt: `Re-render overlay of generation ${sourceGen.id}`,
+      prompt: `Re-render overlay of generation ${sourceGen.id}${isSequenceSource ? ` (frame ${sourceAssetIdx + 1})` : ''}`,
       params: {
         ...sourceParams,
         composeState: {
           layoutId,
+          mode: 'exploration' as const,
           copy: filteredCopy,
           colors,
         },

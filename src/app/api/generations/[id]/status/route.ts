@@ -89,16 +89,23 @@ export async function GET(_req: Request, { params }: RouteContext) {
     costBreakdown?: ReelCostBreakdown;
     composeState?: {
       layoutId?: string;
-      copy?: Record<string, string | undefined>;
+      // Exploration: Record<string, string|undefined>
+      // Sequence:    Array<Record<string, string|undefined>>
+      copy?: Record<string, string | undefined> | Array<Record<string, string | undefined>>;
+      mode?: 'exploration' | 'sequence';
     };
   };
   const costBreakdown = genParams.costBreakdown ?? null;
   // composeState is image-pipeline-only — drives the Edit Copy modal's
   // pre-population (so users edit instead of rewrite the headline) and
   // tells the UI which layout this asset belongs to.
+  // For sequence rows, copy is an array (one entry per frame) and mode
+  // is 'sequence'; the form's modal picks the right index based on which
+  // thumbnail the user clicked Edit on.
   const composeState = genParams.composeState
     ? {
         layoutId: genParams.composeState.layoutId ?? null,
+        mode: genParams.composeState.mode ?? 'exploration',
         copy: genParams.composeState.copy ?? {},
       }
     : null;
