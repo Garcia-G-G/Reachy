@@ -5,14 +5,15 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { QUALITY_TIERS, type QualityTier } from '@/lib/image-models';
 import { VISUAL_STYLE_KEYS, type VisualStyleKey } from '@/lib/visual-styles-meta';
-import { type BrandColors, composeImage, type PlannedCopy } from '@/server/ai/composeImage';
 import { IMAGE_FORMAT_KEYS, type ImageFormat } from '@/server/ai/formats';
-import type { ImageProvider } from '@/server/ai/imageGen';
+import { generateImage, type ImageProvider } from '@/server/ai/imageGen';
 import {
+  type BrandColors,
   DEFAULT_LAYOUT_FOR_FORMAT,
   getLayout,
   LAYOUT_IDS,
   type LayoutId,
+  type PlannedCopy,
 } from '@/server/ai/layoutTemplates';
 import { buildImagePrompt } from '@/server/ai/promptBuilder';
 import { db } from '@/server/db/client';
@@ -120,6 +121,10 @@ export async function enqueueImageGeneration(
     parsed.data.layoutId ?? DEFAULT_LAYOUT_FOR_FORMAT[parsed.data.format];
   const layout = resolvedLayoutId === 'none' ? null : getLayout({ layoutId: resolvedLayoutId });
 
+  // Coarse pre-flight prompt — stored on the generation row for audit
+  // visibility. The worker REBUILDS the prompt per-variant with the
+  // planned copy (which doesn't exist at enqueue time), so this value
+  // is a placeholder, NOT the prompt that actually hits gpt-image-2.
   const prompt = buildImagePrompt({
     idea: parsed.data.idea,
     format: parsed.data.format,
@@ -129,8 +134,9 @@ export async function enqueueImageGeneration(
     visualStyleOverride: parsed.data.visualStyleOverride,
     // For the 'none' path we still need a layout so the prompt builder
     // doesn't reach for an undefined hint — DEFAULT_LAYOUT_FOR_FORMAT
-    // gives the typical placement; the worker just skips the overlay.
+    // gives the typical placement.
     layout: layout ?? getLayout({ format: parsed.data.format }),
+    copy: {},
   });
 
   // Insert generation row first so the worker has a target to update.
@@ -331,6 +337,7 @@ export async function enqueueVariations(
       | VisualStyleKey
       | undefined,
     layout,
+    copy: {},
   });
 
   const [gen] = await db
@@ -392,30 +399,29 @@ export async function enqueueVariations(
 }
 
 /**
- * Re-render the typography overlay on an existing asset with new copy.
- * Loads the original AI background from R2, runs composeImage with the
- * caller-supplied copy + the asset's saved colors + layout, uploads the
- * new composite under a fresh asset row.
+ * Edit the typography on an existing asset by re-rendering with new
+ * copy values. As of the May-2026 AI-typography pivot the AI paints
+ * the typography directly into the image, so editing copy means a
+ * fresh model call — not a free SVG recomposite.
  *
- * Cost: ZERO dollars to the user — no AI call, only CPU + R2. Reachy
- * eats the storage and bandwidth, which is microcents per render. This
- * is the iteration loop that makes the marketing-grade pipeline feel
- * like a design tool instead of a slot machine.
+ * Cost: real dollars. gpt-image-2 high quality is ~$0.21 per image.
  *
- * Architecture note: we re-download the original AI background from R2
- * (storage_key #1 of the source generation) and recompose. The background
- * is the expensive bit — keeping it pristine and re-overlaying is the
- * essence of the deterministic-typography approach.
+ * Two modes:
+ *   - quickFix=false (default): fresh images.generate with the new
+ *     copy in the [LAYOUT DIRECTIVE]. Gives the model maximum
+ *     flexibility but the composition will drift from the original.
+ *   - quickFix=true: images.edit using the source asset as a single
+ *     reference + a "preserve everything except the listed copy"
+ *     prompt. gpt-image-2 has NO adherence/strength knob (cookbook
+ *     2026 confirms input_fidelity is a no-op on this model), so
+ *     adherence is prompt-engineered, not parameter-engineered.
+ *
+ * Caller passes new copy; we merge with the source's prior copy so
+ * untouched slots carry through.
  */
 const rerenderOverlayInput = z.object({
-  /** Source generation whose first asset (or the asset matching
-   *  assetId, if provided) is the background to recompose. */
   generationId: z.string().uuid(),
-  /** Optional specific asset within the source generation. Defaults
-   *  to the first asset in the row. */
   assetId: z.string().uuid().optional(),
-  /** New copy slots — only the keys the layout uses are honored;
-   *  unused keys are ignored. */
   copy: z.object({
     eyebrow: z.string().trim().max(120).optional(),
     headline: z.string().trim().max(240).optional(),
@@ -423,9 +429,16 @@ const rerenderOverlayInput = z.object({
     cta: z.string().trim().max(80).optional(),
     wordmark: z.string().trim().max(80).optional(),
   }),
+  /** When true, use images.edit with the source asset as reference +
+   *  a "preserve everything else" prompt. Faster + more visually
+   *  stable for single-slot tweaks. When false (default) fresh
+   *  generation with the new copy. */
+  quickFix: z.boolean().optional().default(false),
 });
 
-export type RerenderOverlayInput = z.infer<typeof rerenderOverlayInput>;
+export type RerenderOverlayInput = z.input<typeof rerenderOverlayInput>;
+
+const EDIT_COST_CENTS = 21; // gpt-image-2 high-quality ~$0.21 / image
 
 export async function rerenderOverlay(
   input: RerenderOverlayInput,
@@ -459,9 +472,11 @@ export async function rerenderOverlay(
     .limit(1);
   if (!proj) return { ok: false, error: 'not-found' };
 
-  // Load the source asset row for dimensions. We also need its INDEX
-  // within the generation (1, 2, 3, …) so we can pick the matching raw
-  // background from composeState.rawAssets[].
+  // Daily usage cap.
+  const usage = await checkDailyUsage(session.user.id, 'image');
+  if (!usage.ok) return { ok: false, error: `daily-cap (${usage.used}/${usage.cap})` };
+
+  // Locate the source asset and its index in the generation.
   const sourceAssets = await db
     .select()
     .from(asset)
@@ -475,111 +490,133 @@ export async function rerenderOverlay(
     return { ok: false, error: 'no-source-asset' };
   }
 
-  // Recover the layout + colors + raw bg pointer from the original
-  // render. composeState is written by the worker only on the
-  // overlay-enabled path, so a missing composeState means "this asset
-  // was a raw AI background, no typography to re-render".
-  //
-  // composeState.copy shape depends on composeState.mode:
-  //   exploration: a single PlannedCopy shared across all assets.
-  //   sequence:    PlannedCopy[] parallel to rawAssets[]/assets[]. The
-  //                modal pre-populates from frame[sourceAssetIdx]; we
-  //                only replace THAT frame's copy, leaving siblings
-  //                untouched.
+  // Recover aiPromptState. Legacy rows (pre-pivot) have composeState
+  // but no aiPromptState — for those we surface a "regenerate first"
+  // error so the user re-runs through the new pipeline.
   const sourceParams = (sourceGen.params ?? {}) as {
-    composeState?: {
+    aiPromptState?: {
       layoutId?: LayoutId;
-      colors?: BrandColors;
+      brandColors?: BrandColors;
       copy?: PlannedCopy | PlannedCopy[];
-      rawAssets?: Array<{ key: string; publicUrl: string | null }>;
-      mode?: 'exploration' | 'sequence';
+      mode?: 'exploration' | 'multi-strategy' | 'sequence';
+      language?: 'en' | 'es';
+      model?: string;
+      quality?: 'low' | 'medium' | 'high';
     };
+    composeState?: unknown; // legacy
   };
-  const layoutId = sourceParams.composeState?.layoutId;
+  if (!sourceParams.aiPromptState && sourceParams.composeState) {
+    return {
+      ok: false,
+      error: 'legacy generation — re-generate to enable editing under the new AI pipeline',
+    };
+  }
+  const layoutId = sourceParams.aiPromptState?.layoutId;
   if (!layoutId) {
     return {
       ok: false,
-      error: 'source generation has no layout — re-render requires an overlay-enabled asset',
+      error: 'source generation has no layout — re-render requires a layout-driven asset',
     };
   }
   const layout = getLayout({ layoutId });
-  const colors: BrandColors = sourceParams.composeState?.colors ?? {
+  const brandColors: BrandColors = sourceParams.aiPromptState?.brandColors ?? {
     ink: '#14110D',
     paper: '#F1EBDF',
     accent: '#B6481A',
   };
-  const isSequenceSource = sourceParams.composeState?.mode === 'sequence';
+  const language = sourceParams.aiPromptState?.language ?? 'en';
 
-  // Fetch the RAW AI background (no previous overlay) — that's what
-  // makes "Edit copy" produce a clean replace instead of stacking text.
-  // Falls back to the composite if rawAssets is missing (legacy rows
-  // before this field was added) — those WILL stack on re-render and
-  // produce a clearly-buggy result that signals the user should regen.
-  const rawPointer = sourceParams.composeState?.rawAssets?.[sourceAssetIdx];
-  const backgroundUrl = rawPointer?.publicUrl ?? sourceAsset.publicUrl;
-
-  let backgroundBuf: Buffer;
-  try {
-    const res = await fetch(backgroundUrl);
-    if (!res.ok) throw new Error(`fetch ${res.status} ${res.statusText}`);
-    const arr = await res.arrayBuffer();
-    backgroundBuf = Buffer.from(arr);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `failed to fetch source asset: ${msg}` };
-  }
-
-  // Merge user-supplied copy with the previously-rendered copy. The user
-  // edits one or two slots and expects the rest to stay — overwriting
-  // with empty strings is almost never what they want. Caller can pass
-  // an explicit empty string to clear a slot; undefined keeps it.
-  //
-  // Sequence: previousCopy is THIS FRAME's PlannedCopy[K], not the
-  // shared dict. The form's modal already pre-populates from the
-  // matching frame (see /api/generations/:id/status which returns
-  // composeState.copy as an array when mode='sequence').
-  const composeStateCopy = sourceParams.composeState?.copy;
-  const previousCopy: PlannedCopy = (() => {
-    if (Array.isArray(composeStateCopy)) {
-      return composeStateCopy[sourceAssetIdx] ?? {};
-    }
-    return composeStateCopy ?? {};
-  })();
-  const filteredCopy: PlannedCopy = {};
+  // Merge supplied copy with the source's prior copy. Empty string =
+  // explicit clear; undefined = keep prior.
+  const aiPromptCopy = sourceParams.aiPromptState?.copy;
+  const previousCopy: PlannedCopy = Array.isArray(aiPromptCopy)
+    ? (aiPromptCopy[sourceAssetIdx] ?? {})
+    : (aiPromptCopy ?? {});
+  const mergedCopy: PlannedCopy = {};
   for (const slot of layout.slots) {
     const incoming = parsed.data.copy[slot];
     if (incoming !== undefined) {
-      // Empty string explicitly clears; non-empty replaces.
-      if (incoming.length > 0) filteredCopy[slot] = incoming;
+      if (incoming.length > 0) mergedCopy[slot] = incoming;
     } else {
-      // Untouched slot: keep the previous render's value.
       const prior = previousCopy[slot];
-      if (prior) filteredCopy[slot] = prior;
+      if (prior) mergedCopy[slot] = prior;
     }
   }
 
-  let composed: Buffer;
-  try {
-    composed = await composeImage({
-      background: backgroundBuf,
-      width: sourceAsset.width ?? 1080,
-      height: sourceAsset.height ?? 1080,
-      layout,
-      copy: filteredCopy,
-      colors,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `compose failed: ${msg}` };
+  // Load brand kit for the prompt builder.
+  const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
+
+  // Build the AI prompt. For quick-fix mode we prepend a
+  // preserve-everything directive — gpt-image-2 has no strength knob,
+  // so adherence is purely prompt-engineered.
+  const basePrompt = buildImagePrompt({
+    idea: (sourceGen.params as { idea?: string })?.idea ?? '',
+    format: sourceGen.format as ImageFormat,
+    project: { name: proj.name, audience: proj.audience, tone: proj.tone },
+    brandKit: kit ?? null,
+    language,
+    layout,
+    copy: mergedCopy,
+  });
+
+  const changedSlots = layout.slots
+    .filter((slot) => mergedCopy[slot] !== previousCopy[slot])
+    .map((slot) => `${slot}: "${mergedCopy[slot] ?? ''}"`);
+  const preserveDirective = parsed.data.quickFix
+    ? `\n\n[PRESERVE]\nThis is a TYPOGRAPHY EDIT of the reference image. Keep EVERYTHING about the reference identical — same composition, same focal subject, same lighting, same colors, same background texture, same overall mood. Change ONLY the text content to the values listed in [LAYOUT DIRECTIVE]. Specifically these slots changed:\n${changedSlots.map((c) => `- ${c}`).join('\n')}\nAll other typography slots keep their prior text. Treat unchanged regions as fixed.`
+    : '';
+  const editPrompt = basePrompt + preserveDirective;
+
+  // Fetch source asset for quick-fix mode (reference image).
+  let sourceImage: Buffer | undefined;
+  if (parsed.data.quickFix) {
+    try {
+      const res = await fetch(sourceAsset.publicUrl);
+      if (!res.ok) throw new Error(`fetch ${res.status} ${res.statusText}`);
+      sourceImage = Buffer.from(await res.arrayBuffer());
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: `failed to fetch source asset: ${msg}` };
+    }
   }
 
-  // Persist as a NEW generation row + asset so the library shows it as
-  // a distinct iteration. Free in $ terms — costCents=0, no AI call.
-  //
-  // For sequence sources: the new row carries a single-asset composeState
-  // (mode='exploration') because the result is one re-rendered frame, not
-  // a sequence. The user can still edit-copy on the new row — it'll be
-  // treated as exploration on the second pass.
+  // Generate. quickFix uses images.edit (source as ref); otherwise
+  // fresh generate. Same provider/model as the source generation.
+  let renderedBuf: Buffer;
+  let costCents = 0;
+  let contentType: 'image/png' | 'image/jpeg' = 'image/png';
+  try {
+    const result = await generateImage({
+      prompt: editPrompt,
+      format: sourceGen.format as ImageFormat,
+      provider: sourceGen.provider as ImageProvider,
+      model: sourceGen.model ?? 'gpt-image-2',
+      n: 1,
+      quality: sourceParams.aiPromptState?.quality ?? 'high',
+      sourceImage,
+    });
+    const buf = result.buffers[0];
+    if (!buf) throw new Error('model returned no image');
+    renderedBuf = buf;
+    costCents = Math.max(result.costCents, EDIT_COST_CENTS);
+    contentType = result.contentType;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `image edit failed: ${msg}` };
+  }
+
+  // Resize to the source's exact dimensions.
+  const sharpMod = (await import('sharp')).default;
+  const finalBuf = await sharpMod(renderedBuf, { failOn: 'none' })
+    .resize(sourceAsset.width ?? 1080, sourceAsset.height ?? 1080, {
+      fit: 'cover',
+      position: 'centre',
+    })
+    .png({ compressionLevel: 6 })
+    .toBuffer();
+
+  // Persist as a new generation + asset row. parentAssetId on the
+  // new asset links it back to the source for the edits-strip UI.
   const [newGen] = await db
     .insert(generation)
     .values({
@@ -589,25 +626,37 @@ export async function rerenderOverlay(
       status: 'done',
       provider: sourceGen.provider,
       model: sourceGen.model,
-      prompt: `Re-render overlay of generation ${sourceGen.id}${isSequenceSource ? ` (frame ${sourceAssetIdx + 1})` : ''}`,
+      prompt: `Edit copy of generation ${sourceGen.id} (${parsed.data.quickFix ? 'quick-fix' : 'fresh'}) — ${changedSlots.join(', ') || 'no-op'}`,
       params: {
-        ...sourceParams,
-        composeState: {
+        ...(sourceParams as Record<string, unknown>),
+        aiPromptState: {
           layoutId,
           mode: 'exploration' as const,
-          copy: filteredCopy,
-          colors,
+          copy: mergedCopy,
+          brandColors,
+          model: sourceGen.model,
+          quality: sourceParams.aiPromptState?.quality ?? 'high',
+          effort: 'balanced' as const,
+          language,
+          variants: [
+            {
+              prompt: editPrompt,
+              copy: mergedCopy,
+              layoutId,
+              label: parsed.data.quickFix ? 'edit · quick-fix' : 'edit · fresh',
+            },
+          ],
         },
-        rerenderOf: sourceGen.id,
+        editOf: { generationId: sourceGen.id, assetId: sourceAsset.id, quickFix: parsed.data.quickFix },
       },
-      costCents: 0,
+      costCents,
       finishedAt: new Date(),
     })
     .returning();
   if (!newGen) return { ok: false, error: 'failed to create generation row' };
 
   const key = `${proj.id}/${newGen.id}/1.png`;
-  const upload = await putR2(key, composed, 'image/png');
+  const upload = await putR2(key, finalBuf, contentType);
   const [newAsset] = await db
     .insert(asset)
     .values({
@@ -692,18 +741,23 @@ export async function swapLayout(
   if (!proj) return { ok: false, error: 'not-found' };
 
   const srcParams = (srcGen.params ?? {}) as {
-    composeState?: {
-      colors?: BrandColors;
+    aiPromptState?: {
+      brandColors?: BrandColors;
       copy?: PlannedCopy | PlannedCopy[];
-      rawAssets?: Array<{ key: string; publicUrl: string | null }>;
-      mode?: 'exploration' | 'sequence';
+      language?: 'en' | 'es';
+      quality?: 'low' | 'medium' | 'high';
     };
+    composeState?: unknown;
+    idea?: string;
   };
-  if (!srcParams.composeState?.rawAssets) {
-    return { ok: false, error: 'source asset has no raw background to recompose from' };
+  if (!srcParams.aiPromptState && srcParams.composeState) {
+    return {
+      ok: false,
+      error: 'legacy generation — re-generate to enable layout swap under the new AI pipeline',
+    };
   }
 
-  // Locate the asset row + raw bg pointer.
+  // Locate the asset row.
   const siblings = await db
     .select()
     .from(asset)
@@ -713,31 +767,14 @@ export async function swapLayout(
   if (idx < 0) return { ok: false, error: 'asset not part of generation' };
   const sourceAsset = siblings[idx];
   if (!sourceAsset) return { ok: false, error: 'asset not found' };
-  const rawPointer = srcParams.composeState.rawAssets[idx];
-  if (!rawPointer?.publicUrl) {
-    return { ok: false, error: 'raw bg pointer missing — generation predates raw storage' };
-  }
-
-  // Fetch raw bg.
-  let bgBuf: Buffer;
-  try {
-    const res = await fetch(rawPointer.publicUrl);
-    if (!res.ok) throw new Error(`fetch ${res.status}`);
-    bgBuf = Buffer.from(await res.arrayBuffer());
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `failed to fetch raw bg: ${msg}` };
-  }
 
   // Resolve copy: caller's override > source's existing copy (per-frame
-  // for sequence). Slots the new layout doesn't request are silently
-  // dropped; new slots stay empty until the user fills them.
+  // for sequence). Slots the new layout doesn't request are dropped.
   const newLayout = getLayout({ layoutId: parsed.data.layoutId });
-  const priorCopy: PlannedCopy = (() => {
-    const c = srcParams.composeState?.copy;
-    if (Array.isArray(c)) return c[idx] ?? {};
-    return c ?? {};
-  })();
+  const aiPromptCopy = srcParams.aiPromptState?.copy;
+  const priorCopy: PlannedCopy = Array.isArray(aiPromptCopy)
+    ? (aiPromptCopy[idx] ?? {})
+    : (aiPromptCopy ?? {});
   const incoming = parsed.data.copy ?? {};
   const nextCopy: PlannedCopy = {};
   for (const slot of newLayout.slots) {
@@ -746,29 +783,57 @@ export async function swapLayout(
     else if (priorCopy[slot]) nextCopy[slot] = priorCopy[slot];
   }
 
-  const colors: BrandColors = srcParams.composeState?.colors ?? {
+  const brandColors: BrandColors = srcParams.aiPromptState?.brandColors ?? {
     ink: '#14110D',
     paper: '#F1EBDF',
     accent: '#B6481A',
   };
+  const language = srcParams.aiPromptState?.language ?? 'en';
 
-  let composed: Buffer;
+  // Build prompt for the NEW layout with the merged copy. Fresh
+  // generation (not edit) since the visual composition changes.
+  const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
+  const swapPrompt = buildImagePrompt({
+    idea: srcParams.idea ?? '',
+    format: srcGen.format as ImageFormat,
+    project: { name: proj.name, audience: proj.audience, tone: proj.tone },
+    brandKit: kit ?? null,
+    language,
+    layout: newLayout,
+    copy: nextCopy,
+  });
+
+  let renderedBuf: Buffer;
+  let costCents = 0;
+  let contentType: 'image/png' | 'image/jpeg' = 'image/png';
   try {
-    composed = await composeImage({
-      background: bgBuf,
-      width: sourceAsset.width ?? 1080,
-      height: sourceAsset.height ?? 1080,
-      layout: newLayout,
-      copy: nextCopy,
-      colors,
+    const result = await generateImage({
+      prompt: swapPrompt,
+      format: srcGen.format as ImageFormat,
+      provider: srcGen.provider as ImageProvider,
+      model: srcGen.model ?? 'gpt-image-2',
+      n: 1,
+      quality: srcParams.aiPromptState?.quality ?? 'high',
     });
+    const buf = result.buffers[0];
+    if (!buf) throw new Error('model returned no image');
+    renderedBuf = buf;
+    costCents = Math.max(result.costCents, EDIT_COST_CENTS);
+    contentType = result.contentType;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `compose failed: ${msg}` };
+    return { ok: false, error: `layout swap failed: ${msg}` };
   }
 
-  // Persist as a new generation + asset row (matches rerenderOverlay's
-  // pattern — keeps the source row immutable so undo is implicit).
+  const sharpMod = (await import('sharp')).default;
+  const composed = await sharpMod(renderedBuf, { failOn: 'none' })
+    .resize(sourceAsset.width ?? 1080, sourceAsset.height ?? 1080, {
+      fit: 'cover',
+      position: 'centre',
+    })
+    .png({ compressionLevel: 6 })
+    .toBuffer();
+
   const [newGen] = await db
     .insert(generation)
     .values({
@@ -780,23 +845,35 @@ export async function swapLayout(
       model: srcGen.model,
       prompt: `Swap layout (→ ${parsed.data.layoutId}) of generation ${srcGen.id}`,
       params: {
-        ...srcParams,
-        composeState: {
+        ...(srcParams as Record<string, unknown>),
+        aiPromptState: {
           layoutId: parsed.data.layoutId,
           mode: 'exploration' as const,
           copy: nextCopy,
-          colors,
+          brandColors,
+          model: srcGen.model,
+          quality: srcParams.aiPromptState?.quality ?? 'high',
+          effort: 'balanced' as const,
+          language,
+          variants: [
+            {
+              prompt: swapPrompt,
+              copy: nextCopy,
+              layoutId: parsed.data.layoutId,
+              label: `swap → ${parsed.data.layoutId}`,
+            },
+          ],
         },
-        layoutSwapOf: srcGen.id,
+        layoutSwapOf: { generationId: srcGen.id, assetId: sourceAsset.id },
       },
-      costCents: 0,
+      costCents,
       finishedAt: new Date(),
     })
     .returning();
   if (!newGen) return { ok: false, error: 'failed to create generation row' };
 
   const key = `${proj.id}/${newGen.id}/1.png`;
-  const upload = await putR2(key, composed, 'image/png');
+  const upload = await putR2(key, composed, contentType);
   const [newAsset] = await db
     .insert(asset)
     .values({
@@ -867,14 +944,25 @@ export async function swapColors(
   if (!proj) return { ok: false, error: 'not-found' };
 
   const srcParams = (srcGen.params ?? {}) as {
-    composeState?: {
+    aiPromptState?: {
       layoutId?: LayoutId;
       copy?: PlannedCopy | PlannedCopy[];
-      rawAssets?: Array<{ key: string; publicUrl: string | null }>;
+      brandColors?: BrandColors;
+      language?: 'en' | 'es';
+      quality?: 'low' | 'medium' | 'high';
     };
+    composeState?: unknown;
+    idea?: string;
   };
-  if (!srcParams.composeState?.layoutId || !srcParams.composeState?.rawAssets) {
-    return { ok: false, error: 'source generation has no overlay state' };
+  if (!srcParams.aiPromptState && srcParams.composeState) {
+    return {
+      ok: false,
+      error: 'legacy generation — re-generate to enable color swap under the new AI pipeline',
+    };
+  }
+  const layoutId = srcParams.aiPromptState?.layoutId;
+  if (!layoutId) {
+    return { ok: false, error: 'source generation has no layout' };
   }
 
   const siblings = await db
@@ -885,47 +973,80 @@ export async function swapColors(
   const idx = siblings.findIndex((a) => a.id === parsed.data.assetId);
   if (idx < 0) return { ok: false, error: 'asset not part of generation' };
   const sourceAsset = siblings[idx];
-  if (!sourceAsset) return { ok: false, error: 'asset not found' };
-  const rawPointer = srcParams.composeState.rawAssets[idx];
-  if (!rawPointer?.publicUrl) {
-    return { ok: false, error: 'raw bg pointer missing' };
-  }
+  if (!sourceAsset?.publicUrl) return { ok: false, error: 'asset not found' };
 
-  let bgBuf: Buffer;
+  // Fetch the source asset to use as image-edit reference.
+  let sourceImage: Buffer;
   try {
-    const res = await fetch(rawPointer.publicUrl);
+    const res = await fetch(sourceAsset.publicUrl);
     if (!res.ok) throw new Error(`fetch ${res.status}`);
-    bgBuf = Buffer.from(await res.arrayBuffer());
+    sourceImage = Buffer.from(await res.arrayBuffer());
   } catch (err) {
     return {
       ok: false,
-      error: `failed to fetch raw bg: ${err instanceof Error ? err.message : String(err)}`,
+      error: `failed to fetch source asset: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
-  const layout = getLayout({ layoutId: srcParams.composeState.layoutId });
-  const priorCopy: PlannedCopy = (() => {
-    const c = srcParams.composeState?.copy;
-    if (Array.isArray(c)) return c[idx] ?? {};
-    return c ?? {};
-  })();
+  const layout = getLayout({ layoutId });
+  const aiPromptCopy = srcParams.aiPromptState?.copy;
+  const priorCopy: PlannedCopy = Array.isArray(aiPromptCopy)
+    ? (aiPromptCopy[idx] ?? {})
+    : (aiPromptCopy ?? {});
+  const language = srcParams.aiPromptState?.language ?? 'en';
 
-  let composed: Buffer;
+  // Build a synthetic brand kit with the new colors for the prompt.
+  const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
+  const recoloredKit = kit
+    ? { ...kit, primaryColor: parsed.data.colors.ink, bgColor: parsed.data.colors.paper, accentColor: parsed.data.colors.accent }
+    : null;
+
+  const basePrompt = buildImagePrompt({
+    idea: srcParams.idea ?? '',
+    format: srcGen.format as ImageFormat,
+    project: { name: proj.name, audience: proj.audience, tone: proj.tone },
+    brandKit: recoloredKit,
+    language,
+    layout,
+    copy: priorCopy,
+  });
+  const recolorPrompt =
+    basePrompt +
+    `\n\n[PRESERVE]\nThis is a RECOLOR EDIT of the reference image. Keep EVERYTHING about the reference identical — same composition, same focal subject, same lighting structure, same copy text, same layout. Only the brand palette has changed: shift the dominant colors from the prior palette to the new BRAND PALETTE listed above. All ink-colored regions adopt ${parsed.data.colors.ink}; paper regions adopt ${parsed.data.colors.paper}; accent regions adopt ${parsed.data.colors.accent}.`;
+
+  let renderedBuf: Buffer;
+  let costCents = 0;
+  let contentType: 'image/png' | 'image/jpeg' = 'image/png';
   try {
-    composed = await composeImage({
-      background: bgBuf,
-      width: sourceAsset.width ?? 1080,
-      height: sourceAsset.height ?? 1080,
-      layout,
-      copy: priorCopy,
-      colors: parsed.data.colors,
+    const result = await generateImage({
+      prompt: recolorPrompt,
+      format: srcGen.format as ImageFormat,
+      provider: srcGen.provider as ImageProvider,
+      model: srcGen.model ?? 'gpt-image-2',
+      n: 1,
+      quality: srcParams.aiPromptState?.quality ?? 'high',
+      sourceImage,
     });
+    const buf = result.buffers[0];
+    if (!buf) throw new Error('model returned no image');
+    renderedBuf = buf;
+    costCents = Math.max(result.costCents, EDIT_COST_CENTS);
+    contentType = result.contentType;
   } catch (err) {
     return {
       ok: false,
-      error: `compose failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: `recolor failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+
+  const sharpMod = (await import('sharp')).default;
+  const composed = await sharpMod(renderedBuf, { failOn: 'none' })
+    .resize(sourceAsset.width ?? 1080, sourceAsset.height ?? 1080, {
+      fit: 'cover',
+      position: 'centre',
+    })
+    .png({ compressionLevel: 6 })
+    .toBuffer();
 
   const [newGen] = await db
     .insert(generation)
@@ -936,25 +1057,32 @@ export async function swapColors(
       status: 'done',
       provider: srcGen.provider,
       model: srcGen.model,
-      prompt: `Swap colors on generation ${srcGen.id}`,
+      prompt: `Recolor edit of generation ${srcGen.id}`,
       params: {
-        ...srcParams,
-        composeState: {
-          layoutId: srcParams.composeState.layoutId,
+        ...(srcParams as Record<string, unknown>),
+        aiPromptState: {
+          layoutId,
           mode: 'exploration' as const,
           copy: priorCopy,
-          colors: parsed.data.colors,
+          brandColors: parsed.data.colors,
+          model: srcGen.model,
+          quality: srcParams.aiPromptState?.quality ?? 'high',
+          effort: 'balanced' as const,
+          language,
+          variants: [
+            { prompt: recolorPrompt, copy: priorCopy, layoutId, label: 'recolor' },
+          ],
         },
-        colorSwapOf: srcGen.id,
+        colorSwapOf: { generationId: srcGen.id, assetId: sourceAsset.id },
       },
-      costCents: 0,
+      costCents,
       finishedAt: new Date(),
     })
     .returning();
   if (!newGen) return { ok: false, error: 'failed to create generation row' };
 
   const key = `${proj.id}/${newGen.id}/1.png`;
-  const upload = await putR2(key, composed, 'image/png');
+  const upload = await putR2(key, composed, contentType);
   const [newAsset] = await db
     .insert(asset)
     .values({

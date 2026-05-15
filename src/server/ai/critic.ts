@@ -27,7 +27,7 @@ import { getOpenAI } from './openai';
  * accept the same vision + json_schema combo.
  */
 
-import type { Layout } from './layoutTemplates';
+import type { LayoutPromptTemplate as Layout } from './layoutTemplates';
 
 export interface CriticCandidate {
   /** Index in the original generation set (0-based). */

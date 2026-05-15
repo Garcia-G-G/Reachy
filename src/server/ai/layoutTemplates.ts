@@ -1,211 +1,28 @@
 import 'server-only';
-import type { FontRole } from '@/server/typography/fonts';
 import type { ImageFormat } from './formats';
 
 /**
- * Marketing-grade layout templates. The split is intentional:
+ * AI-typography layout templates.
  *
- *   AI = background only (no text inside the pixels).
- *   Layout = a list of coordinate-anchored TextBlock slots.
- *   Renderer = SVG overlay rendered by sharp with the brand fonts.
+ * As of the May-2026 pivot: layouts are no longer SVG-overlay schemas.
+ * gpt-image-2's text-rendering accuracy (~98.5%+ on Latin script per Atlas
+ * Cloud's 2026 benchmark; multi-scale layouts confirmed) makes the prior
+ * "AI = background, sharp + SVG = text" split obsolete. The AI now paints
+ * EVERYTHING — composition, color blocks, and typography in one render.
  *
- * Coordinates are NORMALIZED to the [0, 1] frame so the same template
- * works at every aspect ratio. composeImage multiplies by the actual
- * width/height when building the SVG.
+ * A layout is now a **prompt directive**: the layout's job is to tell
+ * the model where to place which copy slot, at what scale, in what
+ * font character, using which brand color. The brand wordmark and the
+ * planned copy values land verbatim in the prompt so the AI renders
+ * them with correct spelling.
  *
- * Each TextBlock describes ONE rendered line/run. A layout that wants
- * "eyebrow over headline over CTA" lists three TextBlocks with the
- * three roles and their positions. The copyPlanner LLM call returns a
- * PlannedCopy object whose keys match the textSource fields below.
+ * Coordinates are described in PLAIN ENGLISH ("upper-left corner",
+ * "lower 30%", "bleed across the right column") — gpt-image-2 parses
+ * spatial directives natively. No more normalized coordinates.
  */
 
+/** The text slots a layout can populate. The copyPlanner fills these. */
 export type TextRole = 'eyebrow' | 'headline' | 'subheadline' | 'cta' | 'wordmark';
-export type TextSource = TextRole | 'static';
-/** `aiAccent` is a SPECIAL role — its block is NOT rendered by the
- *  SVG overlay. Instead, promptBuilder collects all aiAccent blocks
- *  and injects per-block "IN-IMAGE TEXT" directives into the AI
- *  prompt so the model renders the text inside the picture itself
- *  (with natural integration: paper texture, perspective, lighting).
- *  Used for tiny editorial labels and badge inner-text where the
- *  brand-exact font fidelity matters less than the AI's ability to
- *  paint the text onto the composition. */
-export type BlockRole = TextRole | 'static' | 'aiAccent';
-export type TextAlign = 'left' | 'center' | 'right';
-/** Which slot in the resolved palette this run paints with. Resolved
- *  against brandKit at compose time so a layout works on any brand. */
-export type TextColorRole = 'ink' | 'paper' | 'accent';
-
-export interface TextBlock {
-  /** Logical role — drives font + default weight + which copy field
-   *  populates it. `static` blocks render the fixed `text` field below.
-   *  `aiAccent` blocks are NOT rendered by composeImage — promptBuilder
-   *  collects them and asks the AI to paint the text inside the image. */
-  role: BlockRole;
-  /** Anchor X within the frame, normalized [0, 1]. The point this refers
-   *  to is determined by `align`: left → top-left, center → top-center,
-   *  right → top-right of the text box. */
-  x: number;
-  y: number;
-  /** Width as a fraction of frame width. Controls wrapping. */
-  widthFrac: number;
-  /** Font size as a fraction of frame height. Frame-height is the right
-   *  base for vertical layouts (9:16) where headlines should scale to
-   *  a fraction of the long edge. Tweak per layout. */
-  sizeFrac: number;
-  /** Which font role to render this block in. */
-  font: FontRole;
-  align: TextAlign;
-  /** Color slot — `ink` for primary text, `paper` for inverse, `accent`
-   *  for the brand accent stripe. Resolved at compose time against the
-   *  brand kit's primaryColor / bgColor / accentColor. */
-  color: TextColorRole;
-  /** Variable font weight 100-900. Defaults: display 600, body 500,
-   *  mono 600, italic 400. Skip for italic which has no weight axis. */
-  weight?: number;
-  /** Optional uppercase transform — for mono eyebrows etc. */
-  upper?: boolean;
-  /** Optional letter-spacing in em. Negative tightens (tight display
-   *  headlines), positive opens up (mono eyebrows look better at +0.12). */
-  letterSpacingEm?: number;
-  /** Which slot of PlannedCopy fills this block. `static` blocks use
-   *  the `text` field directly instead. */
-  textSource: TextSource;
-  /** Literal text when textSource === 'static' (otherwise ignored). */
-  text?: string;
-  /** Optional absolute line-height in em. Defaults to 1.1 for display,
-   *  1.3 for body. */
-  lineHeightEm?: number;
-  /** Optional max height as a fraction of the frame, used by the
-   *  auto-fit shrink loop in composeImage. When undefined, inferred
-   *  as `sizeFrac × lineHeightEm × 4` (assume max 4 lines tall).
-   *  Long Spanish copy will shrink to stay within this. */
-  heightFrac?: number;
-  /** Required when role === 'aiAccent'. Directive injected into the
-   *  AI prompt describing WHERE the text lands and HOW it should look
-   *  inside the image. composeImage ignores this; promptBuilder
-   *  consumes it. */
-  promptIntegration?: string;
-}
-
-/** Optional solid block painted under the text — e.g. a coloured slab
- *  behind a quote layout so the text is fully legible regardless of
- *  background. Coordinates normalized like TextBlock. */
-export interface BackdropRect {
-  x: number;
-  y: number;
-  widthFrac: number;
-  heightFrac: number;
-  color: TextColorRole;
-  /** 0–1; defaults to 0.92. Lets the layout dial in a translucent slab
-   *  when the brand wants the background to peek through. */
-  opacity?: number;
-  /** Optional corner radius as a fraction of frame width. The
-   *  card-soft layout uses ~0.018 (about a 20px radius at 1080px). */
-  cornerRadiusFrac?: number;
-  /** Optional soft drop shadow under the rect — picks up the
-   *  "floating card" feel without depending on the AI background.
-   *  When set, composeImage wraps the rect in an SVG filter with
-   *  feGaussianBlur + feOffset + low-opacity black. */
-  shadow?: {
-    /** Blur stdDeviation in px (typical 8-24 for soft cards). */
-    blurPx: number;
-    /** Vertical offset in px (positive = down). */
-    offsetY: number;
-    /** Black-shadow opacity 0–1 (typical 0.15-0.25). */
-    opacity: number;
-  };
-}
-
-/** Cutout / mask treatment. When set, the layout's overlay covers the
- *  whole frame with `colors.paper` EXCEPT where the named text block's
- *  letterforms sit — there the AI background bleeds through. The named
- *  block's `text` value is what's punched out; its other attributes
- *  (font, size, position, alignment) define the cutout shape. The block
- *  is implicitly NOT rendered as visible text — it becomes the mask.
- *
- *  Used by `text-mask-cutout` to produce magazine-style "image inside
- *  letterforms" treatments. composeImage handles the SVG <mask> build. */
-export interface LayoutMask {
-  kind: 'text-fill-image';
-  /** Which TextBlock in `blocks[]` to use as the cutout shape. Match by
-   *  role; the matching block must be present in `blocks[]`. */
-  textBlock: TextRole;
-}
-
-export interface Layout {
-  id: LayoutId;
-  /** Human label for the picker. */
-  label: string;
-  /** Which PlannedCopy slots this layout uses. The copyPlanner only
-   *  fills these — extra slots aren't asked for and so don't waste
-   *  tokens or LLM attention. */
-  slots: readonly TextRole[];
-  /** Hint appended to the AI background prompt. Tells the model where
-   *  to keep the frame visually quiet so the typographic overlay has
-   *  room to breathe. Plain English, concrete: "keep the top 40% and
-   *  bottom 20% calm and uncluttered". */
-  negativeSpaceHint: string;
-  /** Optional backdrop slab(s) painted before the text — used by
-   *  quote-slab to lay a coloured rectangle over the photo first. */
-  backdrops?: readonly BackdropRect[];
-  /** Render order: top → bottom of this array maps to bottom → top of
-   *  the visual stack (last block renders on top). For typical layouts
-   *  order is irrelevant since blocks don't overlap. */
-  blocks: readonly TextBlock[];
-  /** Optional cutout / fill treatment — see LayoutMask. When set, the
-   *  named TextBlock becomes a mask hole revealing the AI image; the
-   *  rest of the canvas fills with `colors.paper`. */
-  mask?: LayoutMask;
-  /** Sequence-mode continuity hint. Called per frame; the returned
-   *  string is appended to the AI prompt to drive intentional motion
-   *  from frame K-1 → K. Keeps the same palette + composition while
-   *  evolving ONE element subtly. Layout-defined so the motion
-   *  direction is editorial, not random. */
-  sequenceHint?: (frameIndex: number, totalFrames: number) => string;
-}
-
-/** Default continuity instruction used when a layout doesn't define
- *  its own sequenceHint. Built on the "narrow-preserve + explicit-action"
- *  pattern (the most reliable edit-pipeline framing for gpt-image-2):
- *  list a tight set of attributes that MUST carry over, then tell the
- *  model WHAT to change with an action verb and a magnitude. Vague
- *  hints like "subtle evolution" yield either identical frames or
- *  random redesigns — neither is a usable carousel beat. */
-function genericSequenceHint(frameIndex: number, totalFrames: number): string {
-  const beat = frameIndex / Math.max(totalFrames - 1, 1); // 0..1 across the sequence
-  const action = (() => {
-    if (frameIndex === 0) return 'Establish the scene. This is the opening frame.';
-    if (frameIndex === totalFrames - 1) {
-      return 'CLOSE the sequence. Shift focal element ~20% toward frame center, scale UP ~10%, deepen the dominant shadow by ~15%. This frame must LAND.';
-    }
-    const pctLeft = Math.round((1 - beat) * 30) + 5; // 5..35
-    return `EVOLVE the prior frame. Shift focal element ~${pctLeft}% LEFT of its prior position, reduce scale ~10%, rotate ambient lighting ~15° clockwise.`;
-  })();
-  return [
-    `Frame ${frameIndex + 1} of ${totalFrames} — direct continuation of the previous frame.`,
-    'PRESERVE EXACTLY (do not redesign):',
-    '- color palette (same hex values, same relative areas)',
-    '- focal subject identity (same object, same material, same era)',
-    '- art style and rendering technique',
-    '- camera focal length / lens character',
-    '',
-    `CHANGE (action this frame): ${action}`,
-    '',
-    'Treat this like a single photograph in a 4-shot series — the viewer reads ONE evolving scene, not four different posters.',
-  ].join('\n');
-}
-
-/** Public helper: resolve a layout's sequenceHint, falling back to the
- *  generic continuity language when the layout doesn't define one.
- *  imageGen / the worker use this directly. */
-export function resolveSequenceHint(
-  layout: Layout,
-  frameIndex: number,
-  totalFrames: number,
-): string {
-  if (layout.sequenceHint) return layout.sequenceHint(frameIndex, totalFrames);
-  return genericSequenceHint(frameIndex, totalFrames);
-}
 
 export type LayoutId =
   | 'hero-centered'
@@ -220,783 +37,362 @@ export type LayoutId =
   | 'text-mask-cutout'
   | 'badge-stamp';
 
-/**
- * ─────────────────────────────────────────────────────────────────────
- * Layout 1 — hero-centered
- *   Eyebrow + Headline + CTA, all centered horizontally.
- *   Used for: hero, post-ig, square, og-square, linkedin-post-square.
- *   Negative space: top 30% + center 40% should be visually quieter
- *   than the bottom so the centered text has contrast room.
- * ─────────────────────────────────────────────────────────────────────
- */
-const heroCentered: Layout = {
+/** Brand color tokens — ink (text + dominant), paper (background-ish),
+ *  accent (small highlight). Injected verbatim into the AI prompt so
+ *  the model gets exact hex values to anchor on. */
+export interface BrandColors {
+  ink: string;
+  paper: string;
+  accent: string;
+}
+
+/** Resolved copy values for the layout's slots. Empty strings are
+ *  allowed and signal "skip this slot in the directive". */
+export interface PromptCopy {
+  eyebrow?: string;
+  headline?: string;
+  subheadline?: string;
+  cta?: string;
+  wordmark?: string;
+}
+
+/** Back-compat alias. composeImage.ts previously owned PlannedCopy;
+ *  the type lives here now since copy planning and prompt building
+ *  both reference it. composeImage.ts is quarantined. */
+export type PlannedCopy = PromptCopy;
+
+export interface PromptDirectiveInput {
+  copy: PromptCopy;
+  brandColors: BrandColors;
+  /** Exact wordmark spelling (case-preserving). Falls back to project
+   *  name when brand kit doesn't specify one. */
+  brandWordmark: string;
+  /** Descriptor of the brand's display font CHARACTER — e.g.
+   *  "high-contrast editorial serif with hairline contrast", "humanist
+   *  geometric sans, generous tracking". gpt-image-2 doesn't know
+   *  family names like "Fraunces" but understands character. */
+  brandFontHint: string;
+}
+
+export interface SequenceDirectiveInput extends PromptDirectiveInput {
+  frameIndex: number;
+  totalFrames: number;
+}
+
+export interface LayoutPromptTemplate {
+  id: LayoutId;
+  /** Human label for the picker. */
+  label: string;
+  /** Which PlannedCopy slots this layout uses. The copyPlanner only
+   *  fills these — extra slots aren't asked for and so don't waste
+   *  tokens or LLM attention. */
+  slots: readonly TextRole[];
+  /** Free-text directive injected into the LAYOUT DIRECTIVE section of
+   *  the prompt. Describes composition + typography placement + scale +
+   *  color, written for an art-director audience. The model uses this
+   *  alongside the [BRIEF] to compose the image. */
+  promptDirective: (input: PromptDirectiveInput) => string;
+  /** Where the model should keep the frame composition quieter so the
+   *  typography reads. Plain English. */
+  negativeSpaceHint: string;
+  /** Optional sequence-mode directive — produces continuity language
+   *  for frame K of N, covering BOTH visual continuity (palette, focal
+   *  subject) AND text progression (eyebrow numbering, headline beat).
+   *  When omitted, the generic sequence directive applies. */
+  sequenceDirective?: (input: SequenceDirectiveInput) => string;
+  /** Optional reference-image hint — when the layout benefits from a
+   *  particular kind of reference (e.g. logo overlay, photographic
+   *  style), encoded here for the prompt builder. */
+  referenceHint?: string;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────
+
+/** Render a "Slot X: '<value>'..." line if the copy slot has content.
+ *  Empty slots are skipped so the directive doesn't bloat with
+ *  "Render '' as eyebrow" noise. */
+function slotLine(label: string, value: string | undefined, body: string): string {
+  if (!value || value.trim().length === 0) return '';
+  return `- ${label} "${escapeForPrompt(value.trim())}" — ${body}`;
+}
+
+/** Strip characters that would confuse the prompt parser (quotes inside
+ *  quotes). Replace double-quote with the typographic equivalent. */
+function escapeForPrompt(s: string): string {
+  return s.replace(/"/g, '“').replace(/\n+/g, ' ');
+}
+
+/** Generic sequence directive used when a layout doesn't override.
+ *  Built on the narrow-preserve + explicit-action pattern: list a
+ *  tight set of carry-over attributes, then tell the model WHAT to
+ *  change with a magnitude. Now ALSO covers text continuity since the
+ *  AI renders the copy too — the planner already varied the copy per
+ *  frame; this directive just tells the model to keep typography
+ *  rhythm consistent. */
+function genericSequenceDirective(input: SequenceDirectiveInput): string {
+  const { frameIndex, totalFrames } = input;
+  const beat = frameIndex / Math.max(totalFrames - 1, 1);
+  const action = (() => {
+    if (frameIndex === 0) return 'Establish the scene. This is the opening frame.';
+    if (frameIndex === totalFrames - 1) {
+      return 'CLOSE the sequence. Shift focal element ~20% toward frame center, scale UP ~10%, deepen the dominant shadow by ~15%.';
+    }
+    const pctLeft = Math.round((1 - beat) * 30) + 5;
+    return `EVOLVE the prior frame. Shift focal element ~${pctLeft}% LEFT of its prior position, reduce scale ~10%, rotate ambient lighting ~15° clockwise.`;
+  })();
+  return [
+    `Frame ${frameIndex + 1} of ${totalFrames} — direct continuation.`,
+    'PRESERVE EXACTLY: color palette (same hex values, same relative areas), focal subject identity (same object, same material), art style and rendering technique, camera focal length, OVERALL TYPOGRAPHIC RHYTHM (same fonts, same scale per slot, same color usage).',
+    `CHANGE (this frame): ${action}`,
+    'TEXT EVOLUTION: render the planned copy for THIS frame verbatim. Spelling exact. Numbering if present must increment cleanly between frames.',
+  ].join('\n');
+}
+
+// ─── Layout 1 — hero-centered ────────────────────────────────────────
+
+const heroCentered: LayoutPromptTemplate = {
   id: 'hero-centered',
   label: 'Hero · centered',
   slots: ['eyebrow', 'headline', 'cta'],
   negativeSpaceHint:
-    'Keep the central 50% of the frame visually CALM — soft tones, low contrast, no busy details there. Push texture, gradients, and accent shapes toward the edges. The composition will host large centered typography over the middle band; do not let the background compete for attention in that band.',
-  blocks: [
-    {
-      role: 'eyebrow',
-      textSource: 'eyebrow',
-      x: 0.5,
-      y: 0.38,
-      widthFrac: 0.8,
-      sizeFrac: 0.022,
-      font: 'mono',
-      align: 'center',
-      color: 'ink',
-      upper: true,
-      letterSpacingEm: 0.18,
-    },
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.5,
-      y: 0.44,
-      widthFrac: 0.8,
-      sizeFrac: 0.085,
-      font: 'display',
-      align: 'center',
-      color: 'ink',
-      weight: 600,
-      letterSpacingEm: -0.015,
-      lineHeightEm: 1.05,
-    },
-    {
-      role: 'cta',
-      textSource: 'cta',
-      x: 0.5,
-      y: 0.7,
-      widthFrac: 0.8,
-      sizeFrac: 0.028,
-      font: 'body',
-      align: 'center',
-      color: 'accent',
-      weight: 600,
-      upper: true,
-      letterSpacingEm: 0.08,
-    },
-  ],
+    'Keep the central 50% of the frame visually CALM — soft tones, low contrast, no busy details. Push texture, gradients, and accent shapes toward the edges so the centered typography breathes.',
+  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+HERO · CENTERED LAYOUT
+Composition: focal subject sits in the lower third or fades into the upper edges; the visual center stays open for centered typography. Use the brand palette (paper as base, ink for text, accent for one small element).
+
+Render this typography stack centered horizontally on a single vertical axis at frame center:
+${slotLine('Eyebrow (small mono UPPERCASE, generous tracking ~0.18em, color ' + brandColors.ink + ', ~2% of frame height)', copy.eyebrow, 'positioned about 38% from the top')}
+${slotLine('Headline (oversized ' + brandFontHint + ', weight 600, color ' + brandColors.ink + ', tight leading, max 6 words, ~8.5% of frame height)', copy.headline, 'centered at ~50% from top, wraps to at most 3 lines')}
+${slotLine('CTA (small mono UPPERCASE, color ' + brandColors.paper + ' on an ' + brandColors.ink + ' pill button ~3% tall, generous horizontal padding)', copy.cta, 'centered ~70% from top')}
+
+Spelling MUST be exact. Kerning crisp. Type integrated into the composition (subtle paper texture, lighting picks up the letters), not flat overlay.
+`.trim(),
 };
 
-/**
- * Layout 2 — hero-split-left
- *   Headline on the LEFT half. The AI background owns the right half.
- *   Used for: og, hero (wide), email-header (when split makes sense).
- *   Negative space: left 50% should be quiet; the visual "subject" of
- *   the AI background sits on the right.
- */
-const heroSplitLeft: Layout = {
+// ─── Layout 2 — hero-split-left ──────────────────────────────────────
+
+const heroSplitLeft: LayoutPromptTemplate = {
   id: 'hero-split-left',
-  label: 'Hero · split-left',
-  slots: ['eyebrow', 'headline', 'cta'],
+  label: 'Hero · split left',
+  slots: ['eyebrow', 'headline', 'subheadline', 'cta'],
   negativeSpaceHint:
-    'Compose the visual subject (shape, gradient, focal element) within the RIGHT 50% of the frame. The LEFT 50% should be calm and low-contrast — soft tonal field, subtle texture only, no busy detail. Typography will be overlaid on the left.',
-  blocks: [
-    {
-      role: 'eyebrow',
-      textSource: 'eyebrow',
-      x: 0.07,
-      y: 0.18,
-      widthFrac: 0.4,
-      sizeFrac: 0.025,
-      font: 'mono',
-      align: 'left',
-      color: 'ink',
-      upper: true,
-      letterSpacingEm: 0.18,
-    },
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.07,
-      y: 0.32,
-      widthFrac: 0.42,
-      sizeFrac: 0.075,
-      font: 'display',
-      align: 'left',
-      color: 'ink',
-      weight: 600,
-      letterSpacingEm: -0.02,
-      lineHeightEm: 1.04,
-    },
-    {
-      role: 'cta',
-      textSource: 'cta',
-      x: 0.07,
-      y: 0.82,
-      widthFrac: 0.42,
-      sizeFrac: 0.024,
-      font: 'body',
-      align: 'left',
-      color: 'accent',
-      weight: 600,
-      upper: true,
-      letterSpacingEm: 0.1,
-    },
-  ],
+    'Left 45% of the frame is editorial copy space — keep it CALM. Right 55% holds the focal subject / visual texture. The vertical seam between the two zones must read clean, not muddy.',
+  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+HERO · SPLIT LEFT LAYOUT
+Composition: 45/55 vertical split. LEFT 45% is editorial copy space, color ${brandColors.paper}. RIGHT 55% is the focal subject and visual scene. The seam between them is clean (no gradient mush).
+
+Typography on the LEFT panel, stacked vertically, left-aligned with a comfortable margin from the left edge (~6%):
+${slotLine('Eyebrow (small mono UPPERCASE, tracking ~0.2em, color ' + brandColors.accent + ', ~2% tall)', copy.eyebrow, 'near the top, ~10% from top')}
+${slotLine('Headline (oversized ' + brandFontHint + ', weight 700, tight leading, color ' + brandColors.ink + ', ~9% tall, wraps to 3-4 lines)', copy.headline, 'just below eyebrow, occupies most of the left panel\'s vertical space')}
+${slotLine('Subheadline (sans-serif, regular weight, color ' + brandColors.ink + ' at 75% opacity, ~2.2% tall, max 3 lines)', copy.subheadline, 'below headline')}
+${slotLine('CTA (small mono UPPERCASE, color ' + brandColors.paper + ' on ' + brandColors.ink + ' pill button)', copy.cta, 'bottom of the left panel, ~85% from top')}
+
+All text renders crisply with correct spelling and tight kerning.
+`.trim(),
 };
 
-/**
- * Layout 3 — quote-slab
- *   Large italic headline centered on a coloured slab that's painted on
- *   top of the AI background. The slab gives the typography legibility
- *   regardless of what the AI rendered.
- *   Used for: square, post-ig (quote variants), reel-cover.
- */
-const quoteSlab: Layout = {
+// ─── Layout 3 — quote-slab ───────────────────────────────────────────
+
+const quoteSlab: LayoutPromptTemplate = {
   id: 'quote-slab',
   label: 'Quote · slab',
-  slots: ['headline', 'wordmark'],
+  slots: ['headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
-    'The composition will be partially covered by a centered colored slab containing typography. Treat the visible periphery (the band around the central slab) as the showcase — push interesting form, colour transitions, and texture into the outer 25% of the frame. The center will be visually masked.',
-  backdrops: [
-    {
-      x: 0.08,
-      y: 0.18,
-      widthFrac: 0.84,
-      heightFrac: 0.64,
-      color: 'paper',
-      opacity: 0.94,
-    },
-  ],
-  blocks: [
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.5,
-      y: 0.4,
-      widthFrac: 0.72,
-      sizeFrac: 0.085,
-      font: 'italic',
-      align: 'center',
-      color: 'ink',
-      letterSpacingEm: -0.01,
-      lineHeightEm: 1.08,
-    },
-    {
-      role: 'wordmark',
-      textSource: 'wordmark',
-      x: 0.5,
-      y: 0.71,
-      widthFrac: 0.4,
-      sizeFrac: 0.022,
-      font: 'mono',
-      align: 'center',
-      color: 'ink',
-      upper: true,
-      letterSpacingEm: 0.18,
-    },
-  ],
+    'The CENTER of the frame holds a solid-color paper slab; the photo lives in the borders / edges. The slab is the visual anchor — keep its interior PURE solid color, no texture.',
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+QUOTE SLAB LAYOUT
+Composition: a solid rectangular slab fills the center 70% of the frame in color ${brandColors.paper}. The background bleeds around it (~15% margin on all sides) with the focal scene/texture.
+
+On the slab, typography centered both horizontally and vertically:
+${slotLine('Pull-quote (' + brandFontHint + ', italic, weight 500, color ' + brandColors.ink + ', ~7% tall, wraps to 3-5 lines, enclosed in typographic quote marks)', copy.headline, 'main body of the slab')}
+${slotLine('Attribution (small sans-serif, color ' + brandColors.ink + ' at 60% opacity, ~1.8% tall, prefixed with an em-dash "—")', copy.subheadline, 'centered below the quote, ~10% gap above it')}
+- Wordmark "${escapeForPrompt(brandWordmark)}" — small mono UPPERCASE, color ${brandColors.accent}, ~1.5% tall, bottom-center of the slab with ~5% margin from slab bottom.
+
+The slab has a faint 1px border of ${brandColors.ink} at 20% opacity. All text spelled correctly.
+`.trim(),
 };
 
-/**
- * Layout 4 — announcement-banner
- *   Eyebrow + Headline + Subheadline, all left-aligned, sitting low in
- *   the frame. Used for: email-header, email-banner-wide, banner-tw,
- *   launch announcements.
- */
-const announcementBanner: Layout = {
+// ─── Layout 4 — announcement-banner ──────────────────────────────────
+
+const announcementBanner: LayoutPromptTemplate = {
   id: 'announcement-banner',
   label: 'Announcement · banner',
-  slots: ['eyebrow', 'headline', 'subheadline'],
+  slots: ['eyebrow', 'headline', 'cta'],
   negativeSpaceHint:
-    'Keep the LOWER 45% of the frame visually CALM — soft tonal field, low contrast, no busy details. The composition can be lively in the upper 55% (gradients, accent shapes, texture), but the bottom band hosts left-aligned typography and must read clearly over it.',
-  blocks: [
-    {
-      role: 'eyebrow',
-      textSource: 'eyebrow',
-      x: 0.05,
-      y: 0.62,
-      widthFrac: 0.6,
-      sizeFrac: 0.05,
-      font: 'mono',
-      align: 'left',
-      color: 'ink',
-      upper: true,
-      letterSpacingEm: 0.18,
-    },
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.05,
-      y: 0.7,
-      widthFrac: 0.6,
-      sizeFrac: 0.13,
-      font: 'display',
-      align: 'left',
-      color: 'ink',
-      weight: 600,
-      letterSpacingEm: -0.02,
-      lineHeightEm: 1.04,
-    },
-    {
-      role: 'subheadline',
-      textSource: 'subheadline',
-      x: 0.05,
-      y: 0.86,
-      widthFrac: 0.6,
-      sizeFrac: 0.045,
-      font: 'body',
-      align: 'left',
-      color: 'ink',
-      weight: 400,
-      lineHeightEm: 1.3,
-    },
-  ],
+    'Horizontal banner composition — the visual breaks into three vertical bands (LEFT decorative texture, CENTER typography zone, RIGHT decorative texture). Center stays calm.',
+  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+ANNOUNCEMENT BANNER LAYOUT
+Composition: horizontal three-band split. Left and right thirds carry small decorative elements (icons, geometric shapes, accent strokes) in ${brandColors.accent}. Center third hosts the announcement copy on ${brandColors.paper}.
+
+Typography centered in the middle band:
+${slotLine('Eyebrow (small mono UPPERCASE, color ' + brandColors.accent + ', tracking ~0.22em, ~1.8% tall)', copy.eyebrow, 'just above headline')}
+${slotLine('Headline (' + brandFontHint + ', weight 600, color ' + brandColors.ink + ', ~6% tall, max 2 lines, sentence case)', copy.headline, 'visual center of the frame')}
+${slotLine('CTA (small mono UPPERCASE, color ' + brandColors.paper + ' on ' + brandColors.ink + ' pill button, ~2.5% tall)', copy.cta, 'centered below headline with ~3% gap')}
+
+Decorative side elements should hint at the brief's subject but never compete with the centered text. Spelling exact.
+`.trim(),
 };
 
-/**
- * Layout 5 — card-soft
- *   A floating brand-colored card with a soft drop shadow sits centered
- *   over the AI background. Headline + small sub inside the card. The
- *   IG-native aesthetic — feels like a curated product post, not a
- *   slide deck.
- *   Used for: post-ig (DEFAULT), square, og-square, linkedin-post-square.
- */
-const cardSoft: Layout = {
+// ─── Layout 5 — card-soft ────────────────────────────────────────────
+
+const cardSoft: LayoutPromptTemplate = {
   id: 'card-soft',
   label: 'Card · soft',
-  // 4 slots: eyebrow above the card, headline + sub inside, wordmark
-  // below the card. Reads like a print magazine cover stamp.
-  slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
+  slots: ['eyebrow', 'headline', 'subheadline', 'cta', 'wordmark'],
   negativeSpaceHint:
-    'Center-weighted composition with RICH color and form spilling out from behind a centered floating card. The card will mask only the middle ~40% of the frame — push the most interesting part of the image into the VISIBLE HALO around the centered card: corners, edges, top quarter, bottom quarter. Photographic depth, gradient lighting, organic textures. Avoid flat solid fields.',
-  // Smaller card so the AI image dominates the frame — was 0.84×0.56,
-  // now 0.62×0.45 centered (with the y bumped to 0.275 so the card sits
-  // optical-centre). Lets the AI background read clearly on all four
-  // sides of the card.
-  backdrops: [
-    {
-      x: 0.19,
-      y: 0.275,
-      widthFrac: 0.62,
-      heightFrac: 0.45,
-      color: 'paper',
-      opacity: 1,
-      cornerRadiusFrac: 0.022,
-      shadow: { blurPx: 32, offsetY: 22, opacity: 0.24 },
-    },
-  ],
-  blocks: [
-    // Eyebrow ABOVE the card — mono uppercase on the AI image directly.
-    // Color = accent so it pops against the photo regardless of bg tone.
-    {
-      role: 'eyebrow',
-      textSource: 'eyebrow',
-      x: 0.5,
-      y: 0.18,
-      widthFrac: 0.7,
-      sizeFrac: 0.02,
-      font: 'mono',
-      align: 'center',
-      color: 'accent',
-      upper: true,
-      letterSpacingEm: 0.2,
-    },
-    // Headline INSIDE the card, top half.
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.5,
-      y: 0.36,
-      widthFrac: 0.5,
-      sizeFrac: 0.056,
-      font: 'display',
-      align: 'center',
-      color: 'ink',
-      weight: 600,
-      letterSpacingEm: -0.02,
-      lineHeightEm: 1.05,
-    },
-    // Subheadline INSIDE the card, bottom half.
-    {
-      role: 'subheadline',
-      textSource: 'subheadline',
-      x: 0.5,
-      y: 0.57,
-      widthFrac: 0.48,
-      sizeFrac: 0.022,
-      font: 'body',
-      align: 'center',
-      color: 'ink',
-      weight: 400,
-      lineHeightEm: 1.4,
-    },
-    // Wordmark BELOW the card — small mono, low-contrast over photo.
-    {
-      role: 'wordmark',
-      textSource: 'wordmark',
-      x: 0.5,
-      y: 0.78,
-      widthFrac: 0.6,
-      sizeFrac: 0.018,
-      font: 'mono',
-      align: 'center',
-      color: 'paper',
-      upper: true,
-      letterSpacingEm: 0.22,
-    },
-  ],
-  sequenceHint: (frameIndex, totalFrames) =>
-    [
-      `Frame ${frameIndex + 1} of ${totalFrames} — continuation of the prior frame.`,
-      'The centered floating card masks the middle ~40% of the frame; that masked area is irrelevant.',
-      'In the VISIBLE HALO around the card: preserve the palette and overall composition; let the photographic texture/lighting drift slowly across frames (a gentle pan / focus pull / colour temperature shift).',
-      'Do NOT redesign the halo elements — evolve them.',
-    ].join(' '),
+    'A card-like rectangle fills the inner 75% of the frame (margins of ~12% on all sides). Within the card, the upper 30% is reserved for a visual element; the lower 70% is the copy stack.',
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+SOFT CARD LAYOUT
+Composition: a card-like rectangle occupies the inner 75% of the frame, color ${brandColors.paper}, with a SOFT shadow underneath (~10px blur, 8% opacity, offset down-right). Outside the card the frame is a complementary muted tone of ${brandColors.paper}.
+
+Inside the card:
+- TOP 30%: a single small visual element (icon, illustration, geometric shape) in ${brandColors.accent}, centered horizontally.
+- BOTTOM 70%: typography stacked, left-aligned with ~8% padding from card-left:
+${slotLine('Eyebrow (mono UPPERCASE, color ' + brandColors.accent + ', tracking ~0.18em, ~1.5% tall)', copy.eyebrow, 'first line of the stack')}
+${slotLine('Headline (' + brandFontHint + ', weight 600, color ' + brandColors.ink + ', ~5.5% tall, max 3 lines)', copy.headline, 'just below eyebrow')}
+${slotLine('Subheadline (sans-serif, regular, color ' + brandColors.ink + ' at 70% opacity, ~2% tall, max 2 lines)', copy.subheadline, 'below headline')}
+${slotLine('CTA (mono UPPERCASE, color ' + brandColors.paper + ' on ' + brandColors.ink + ' pill button, ~2.2% tall)', copy.cta, 'bottom-left of the card')}
+- Wordmark "${escapeForPrompt(brandWordmark)}" — tiny mono UPPERCASE, color ${brandColors.ink} at 50% opacity, bottom-right corner of the card.
+
+Spelling exact, kerning crisp.
+`.trim(),
 };
 
-/**
- * Layout 6 — quote-large
- *   Full-bleed solid brand color (paper) with one huge italic phrase.
- *   The AI background is OPTIONAL noise — we paint a full-frame paper
- *   rect on top of it before the typography. Wordmark below in mono.
- *   Used for: square, post-ig (quote variants), reel-cover.
- */
-const quoteLarge: Layout = {
+// ─── Layout 6 — quote-large ──────────────────────────────────────────
+
+const quoteLarge: LayoutPromptTemplate = {
   id: 'quote-large',
   label: 'Quote · large',
-  slots: ['headline', 'wordmark'],
+  slots: ['headline', 'subheadline'],
   negativeSpaceHint:
-    'The composition will be covered by a full-bleed solid brand color before the typography lands — the AI background only contributes very subtle visible noise (paper texture, soft grain) if any. Generate a tonal, mostly-flat field of the brand cream tone with VERY soft texture. No focal elements, no shapes — just a quiet field.',
-  backdrops: [
-    {
-      x: 0,
-      y: 0,
-      widthFrac: 1,
-      heightFrac: 1,
-      color: 'paper',
-      opacity: 0.97,
-    },
-  ],
-  blocks: [
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.5,
-      y: 0.32,
-      widthFrac: 0.78,
-      sizeFrac: 0.13,
-      font: 'italic',
-      align: 'center',
-      color: 'ink',
-      letterSpacingEm: -0.025,
-      lineHeightEm: 1.0,
-    },
-    {
-      role: 'wordmark',
-      textSource: 'wordmark',
-      x: 0.5,
-      y: 0.86,
-      widthFrac: 0.4,
-      sizeFrac: 0.022,
-      font: 'mono',
-      align: 'center',
-      color: 'accent',
-      upper: true,
-      letterSpacingEm: 0.22,
-    },
-  ],
+    'Entire frame is type-led — no card, no slab. The visual is a subtle photographic or textural background that the giant quote sits ON TOP OF. Background must read at ~70% the visual weight of the text.',
+  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+LARGE QUOTE LAYOUT (NO CARD)
+Composition: full-frame photographic or textural background tinted ${brandColors.paper}. The text dominates — background reads at ~70% weight of the typography.
+
+Typography:
+${slotLine('Massive pull-quote (' + brandFontHint + ', italic, weight 500, color ' + brandColors.ink + ', ~12% tall, leading ~1.05x, wraps to 3-5 lines, enclosed in typographic quote marks)', copy.headline, 'centered horizontally, occupies vertical center 60% of the frame')}
+${slotLine('Attribution (sans-serif, regular, color ' + brandColors.ink + ' at 65% opacity, ~2% tall, prefixed with em-dash "—")', copy.subheadline, 'centered below the quote, ~8% gap')}
+
+The quote should feel hand-set by a designer — character-aware kerning, no widows, no orphans. Spelling perfect.
+`.trim(),
 };
 
-/**
- * Layout 7 — editorial-margin
- *   Typography column on the LEFT 30% of the frame, AI imagery owns the
- *   right 70%. A subtle paper rect on the left hides AI scribbles in
- *   that column. Picks up the magazine-spread feel.
- *   Used for: hero, og, linkedin-post-landscape, youtube-thumbnail.
- */
-const editorialMargin: Layout = {
+// ─── Layout 7 — editorial-margin ─────────────────────────────────────
+
+const editorialMargin: LayoutPromptTemplate = {
   id: 'editorial-margin',
   label: 'Editorial · margin',
-  slots: ['eyebrow', 'headline', 'subheadline'],
+  slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
-    'Compose the visual subject — gradients, focal elements, texture, hero shapes — entirely within the RIGHT 70% of the frame (from x=30% to x=100%). The LEFT 30% column should be a quiet field of the brand cream tone with optional very-soft texture, hosting no recognisable shapes or colour shifts. This becomes the typography margin.',
-  backdrops: [
-    {
-      x: 0,
-      y: 0,
-      widthFrac: 0.34,
-      heightFrac: 1,
-      color: 'paper',
-      opacity: 0.96,
-    },
-  ],
-  blocks: [
-    {
-      role: 'eyebrow',
-      textSource: 'eyebrow',
-      x: 0.04,
-      y: 0.12,
-      widthFrac: 0.26,
-      sizeFrac: 0.022,
-      font: 'mono',
-      align: 'left',
-      color: 'accent',
-      upper: true,
-      letterSpacingEm: 0.2,
-    },
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.04,
-      y: 0.2,
-      widthFrac: 0.26,
-      sizeFrac: 0.062,
-      font: 'display',
-      align: 'left',
-      color: 'ink',
-      weight: 600,
-      letterSpacingEm: -0.02,
-      lineHeightEm: 1.04,
-    },
-    {
-      role: 'subheadline',
-      textSource: 'subheadline',
-      x: 0.04,
-      y: 0.78,
-      widthFrac: 0.26,
-      sizeFrac: 0.022,
-      font: 'body',
-      align: 'left',
-      color: 'ink',
-      weight: 400,
-      lineHeightEm: 1.4,
-    },
-  ],
+    'Left 25% column is a narrow editorial margin (metadata strip). Right 75% is the main editorial column. The narrow column hosts mono UPPERCASE marginalia; the wide column hosts the editorial body.',
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+EDITORIAL MARGIN LAYOUT
+Composition: a vertical 1-px rule of ${brandColors.ink} at 30% opacity divides the frame into a LEFT 25% margin column and a RIGHT 75% main column. Background is ${brandColors.paper}, with a small photographic / textural element in the upper-right corner of the main column.
+
+LEFT margin column (typography aligned to the left edge of the column, vertically stacked from top):
+${slotLine('Eyebrow (small mono UPPERCASE, color ' + brandColors.ink + ', tracking ~0.2em, ~1.5% tall)', copy.eyebrow, 'near top of margin column')}
+- Wordmark "${escapeForPrompt(brandWordmark)}" — tiny mono UPPERCASE, color ${brandColors.accent}, ~1.3% tall, near bottom of margin column.
+
+RIGHT main column (left-aligned, ~5% margin from the dividing rule):
+${slotLine('Headline (' + brandFontHint + ', weight 600, color ' + brandColors.ink + ', ~7% tall, max 4 lines, tight leading)', copy.headline, 'upper third of main column')}
+${slotLine('Subheadline (sans-serif, regular, color ' + brandColors.ink + ' at 75% opacity, ~2.2% tall, max 4 lines)', copy.subheadline, 'middle third of main column, ~6% gap below headline')}
+
+Magazine-grade typography. Spelling exact.
+`.trim(),
 };
 
-/**
- * Layout 8 — feature-stack
- *   Mono accent dot · eyebrow · large headline · supporting line.
- *   All centered, generously spaced. The "feature post" aesthetic for
- *   product launches and announcements.
- *   Used for: post-ig, square, linkedin-post-square, og-square.
- */
-const featureStack: Layout = {
+// ─── Layout 8 — feature-stack ────────────────────────────────────────
+
+const featureStack: LayoutPromptTemplate = {
   id: 'feature-stack',
   label: 'Feature · stack',
-  slots: ['eyebrow', 'headline', 'subheadline'],
+  slots: ['eyebrow', 'headline', 'subheadline', 'cta'],
   negativeSpaceHint:
-    'Keep the central 70% of the frame visually CALM — soft tones, low contrast, no busy details. The composition will host centered typography with generous breathing room across most of the frame. Push texture and accent gradients toward the extreme corners only; the middle should feel airy and uncluttered.',
-  backdrops: [
-    // Small accent dot above the eyebrow — drawn as a tiny rect; the
-    // SVG renderer treats this as a solid block. It's the "decoration"
-    // that makes the layout feel intentional vs. arbitrary.
-    {
-      x: 0.49,
-      y: 0.24,
-      widthFrac: 0.02,
-      heightFrac: 0.02,
-      color: 'accent',
-      opacity: 1,
-      cornerRadiusFrac: 0.01,
-    },
-  ],
-  blocks: [
-    {
-      role: 'eyebrow',
-      textSource: 'eyebrow',
-      x: 0.5,
-      y: 0.3,
-      widthFrac: 0.7,
-      sizeFrac: 0.022,
-      font: 'mono',
-      align: 'center',
-      color: 'accent',
-      upper: true,
-      letterSpacingEm: 0.22,
-    },
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.5,
-      y: 0.4,
-      widthFrac: 0.78,
-      sizeFrac: 0.078,
-      font: 'display',
-      align: 'center',
-      color: 'ink',
-      weight: 600,
-      letterSpacingEm: -0.02,
-      lineHeightEm: 1.04,
-    },
-    {
-      role: 'subheadline',
-      textSource: 'subheadline',
-      x: 0.5,
-      y: 0.66,
-      widthFrac: 0.64,
-      sizeFrac: 0.026,
-      font: 'body',
-      align: 'center',
-      color: 'ink',
-      weight: 400,
-      lineHeightEm: 1.4,
-    },
-  ],
+    'Top 25% of the frame holds a visual element (illustration, photo, geometric shape). Middle 50% is the typography stack. Bottom 25% is breathing room with a small CTA.',
+  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+FEATURE STACK LAYOUT
+Composition: vertical three-band — TOP 25% visual element on ${brandColors.paper} background, MIDDLE 50% typography zone, BOTTOM 25% breathing room with a single CTA.
+
+Typography centered horizontally:
+${slotLine('Eyebrow (mono UPPERCASE, color ' + brandColors.accent + ', tracking ~0.2em, ~1.8% tall)', copy.eyebrow, 'top of the middle band, ~30% from frame top')}
+${slotLine('Headline (' + brandFontHint + ', weight 700, color ' + brandColors.ink + ', ~7% tall, max 3 lines, tight leading)', copy.headline, 'below eyebrow, dominant in the middle band')}
+${slotLine('Subheadline (sans-serif, regular, color ' + brandColors.ink + ' at 70% opacity, ~2% tall, max 3 lines)', copy.subheadline, 'below headline, ~4% gap')}
+${slotLine('CTA (mono UPPERCASE, color ' + brandColors.paper + ' on ' + brandColors.ink + ' pill button)', copy.cta, 'centered in the bottom band')}
+
+Spelling exact, kerning crisp.
+`.trim(),
 };
 
-/**
- * Layout 9 — editorial-collage
- *   Magazine-spread aesthetic. No card backdrop. The AI image fills the
- *   frame; typography lands directly on it, asymmetric. Oversized italic
- *   headline bleeds into the lower-left third, mono eyebrow top-left,
- *   sub bottom-left, wordmark bottom-right. The new flagship for IG
- *   posts (post-ig default).
- */
-const editorialCollage: Layout = {
+// ─── Layout 9 — editorial-collage ────────────────────────────────────
+
+const editorialCollage: LayoutPromptTemplate = {
   id: 'editorial-collage',
   label: 'Editorial · collage',
   slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
-    'Compose with intentional empty space in the LEFT HALF of the frame, especially the lower-left quadrant. Push the strong subject — focal element, color block, hero shape — into the RIGHT 40% of the frame. Magazine-spread aesthetic: ONE clear focal element, photographic depth, planned negative space on the left where oversized typography will land. Avoid flat abstract gradients.',
-  blocks: [
-    {
-      // Eyebrow handed off to the AI — small editorial label printed
-      // inside the image rather than overlaid. Natural integration with
-      // the photo's grain / lighting beats vector-perfect typography
-      // at this scale.
-      role: 'aiAccent',
-      textSource: 'eyebrow',
-      x: 0.06,
-      y: 0.08,
-      widthFrac: 0.4,
-      sizeFrac: 0.018,
-      font: 'mono',
-      align: 'left',
-      color: 'ink',
-      upper: true,
-      letterSpacingEm: 0.22,
-      promptIntegration:
-        'In the UPPER-LEFT corner of the frame (approximately 6% from the left edge, 8% from the top), integrate a small editorial label in a clean sans-serif mono font, UPPERCASE, ink-toned, approximately 1.8% of frame height tall, with generous letter-spacing. Treat it as printed on the image — let it pick up the paper grain / lighting subtly.',
-    },
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.05,
-      y: 0.5,
-      widthFrac: 0.62,
-      // Oversized — italic display at 16% of frame height. Auto-fit
-      // in composeImage shrinks if long Spanish copy would overflow.
-      sizeFrac: 0.16,
-      heightFrac: 0.4,
-      font: 'italic',
-      align: 'left',
-      color: 'ink',
-      letterSpacingEm: -0.03,
-      lineHeightEm: 0.95,
-    },
-    {
-      role: 'subheadline',
-      textSource: 'subheadline',
-      x: 0.06,
-      y: 0.86,
-      widthFrac: 0.56,
-      sizeFrac: 0.024,
-      font: 'body',
-      align: 'left',
-      color: 'ink',
-      weight: 400,
-      lineHeightEm: 1.35,
-    },
-    {
-      role: 'wordmark',
-      textSource: 'wordmark',
-      x: 0.95,
-      y: 0.94,
-      widthFrac: 0.3,
-      sizeFrac: 0.016,
-      font: 'mono',
-      align: 'right',
-      color: 'ink',
-      upper: true,
-      letterSpacingEm: 0.22,
-    },
-  ],
-  sequenceHint: (frameIndex, totalFrames) =>
-    [
-      `Frame ${frameIndex + 1} of ${totalFrames} — continuation of the prior frame.`,
-      'Preserve the EXACT palette, lighting, and overall composition.',
-      `Evolve ONE element: the focal subject in the right 40% migrates ~${Math.round((frameIndex / Math.max(1, totalFrames - 1)) * 15)}% toward the centre and grows slightly larger; the negative space on the left progressively contracts as text content arrives.`,
-      'Do NOT redesign. Read as a slow editorial pan: same scene, evolved beat.',
-    ].join(' '),
+    'Asymmetric editorial composition — no center card, no balanced grid. Focal subject occupies the RIGHT 55%. LEFT 45% is breathing room with intentional negative space.',
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+EDITORIAL COLLAGE LAYOUT
+Composition: asymmetric, magazine-cover energy. Focal subject occupies the right 55% of the frame with photographic depth. Left 45% is intentional negative space on ${brandColors.paper}.
+
+Typography (positioned with editorial confidence — NOT centered, NOT gridded):
+${slotLine('Eyebrow (small mono UPPERCASE, color ' + brandColors.ink + ', tracking ~0.22em, ~1.8% tall)', copy.eyebrow, 'UPPER-LEFT corner, approximately 6% from the left edge and 8% from the top — treat as printed editorial metadata')}
+${slotLine('Headline (oversized italic ' + brandFontHint + ', weight 600, color ' + brandColors.ink + ', ~10% tall, dramatic leading, wraps to 3-4 lines)', copy.headline, 'LOWER-LEFT area, starting around 50% from top — should naturally bleed onto the right-side focal composition without losing legibility')}
+${slotLine('Subheadline (sans-serif, regular, color ' + brandColors.ink + ' at 80% opacity, ~2% tall, max 2 lines)', copy.subheadline, 'just below the headline')}
+- Wordmark "${escapeForPrompt(brandWordmark)}" — tiny mono UPPERCASE, color ${brandColors.accent}, ~1.5% tall, BOTTOM-RIGHT corner with ~3% margin.
+
+Typography is a first-class compositional element, not an overlay. Spelling exact.
+`.trim(),
 };
 
-/**
- * Layout 10 — text-mask-cutout
- *   Magazine-style "image inside letterforms". The AI image is revealed
- *   ONLY through a single huge headline word; the rest of the canvas is
- *   solid paper. Tiny wordmark in the corner is the only literal text
- *   on top of the cutout.
- *
- *   composeImage's SVG mask pipeline handles this — the `mask` field
- *   tells it which TextBlock becomes the cutout shape. That block is
- *   NOT rendered as visible text (it's the mask); its geometry just
- *   defines where the image bleeds through.
- *
- *   Best with high-contrast / chunky AI compositions: fine detail
- *   reads as mush inside the letter shapes. The negativeSpaceHint
- *   pushes the model toward bold gradients + chunky color blocks.
- */
-const textMaskCutout: Layout = {
+// ─── Layout 10 — text-mask-cutout ────────────────────────────────────
+
+const textMaskCutout: LayoutPromptTemplate = {
   id: 'text-mask-cutout',
   label: 'Text · mask cutout',
-  slots: ['headline', 'wordmark'],
+  slots: ['headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
-    'HIGH CONTRAST composition with bold, chunky shapes — most of this image will only be visible inside large letterforms, so fine detail and small features will read as visual noise. Strong color blocks, dramatic gradients, simple silhouettes. Think saturated abstract art, not photoreal. ONE clear focal energy; avoid balanced symmetric noise.',
-  blocks: [
-    {
-      role: 'headline',
-      textSource: 'headline',
-      // The cutout block — composeImage detects mask.textBlock === 'headline'
-      // and uses this geometry to build the SVG <mask>. Position centered,
-      // huge font, single short word (REACHY / LAUNCH / etc).
-      x: 0.5,
-      y: 0.5,
-      widthFrac: 0.94,
-      sizeFrac: 0.32,
-      font: 'display',
-      align: 'center',
-      color: 'ink',
-      weight: 700,
-      letterSpacingEm: -0.04,
-      lineHeightEm: 0.92,
-    },
-    {
-      role: 'wordmark',
-      textSource: 'wordmark',
-      x: 0.95,
-      y: 0.94,
-      widthFrac: 0.3,
-      sizeFrac: 0.016,
-      font: 'mono',
-      align: 'right',
-      color: 'ink',
-      upper: true,
-      letterSpacingEm: 0.22,
-    },
-  ],
-  mask: { kind: 'text-fill-image', textBlock: 'headline' },
-  sequenceHint: (frameIndex, totalFrames) =>
-    [
-      `Frame ${frameIndex + 1} of ${totalFrames} — continuation of the prior frame.`,
-      'Preserve the EXACT palette and overall composition.',
-      'The image revealed inside the letterforms shifts perspective slightly, like a slow parallax pan — same scene, viewed from a marginally different angle. Bold gradients and chunky color blocks remain dominant.',
-      'No element should redraw — only shift position by ~5–10% across the frame.',
-    ].join(' '),
+    'Background fills the entire frame with ${brandColors.paper}. A single dominant word forms a massive cut-out revealing the focal subject through the letterforms.',
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+TEXT MASK CUTOUT LAYOUT
+Composition: background is solid ${brandColors.paper}. Foreground: ONE dominant word from the headline is rendered as MASSIVE cut-out letterforms (filling ~75% of frame width, vertically centered) revealing a photographic / textural scene INSIDE the letterforms themselves — the letters are windows into the focal subject.
+
+Typography:
+${slotLine('Cut-out word (' + brandFontHint + ', weight 800, ~30% of frame height, letters act as image-masks, the OUTLINE of the letters is ' + brandColors.ink + ' at 20% opacity)', copy.headline, 'centered horizontally, dominating the visual')}
+${slotLine('Subheadline (small sans-serif, color ' + brandColors.ink + ', ~2% tall, max 2 lines)', copy.subheadline, 'below the cut-out word, centered, ~5% gap')}
+- Wordmark "${escapeForPrompt(brandWordmark)}" — tiny mono UPPERCASE, color ${brandColors.accent}, top-right corner with ~3% margin.
+
+If the headline has multiple words, pick ONE strong word for the cut-out and place the others on a smaller secondary line below. Spelling exact.
+`.trim(),
 };
 
-/**
- * Layout 11 — badge-stamp
- *   Editorial poster: hero AI image full-frame + small circular accent
- *   "stamp" sticker overlay on the right edge. Headline italic on the
- *   top of the photo; eyebrow lives INSIDE the stamp circle.
- *
- *   The "circle" is a rounded rect with cornerRadiusFrac=0.5 — produces
- *   a true circle when the rect is square.
- */
-const badgeStamp: Layout = {
+// ─── Layout 11 — badge-stamp ─────────────────────────────────────────
+
+const badgeStamp: LayoutPromptTemplate = {
   id: 'badge-stamp',
   label: 'Badge · stamp',
-  slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
+  slots: ['eyebrow', 'headline', 'subheadline'],
   negativeSpaceHint:
-    'Photographic depth-of-field — SHARP focal subject in the LEFT 60% of the frame (a clear hero shape, character, product, or composition centerpiece). Soft bokeh / gentle gradient / negative space in the RIGHT 40% where a circular brand stamp will be overlaid. The subject should feel like a magazine cover photo, not a generic stock background.',
-  // The stamp is a ~24% diameter circle anchored mid-right. The blocks[]
-  // section places the eyebrow INSIDE this circle (same x/y, white-on-
-  // accent).
-  backdrops: [
-    {
-      x: 0.62,
-      y: 0.4,
-      widthFrac: 0.24,
-      heightFrac: 0.24,
-      color: 'accent',
-      opacity: 1,
-      // 50% of width → perfect circle when widthFrac === heightFrac (it
-      // does, both are 0.24 of frame width here — careful: heightFrac is
-      // a fraction of HEIGHT so on a 1080×1350 portrait the rect won't
-      // actually be square. composeImage uses width × frame-width and
-      // height × frame-height, so for portrait we'll get an ellipse.
-      // Accept this — looks intentional on most aspect ratios; users who
-      // want a true circle on portrait can pick square format.)
-      cornerRadiusFrac: 0.5,
-      shadow: { blurPx: 20, offsetY: 10, opacity: 0.18 },
-    },
-  ],
-  blocks: [
-    // Headline at top of frame — italic Instrument Serif, max 4 words.
-    {
-      role: 'headline',
-      textSource: 'headline',
-      x: 0.05,
-      y: 0.08,
-      widthFrac: 0.5,
-      sizeFrac: 0.075,
-      font: 'italic',
-      align: 'left',
-      color: 'ink',
-      letterSpacingEm: -0.025,
-      lineHeightEm: 1.0,
-    },
-    // Eyebrow inside the stamp — AI paints the label directly onto
-    // the orange/accent disc so it picks up the stamp's printed feel.
-    {
-      role: 'aiAccent',
-      textSource: 'eyebrow',
-      x: 0.74,
-      y: 0.5,
-      widthFrac: 0.22,
-      sizeFrac: 0.02,
-      font: 'mono',
-      align: 'center',
-      color: 'paper',
-      upper: true,
-      letterSpacingEm: 0.18,
-      lineHeightEm: 1.2,
-      promptIntegration:
-        'Inside the orange/accent-colored circular stamp on the right side of the frame (center around 74% from the left edge, 50% from the top), render a short label in clean sans-serif mono UPPERCASE text, paper-colored so it reads against the accent disc. Arrange the text as if printed/inked into the stamp — slight imperfection, generous letter-spacing, ink-on-paper feel.',
-    },
-    // Subheadline below stamp — small italic, max 2 lines, color ink.
-    {
-      role: 'subheadline',
-      textSource: 'subheadline',
-      x: 0.62,
-      y: 0.74,
-      widthFrac: 0.32,
-      sizeFrac: 0.022,
-      font: 'italic',
-      align: 'center',
-      color: 'ink',
-      lineHeightEm: 1.3,
-    },
-    // Wordmark bottom-left mono.
-    {
-      role: 'wordmark',
-      textSource: 'wordmark',
-      x: 0.05,
-      y: 0.94,
-      widthFrac: 0.4,
-      sizeFrac: 0.016,
-      font: 'mono',
-      align: 'left',
-      color: 'ink',
-      upper: true,
-      letterSpacingEm: 0.22,
-    },
-  ],
-  sequenceHint: (frameIndex, totalFrames) =>
-    [
-      `Frame ${frameIndex + 1} of ${totalFrames} — continuation of the prior frame.`,
-      'Preserve the EXACT palette, lighting direction, focal subject identity.',
-      `The photographic subject in the left 60% pulls into slightly tighter focus and shifts pose by ~5°. The right 40% bokeh tone evolves marginally (a touch warmer or cooler) as the sequence advances.`,
-      'No element should redraw — same scene, one beat later.',
-    ].join(' '),
+    'Asymmetric layout — left half is typography, right half is a circular accent stamp containing the eyebrow as inked text. Background is paper-toned.',
+  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+BADGE STAMP LAYOUT
+Composition: background is ${brandColors.paper}. Right half of the frame contains a circular accent stamp/disc in ${brandColors.accent} (~24% of frame width, vertically centered, soft printed-stamp character — ink-on-paper feel, slight imperfection at the edges). Left half hosts the main typography.
+
+Typography:
+${slotLine('Headline (italic ' + brandFontHint + ', weight 600, color ' + brandColors.ink + ', ~7.5% tall, tight leading, max 4 words)', copy.headline, 'UPPER-LEFT of the frame, ~5% from left, ~8% from top')}
+${slotLine('Subheadline (small italic ' + brandFontHint + ', color ' + brandColors.ink + ', ~2.2% tall, max 2 lines)', copy.subheadline, 'BELOW THE STAMP, ~62% from left, ~74% from top')}
+
+INSIDE the accent stamp/disc on the right:
+${slotLine('Eyebrow (mono UPPERCASE, color ' + brandColors.paper + ' so it reads against the accent disc, tracking ~0.18em, ~2% tall)', copy.eyebrow, 'centered inside the disc, slight curve or printed-stamp feel — ink-on-paper character')}
+
+Spelling exact. Stamp has the soft, slightly imperfect character of a hand-pressed ink stamp.
+`.trim(),
 };
 
-export const LAYOUTS: Record<LayoutId, Layout> = {
+// ─── Registry ────────────────────────────────────────────────────────
+
+export const LAYOUTS: Record<LayoutId, LayoutPromptTemplate> = {
   'hero-centered': heroCentered,
   'hero-split-left': heroSplitLeft,
   'quote-slab': quoteSlab,
@@ -1012,22 +408,13 @@ export const LAYOUTS: Record<LayoutId, Layout> = {
 
 export const LAYOUT_IDS = Object.keys(LAYOUTS) as LayoutId[];
 
-/**
- * Default layout per format. The picker can override per generation but
- * this matrix is what runs when the user doesn't pick one. Picked to
- * match how each format is typically used in marketing collateral.
- *
- * Wide formats → split-left or announcement-banner.
- * Square / portrait → hero-centered or quote-slab.
- */
+/** Per-format default layout. The picker UI offers all layouts, but
+ *  when a generation comes in without an explicit layoutId we pick
+ *  the format's natural fit (squares get hero-centered, 9:16 reels
+ *  get feature-stack, etc.). */
 export const DEFAULT_LAYOUT_FOR_FORMAT: Record<ImageFormat, LayoutId> = {
   hero: 'editorial-margin',
   og: 'editorial-margin',
-  // post-ig default: editorial-collage. Card-soft was a step up from
-  // hero-centered but still leaned on a centered backdrop card; the
-  // collage treatment removes that crutch and lets the AI background
-  // carry the visual weight (asymmetric italic display headline bleeds
-  // onto the photo). card-soft remains available as an explicit pick.
   'post-ig': 'editorial-collage',
   square: 'feature-stack',
   'og-square': 'card-soft',
@@ -1042,10 +429,20 @@ export const DEFAULT_LAYOUT_FOR_FORMAT: Record<ImageFormat, LayoutId> = {
   'email-banner-wide': 'announcement-banner',
 };
 
-/** Resolve a layout id (or a format's default) to its definition.
- *  Used at the entry to composeImage so callers can pass either. */
-export function getLayout(input: { layoutId?: LayoutId; format?: ImageFormat }): Layout {
+export function getLayout(input: { layoutId?: LayoutId; format?: ImageFormat }): LayoutPromptTemplate {
   if (input.layoutId) return LAYOUTS[input.layoutId];
   if (input.format) return LAYOUTS[DEFAULT_LAYOUT_FOR_FORMAT[input.format]];
   return LAYOUTS['hero-centered'];
+}
+
+/** Sequence-directive resolver bound to a specific layout — the form
+ *  the worker uses per-frame in sequence mode. Layouts may override
+ *  via their own sequenceDirective; otherwise the generic
+ *  narrow-preserve + explicit-action language applies. */
+export function sequenceDirectiveFor(
+  layout: LayoutPromptTemplate,
+  input: SequenceDirectiveInput,
+): string {
+  if (layout.sequenceDirective) return layout.sequenceDirective(input);
+  return genericSequenceDirective(input);
 }

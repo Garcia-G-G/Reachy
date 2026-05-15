@@ -1,13 +1,16 @@
 import 'server-only';
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
-import type { PlannedCopy } from './composeImage';
-import type { Layout, TextRole } from './layoutTemplates';
+import type {
+  LayoutPromptTemplate as Layout,
+  PlannedCopy,
+  TextRole,
+} from './layoutTemplates';
 import { getOpenAI } from './openai';
 
 // Re-export so callers that already import { PlannedCopy } from copyPlanner
-// continue to work. The single source of truth is composeImage.ts since
-// that's the type consumer.
+// continue to work. As of the May-2026 AI-typography pivot the canonical
+// definition lives in layoutTemplates.ts; composeImage.ts is quarantined.
 export type { PlannedCopy };
 
 /**
@@ -44,35 +47,36 @@ export interface PlanCopyResult {
   userPrompt: string;
 }
 
-/** Word-length guidance per role. The planner is told to hit these
- *  ranges; the prompt asks it to write tighter if the brand voice is
- *  punchy. Generous max prevents the JSON validator from rejecting
- *  edge cases that read fine. */
+/** Word-length guidance per role. As of the May-2026 AI-typography
+ *  pivot the AI renders every slot directly inside the image, so legible-
+ *  at-scale takes priority over flexibility. The slots are tighter than
+ *  the overlay era's tolerances — long copy that overflowed an SVG
+ *  block also misrenders at typographic scale in the AI image. */
 const ROLE_LIMITS: Record<TextRole, { minWords: number; maxWords: number; hint: string }> = {
   eyebrow: {
     minWords: 1,
-    maxWords: 5,
-    hint: 'a short eyebrow / kicker — 1-3 words ideal — labelling the category, mood, or angle. Examples: "LAUNCH NOTES", "WHY IT MATTERS", "Q1 RECAP".',
+    maxWords: 4,
+    hint: 'a short eyebrow / kicker — 1-3 words ideal — labelling the category, mood, or angle. Examples: "LAUNCH NOTES", "WHY IT MATTERS", "Q1 RECAP". Will be rendered UPPERCASE inside the image; keep it punchy.',
   },
   headline: {
     minWords: 2,
-    maxWords: 12,
-    hint: 'the main headline — 4-8 words, punchy. Avoid clickbait, sounds-like-a-person, never a complete sentence with period.',
+    maxWords: 9,
+    hint: 'the main headline — 3-7 words, punchy. Renders at large scale INSIDE the image, so MUST be short enough to stay readable. No periods, no clickbait, no complete sentences.',
   },
   subheadline: {
     minWords: 4,
-    maxWords: 22,
-    hint: 'a single supporting line under the headline — 8-18 words, expands the angle. Complete-sentence-style is fine here.',
+    maxWords: 18,
+    hint: 'a single supporting line under the headline — 6-14 words, expands the angle. Renders at smaller scale inside the image; keep it readable without squinting.',
   },
   cta: {
     minWords: 1,
-    maxWords: 5,
+    maxWords: 4,
     hint: 'a call-to-action — 1-3 words, action verb start, no period. Examples: "Read the deep dive", "See how", "Get the playbook".',
   },
   wordmark: {
     minWords: 1,
-    maxWords: 3,
-    hint: 'a small wordmark / signature line — typically the brand name or initiative. 1-2 words ideal.',
+    maxWords: 2,
+    hint: 'a small wordmark / signature line — typically the brand name. 1-2 words, render as-is.',
   },
 };
 
@@ -314,11 +318,7 @@ function buildSequenceSystemPrompt(args: PlanCopySequenceArgs): string {
     'Strict sequence rules:',
     `- The sequence has exactly ${args.frames} frames. Frame 1 SETS UP the idea; frame ${args.frames} LANDS the punch. Intermediate frames carry the build.`,
     '- Wordmark (when the layout has one) is IDENTICAL across every frame — a constant brand stamp.',
-    '- When the layout has an eyebrow slot, number the eyebrows as "№ 1/' +
-      String(args.frames) +
-      ' · …", "№ 2/' +
-      String(args.frames) +
-      ' · …", … so the viewer reads the progression. Each numbered eyebrow gets a SHORT thematic suffix (1-3 words, uppercase).',
+    '- Eyebrows progress naturally — choose what reads best for the brief (could be thematic labels like "INTRO / CONTEXT / SHIFT / RESULT", or chapter feel like "FIRST / NEXT / NOW", or numbered if the brief is genuinely countable). Avoid forced "№ 1/N" formatting unless the content is intrinsically a list.',
     '- Headlines progress: tease in frame 1, develop in mid, resolve in the last. Same length / shape per frame so the typographic rhythm holds.',
     '- Subheadlines may be EMPTY on clean reveal frames (intermediate frames where the visual carries the beat). When non-empty, 8-18 words.',
     '- Do NOT mix languages mid-sequence.',

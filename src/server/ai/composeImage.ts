@@ -1,7 +1,18 @@
+// @ts-nocheck — DEPRECATED (May 2026): quarantined after the full-AI
+// typography pivot. gpt-image-2 now renders the typography directly
+// inside the image; we no longer composite SVG overlays. This file is
+// retained for emergency fallback only — no active code path calls
+// composeImage(). See git log around 2026-05 for the pivot rationale.
 import 'server-only';
 import sharp from 'sharp';
 import { allFontFacesCss, fontFamily } from '@/server/typography/fonts';
-import type { Layout, TextBlock, TextColorRole } from './layoutTemplates';
+
+// LEGACY TYPES — kept here so the file still parses standalone after
+// layoutTemplates.ts dropped the overlay schema. Do not reuse.
+type TextRole = 'eyebrow' | 'headline' | 'subheadline' | 'cta' | 'wordmark';
+type TextColorRole = 'ink' | 'paper' | 'accent';
+type TextBlock = unknown;
+type Layout = unknown;
 
 /**
  * The compositing layer of the marketing-grade pipeline. Takes the AI-

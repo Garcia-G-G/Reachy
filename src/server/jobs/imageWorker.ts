@@ -2,13 +2,17 @@ import 'server-only';
 import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { formatPlanAsBrief, planArtDirection } from '@/server/ai/artDirector';
-import { type BrandColors, composeImage, type PlannedCopy } from '@/server/ai/composeImage';
 import { planCopy, planCopySequence } from '@/server/ai/copyPlanner';
 import { pickBest } from '@/server/ai/critic';
 import { getFormat } from '@/server/ai/formats';
 import { generateImage } from '@/server/ai/imageGen';
-import { getLayout, type LayoutId, resolveSequenceHint } from '@/server/ai/layoutTemplates';
-import { buildImagePrompt, pickVariantAxis, resolveAiAccents } from '@/server/ai/promptBuilder';
+import {
+  type BrandColors,
+  getLayout,
+  type LayoutId,
+  type PlannedCopy,
+} from '@/server/ai/layoutTemplates';
+import { buildImagePrompt, pickVariantAxis } from '@/server/ai/promptBuilder';
 import { enhancePrompt } from '@/server/ai/promptEnhancer';
 import type { VisualStyleKey } from '@/server/ai/visualStyles';
 import { db } from '@/server/db/client';
@@ -160,7 +164,6 @@ export function startImageWorker(): Worker<ImageGenJobData> {
 
         // Outputs the unified DB write below consumes regardless of branch.
         const composedBuffers: Buffer[] = [];
-        const rawUploads: Array<{ key: string; publicUrl: string | null }> = [];
         // For exploration: single PlannedCopy shared across all frames.
         // For sequence:    PlannedCopy[] parallel to composedBuffers.
         let copy: PlannedCopy = {};
@@ -177,10 +180,21 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         let multiStrategyVariantLabels: string[] = [];
         let isMultiStrategy = false;
 
+        // Per-variant prompt-state, persisted into aiPromptState so the
+        // editor can re-render an edited copy version cheaply.
+        const variantPromptStates: Array<{
+          prompt: string;
+          copy: PlannedCopy;
+          layoutId: LayoutId | null;
+          label: string;
+        }> = [];
+
         if (sequenceMode && layout) {
           // ── SEQUENCE MODE ────────────────────────────────────────────────
           // Plan all N frames of copy in one LLM call so the narrative is
-          // coherent (set-up → punch). Each frame's compose uses copies[K].
+          // coherent (set-up → punch). Each frame's prompt is rebuilt
+          // with the per-frame copy + a sequenceDirective so the AI
+          // renders both visual and text continuity in one pass.
           const seqPlan = await planCopySequence({
             idea: idea ?? '',
             layout,
@@ -193,30 +207,49 @@ export function startImageWorker(): Worker<ImageGenJobData> {
           });
           sequenceCopies = seqPlan.copies;
           copyCostCents = seqPlan.costCents;
-          composeCostCents = n; // 1¢ per frame compose floor.
+          // Note: composeCostCents stays at 0 in AI-typography mode —
+          // there's no SVG composite step anymore, the AI renders the
+          // whole asset.
 
           const sharpMod = (await import('sharp')).default;
+          const brandRefsP = !sourceRawUrl
+            ? getBrandReferenceImages(projectId)
+            : Promise.resolve([]);
+          const brandRefs = await brandRefsP;
           let previousFrameBuffer: Buffer | undefined;
 
           for (let frameIdx = 0; frameIdx < n; frameIdx++) {
+            const frameCopy = sequenceCopies[frameIdx] ?? {};
+            const framePrompt = buildImagePrompt({
+              idea: idea ?? '',
+              format,
+              project: proj
+                ? { name: proj.name, audience: proj.audience, tone: proj.tone }
+                : { name: 'Project', audience: null, tone: null },
+              brandKit: kit ?? null,
+              language: language ?? 'en',
+              layout,
+              copy: frameCopy,
+              effort: effortTier,
+              sequence: { frameIndex: frameIdx, totalFrames: n },
+            });
+
             const result = await generateImage({
-              prompt,
+              prompt: framePrompt,
               format,
               provider,
               model,
               n: 1,
               quality,
-              // sourceImage carries the variation user-source path; in
-              // sequence mode we ONLY pass previousFrameBuffer via the
-              // sequence field (not as sourceImage) so the two flows
-              // don't fight inside imageGen. They're mutually exclusive
-              // at the action layer.
               sequence: {
                 frameIndex: frameIdx,
                 totalFrames: n,
                 previousFrameBuffer,
-                sequenceHint: resolveSequenceHint(layout, frameIdx, n),
+                // sequenceHint is now empty — the buildImagePrompt
+                // call above injects the [SEQUENCE] section directly.
+                sequenceHint: '',
               },
+              brandReferenceImages: brandRefs,
             });
             imageCostCents += result.costCents;
             contentType = result.contentType;
@@ -224,28 +257,22 @@ export function startImageWorker(): Worker<ImageGenJobData> {
             if (!rawFrame) {
               throw new Error(`sequence frame ${frameIdx + 1}/${n}: model returned no image`);
             }
-            // Resize raw → upload raw → compose → push.
+            // Resize to the exact frame dimensions. The sized buffer
+            // IS the final asset now — no SVG composite step.
             const sized = await sharpMod(rawFrame, { failOn: 'none' })
               .resize(fm.w, fm.h, { fit: 'cover', position: 'centre' })
               .png({ compressionLevel: 6 })
               .toBuffer();
-            const rawKey = `${projectId}/${generationId}/${frameIdx + 1}-raw.png`;
-            const rawUpload = await putR2(rawKey, sized, 'image/png');
-            rawUploads.push({ key: rawUpload.key, publicUrl: rawUpload.publicUrl });
-
-            const frameCopy = sequenceCopies[frameIdx] ?? {};
-            const composed = await composeImage({
-              background: sized,
-              width: fm.w,
-              height: fm.h,
-              layout,
-              copy: frameCopy,
-              colors,
-            });
-            composedBuffers.push(composed);
+            composedBuffers.push(sized);
             previousFrameBuffer = sized;
+            variantPromptStates.push({
+              prompt: framePrompt,
+              copy: frameCopy,
+              layoutId: layout.id,
+              label: `frame ${frameIdx + 1}/${n}`,
+            });
             console.log(
-              `[reachy:image] gen ${generationId} sequence frame ${frameIdx + 1}/${n} composed`,
+              `[reachy:image] gen ${generationId} sequence frame ${frameIdx + 1}/${n} rendered`,
             );
           }
         } else {
@@ -285,7 +312,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
             let strategyHint: string | null = null;
             if (multiStrategyOn && layout) {
               const baseStyleKey = (kit?.visualStyle ?? 'abstract') as VisualStyleKey;
-              const axis = pickVariantAxis(varIdx, layout.id, baseStyleKey);
+              const axis = pickVariantAxis(varIdx, layout.id, baseStyleKey, generationId);
               if (axis.layoutOverride) {
                 activeLayout = getLayout({ layoutId: axis.layoutOverride });
               }
@@ -294,44 +321,34 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               strategyHint = axis.strategyHint;
             }
 
-            // aiAccent layouts NEED the planned copy BEFORE the image
-            // prompt is built — the AI has to paint the actual eyebrow /
-            // badge text into the image, not generic placeholder text.
-            // So we plan copy early when:
-            //   - we're rebuilding the prompt (multi-strategy), OR
-            //   - the active layout has aiAccent blocks (regardless of mode).
-            // Otherwise we keep the original lazy planning at compose time.
-            const layoutForCopy = activeLayout ?? layout;
-            const layoutHasAiAccent =
-              layoutForCopy?.blocks.some((b) => b.role === 'aiAccent') ?? false;
-            const needEarlyCopy = (multiStrategyOn && layout) || layoutHasAiAccent;
-
-            let earlyCopy: PlannedCopy | null = null;
-            if (needEarlyCopy && layoutForCopy) {
-              const planEarly = await planCopy({
+            // Plan copy against THIS variant's layout. The AI renders
+            // the copy verbatim, so it must be resolved before the
+            // prompt is built. We accept the per-variant cost; the
+            // alternative (one shared plan) misses the slot structure
+            // of alternate layouts.
+            let variantCopy: PlannedCopy = {};
+            if (activeLayout) {
+              const planForVariant = await planCopy({
                 idea: idea ?? '',
-                layout: layoutForCopy,
+                layout: activeLayout,
                 language: language ?? 'en',
                 project: proj
                   ? { name: proj.name, audience: proj.audience, tone: proj.tone }
                   : { name: 'Project', audience: null, tone: null },
                 brandKit: kit ?? null,
               });
-              copyCostCents += planEarly.costCents;
-              earlyCopy = planEarly.copy;
+              copyCostCents += planForVariant.costCents;
+              variantCopy = planForVariant.copy;
             }
 
-            const aiAccents =
-              earlyCopy && layoutForCopy ? resolveAiAccents(layoutForCopy, earlyCopy) : [];
-
-            // Per-variant prompt. For the FIRST variant in single-shot
-            // mode we keep using the worker's already-built editPrompt
-            // UNLESS the layout has aiAccent blocks — in that case the
-            // action-built prompt is missing the AI-text directives, so
-            // we rebuild here with the freshly-resolved aiAccents.
-            const shouldRebuildPrompt = (multiStrategyOn && layoutForCopy) || aiAccents.length > 0;
+            // Build the per-variant prompt with the resolved copy.
+            // Variation mode (sourceRawUrl) keeps the action-built
+            // editPrompt because the user wants composition rooted in
+            // the source image; in that case we still send `copy` for
+            // typographic-continuity hints but the layout / style
+            // axes don't perturb.
             let perVariantPrompt: string;
-            if (shouldRebuildPrompt && layoutForCopy) {
+            if (activeLayout && !sourceRawUrl) {
               perVariantPrompt = buildImagePrompt({
                 idea: idea ?? '',
                 format,
@@ -341,10 +358,10 @@ export function startImageWorker(): Worker<ImageGenJobData> {
                 brandKit: kit ?? null,
                 language: language ?? 'en',
                 visualStyleOverride: activeStyle ?? undefined,
-                layout: layoutForCopy,
+                layout: activeLayout,
+                copy: variantCopy,
                 effort: effortTier,
                 strategyHint: strategyHint ?? undefined,
-                aiAccents: aiAccents.length > 0 ? aiAccents : undefined,
               });
             } else {
               perVariantPrompt = editPrompt;
@@ -466,52 +483,32 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               winnerBuf = firstCandidate;
             }
 
-            // Resize + upload raw + compose.
-            if (activeLayout) {
-              const sized = await sharpMod(winnerBuf, { failOn: 'none' })
-                .resize(fm.w, fm.h, { fit: 'cover', position: 'centre' })
-                .png({ compressionLevel: 6 })
-                .toBuffer();
-              const rawKey = `${projectId}/${generationId}/${varIdx + 1}-raw.png`;
-              const rawUpload = await putR2(rawKey, sized, 'image/png');
-              rawUploads.push({ key: rawUpload.key, publicUrl: rawUpload.publicUrl });
+            // Resize the winning candidate to the exact frame size.
+            // This buffer IS the final asset — no SVG composite step.
+            const finalBuf = await sharpMod(winnerBuf, { failOn: 'none' })
+              .resize(fm.w, fm.h, { fit: 'cover', position: 'centre' })
+              .png({ compressionLevel: 6 })
+              .toBuffer();
+            composedBuffers.push(finalBuf);
 
-              // Per-variant copy plan against THIS variant's layout —
-              // reuse the early plan when we made one (multi-strategy
-              // or aiAccent layouts), otherwise plan it now.
-              let planCopyForVariant: PlannedCopy;
-              if (earlyCopy) {
-                planCopyForVariant = earlyCopy;
-              } else {
-                const planForVariant = await planCopy({
-                  idea: idea ?? '',
-                  layout: activeLayout,
-                  language: language ?? 'en',
-                  project: proj
-                    ? { name: proj.name, audience: proj.audience, tone: proj.tone }
-                    : { name: 'Project', audience: null, tone: null },
-                  brandKit: kit ?? null,
-                });
-                copyCostCents += planForVariant.costCents;
-                planCopyForVariant = planForVariant.copy;
-              }
-              composeCostCents += 1;
-              if (varIdx === 0) copy = planCopyForVariant; // legacy single-copy carrier
-              variantCopies.push(planCopyForVariant);
+            if (activeLayout) {
+              if (varIdx === 0) copy = variantCopy; // legacy single-copy carrier
+              variantCopies.push(variantCopy);
               variantLayoutIds.push(activeLayout.id);
               variantLabels.push(strategyLabel);
-
-              const composed = await composeImage({
-                background: sized,
-                width: fm.w,
-                height: fm.h,
-                layout: activeLayout,
-                copy: planCopyForVariant,
-                colors,
+              variantPromptStates.push({
+                prompt: perVariantPrompt,
+                copy: variantCopy,
+                layoutId: activeLayout.id,
+                label: strategyLabel,
               });
-              composedBuffers.push(composed);
             } else {
-              composedBuffers.push(winnerBuf);
+              variantPromptStates.push({
+                prompt: perVariantPrompt,
+                copy: {},
+                layoutId: null,
+                label: strategyLabel,
+              });
             }
           }
 
@@ -546,42 +543,46 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         }
         await db.insert(asset).values(rows);
 
-        // Total cost: AI-image cost (sum across all calls for sequence mode)
-        // + copy planner LLM call + compose floor. Persisted to the
-        // generation row so the UI's "Cost: X¢" tally reflects the wallet.
-        // Composition state (layout + copy + colors + raw pointers) is
-        // persisted in params so the re-render-overlay action can rebuild
-        // the same asset cheaply without re-querying the brand kit.
+        // Total cost: AI-image cost + copy planner + critic/art-director
+        // overhead. No more compose floor (the AI now paints typography
+        // inline; there's no SVG composite step).
         const totalCostCents = imageCostCents + copyCostCents + composeCostCents;
         const [existingGen] = await db
           .select({ params: generation.params })
           .from(generation)
           .where(eq(generation.id, generationId))
           .limit(1);
+
+        // aiPromptState — replaces the legacy composeState. Captures
+        // everything the editor needs to re-render an edited-copy
+        // version: the prompt that produced each variant, the copy
+        // slots that went into it, the brand colors snapshot, and the
+        // model knobs in use. The editor's edit-copy flow uses this
+        // to rebuild the prompt with new copy values + ship a fresh
+        // `images.edit` call against the asset.
         const mergedParams = {
           ...((existingGen?.params as Record<string, unknown>) ?? {}),
           ...(layout
             ? {
-                composeState: {
+                aiPromptState: {
                   layoutId: layout.id,
-                  // composeState.mode discriminates downstream:
-                  //   exploration    — single shared PlannedCopy (n=1
-                  //                    or multi-strategy disabled).
-                  //   multi-strategy — PlannedCopy[] + variant labels +
-                  //                    per-variant layoutIds (n > 1).
-                  //   sequence       — PlannedCopy[] for serial frames.
                   mode: sequenceMode
                     ? ('sequence' as const)
                     : isMultiStrategy
                       ? ('multi-strategy' as const)
                       : ('exploration' as const),
                   copy: sequenceMode || isMultiStrategy ? (sequenceCopies ?? []) : copy,
-                  colors,
-                  // Parallel arrays to assets[] order — index i of rawUploads
-                  // is the raw background for asset i. rerenderOverlay uses
-                  // this to recompose without stacking text on text.
-                  rawAssets: rawUploads,
-                  // Sequence-specific metadata.
+                  brandColors: colors,
+                  model,
+                  quality: quality ?? 'medium',
+                  effort: effortTier,
+                  language: language ?? 'en',
+                  variants: variantPromptStates.map((v) => ({
+                    prompt: v.prompt,
+                    copy: v.copy,
+                    layoutId: v.layoutId,
+                    label: v.label,
+                  })),
                   ...(sequenceMode
                     ? {
                         sequenceMeta: {
@@ -590,9 +591,6 @@ export function startImageWorker(): Worker<ImageGenJobData> {
                         },
                       }
                     : {}),
-                  // Multi-strategy bookkeeping — per-variant layouts +
-                  // human labels for the UI's "Variant 2 — alt style"
-                  // chip and for the per-variant edit-copy / swap path.
                   ...(isMultiStrategy
                     ? {
                         variantAxes: multiStrategyVariantLayouts.map((id, i) => ({
