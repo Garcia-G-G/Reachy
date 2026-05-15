@@ -87,26 +87,41 @@ export async function GET(_req: Request, { params }: RouteContext) {
   // The worker writes this into generation.params on success — see videoWorker.ts.
   const genParams = (gen.params ?? {}) as {
     costBreakdown?: ReelCostBreakdown;
+    // Post-pivot (May 2026): the AI now renders typography directly,
+    // so the prior overlay-pipeline `composeState` is replaced by
+    // `aiPromptState` which captures the per-variant prompt + copy.
+    // Old rows still carry `composeState`; the editor falls back to
+    // a read-only banner for those.
+    aiPromptState?: {
+      layoutId?: string;
+      copy?: Record<string, string | undefined> | Array<Record<string, string | undefined>>;
+      mode?: 'exploration' | 'sequence' | 'multi-strategy';
+      brandColors?: { ink: string; paper: string; accent: string };
+      variantAxes?: Array<{ layoutId?: string; label?: string }>;
+    };
     composeState?: {
       layoutId?: string;
-      // Exploration: Record<string, string|undefined>
-      // Sequence:    Array<Record<string, string|undefined>>
       copy?: Record<string, string | undefined> | Array<Record<string, string | undefined>>;
-      mode?: 'exploration' | 'sequence';
+      mode?: 'exploration' | 'sequence' | 'multi-strategy';
+      colors?: { ink: string; paper: string; accent: string };
+      variantAxes?: Array<{ layoutId?: string; label?: string }>;
     };
   };
   const costBreakdown = genParams.costBreakdown ?? null;
-  // composeState is image-pipeline-only — drives the Edit Copy modal's
-  // pre-population (so users edit instead of rewrite the headline) and
-  // tells the UI which layout this asset belongs to.
-  // For sequence rows, copy is an array (one entry per frame) and mode
-  // is 'sequence'; the form's modal picks the right index based on which
-  // thumbnail the user clicked Edit on.
-  const composeState = genParams.composeState
+
+  // Prefer aiPromptState (post-pivot). Fall back to composeState (pre-
+  // pivot legacy rows) and expose it under the same `composeState` key
+  // so existing UI consumers keep working. The editor checks the
+  // `legacy` flag to decide whether to allow editing.
+  const stateSource = genParams.aiPromptState ?? genParams.composeState ?? null;
+  const composeState = stateSource
     ? {
-        layoutId: genParams.composeState.layoutId ?? null,
-        mode: genParams.composeState.mode ?? 'exploration',
-        copy: genParams.composeState.copy ?? {},
+        layoutId: stateSource.layoutId ?? null,
+        mode: stateSource.mode ?? 'exploration',
+        copy: stateSource.copy ?? {},
+        colors: genParams.aiPromptState?.brandColors ?? genParams.composeState?.colors ?? undefined,
+        variantAxes: stateSource.variantAxes ?? undefined,
+        legacy: !genParams.aiPromptState && Boolean(genParams.composeState),
       }
     : null;
 

@@ -1,13 +1,21 @@
+// DEPRECATED (May 2026): quarantined after the full-AI typography
+// pivot. gpt-image-2 now renders typography directly inside the image;
+// we no longer composite SVG overlays so the @font-face base64 embed
+// pipeline is unused. This file is retained for emergency fallback
+// (alongside src/server/ai/composeImage.ts) and for any future client-
+// side preview affordances. No active code path imports it.
 import 'server-only';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
- * Server-side font registry for the marketing-grade compositing layer.
+ * Server-side font registry for the LEGACY SVG-overlay compositing
+ * layer. Held alive only for emergency fallback — see DEPRECATED note
+ * at the top of this file.
  *
- * The image pipeline now separates concerns:
- *   1. AI generates the BACKGROUND only — no text inside the pixels.
- *   2. A deterministic SVG overlay paints the typography on top using
+ * The legacy pipeline separated concerns:
+ *   1. AI generated the BACKGROUND only — no text inside the pixels.
+ *   2. A deterministic SVG overlay painted the typography on top using
  *      these TTFs, with exact brand colors, exact kerning, exact font.
  *
  * The TTF files live in public/fonts/ so they're also reachable by the

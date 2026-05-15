@@ -50,15 +50,20 @@ export interface EditorAsset {
   height: number | null;
 }
 
-/** Mirror of generation.params.composeState. The worker writes this on
- *  the overlay-enabled path. Loose typing because the JSONB column can
- *  shift between modes (exploration / sequence / multi-strategy). */
+/** Mirror of generation.params.aiPromptState (post-pivot) or
+ *  composeState (legacy). The page-level loader collapses both into
+ *  this shape; the `legacy` flag tells the editor whether to allow
+ *  editing or surface a read-only banner. */
 export interface EditorComposeState {
   layoutId?: LayoutId;
   mode?: 'exploration' | 'sequence' | 'multi-strategy';
   copy?: Record<LayoutSlot, string | undefined> | Array<Record<LayoutSlot, string | undefined>>;
   colors?: { ink: string; paper: string; accent: string };
   variantAxes?: Array<{ layoutId?: LayoutId; label?: string }>;
+  /** True when this generation predates the May-2026 AI-typography
+   *  pivot (only composeState in params, no aiPromptState). The
+   *  editor disables editing affordances for these rows. */
+  legacy?: boolean;
 }
 
 interface GenerationEditorProps {
@@ -160,6 +165,7 @@ export function GenerationEditor(props: GenerationEditorProps) {
   const selected = assets[Math.min(selectedIdx, Math.max(0, assets.length - 1))] ?? null;
   const isSequence = composeState?.mode === 'sequence';
   const isMultiStrategy = composeState?.mode === 'multi-strategy';
+  const isLegacy = Boolean(composeState?.legacy);
 
   // Resolve the per-asset layout (multi-strategy variants can have
   // different layouts per slot). Falls back to composeState.layoutId
@@ -331,31 +337,46 @@ export function GenerationEditor(props: GenerationEditorProps) {
 
         {/* Sidebar */}
         <aside className="space-y-8">
+          {isLegacy && (
+            <section
+              className="space-y-2 border p-3"
+              style={{ borderColor: 'rgba(20,17,13,0.18)', background: 'var(--paper, #F1EBDF)' }}
+            >
+              <h3 className="mono-eyebrow">Legacy generation</h3>
+              <p className="text-sm leading-relaxed">
+                This generation uses the legacy SVG-overlay pipeline. Edit-copy / layout-swap /
+                color-swap require the new AI pipeline — re-generate from the brief to enable
+                editing.
+              </p>
+            </section>
+          )}
+
           <EditCopyBlock
-            disabled={status !== 'done' || !selected || pendingAction !== null}
+            disabled={status !== 'done' || !selected || pendingAction !== null || isLegacy}
             initialCopy={initialCopy}
             layoutId={resolvedLayoutId}
-            onSubmit={async (copy) => {
+            onSubmit={async ({ copy, quickFix }) => {
               if (!selected) return;
               setPendingAction('edit-copy');
               const res = await rerenderOverlay({
                 generationId,
                 assetId: selected.id,
                 copy,
+                quickFix,
               });
               setPendingAction(null);
               if (!res.ok) {
                 toast.error(`Edit copy failed: ${res.error}`);
                 return;
               }
-              toast.success('Overlay re-rendered · $0');
+              toast.success(`Edit rendered · ~$0.21`);
               window.location.href = `/app/projects/${slug}/generate/image/${res.data.generationId}`;
             }}
           />
 
           <LayoutBlock
             currentLayoutId={resolvedLayoutId}
-            disabled={status !== 'done' || !selected || pendingAction !== null}
+            disabled={status !== 'done' || !selected || pendingAction !== null || isLegacy}
             onPick={async (layoutId) => {
               if (!selected) return;
               setPendingAction('swap-layout');
@@ -369,14 +390,14 @@ export function GenerationEditor(props: GenerationEditorProps) {
                 toast.error(`Swap layout failed: ${res.error}`);
                 return;
               }
-              toast.success(`Layout → ${layoutId} · $0`);
+              toast.success(`Layout → ${layoutId} · ~$0.21`);
               window.location.href = `/app/projects/${slug}/generate/image/${res.data.generationId}`;
             }}
           />
 
           <ColorsBlock
             colors={composeState?.colors ?? { ink: '#14110D', paper: '#F1EBDF', accent: '#B6481A' }}
-            disabled={status !== 'done' || !selected || pendingAction !== null}
+            disabled={status !== 'done' || !selected || pendingAction !== null || isLegacy}
             onSubmit={async (colors) => {
               if (!selected) return;
               setPendingAction('swap-colors');
@@ -386,7 +407,7 @@ export function GenerationEditor(props: GenerationEditorProps) {
                 toast.error(`Swap colors failed: ${res.error}`);
                 return;
               }
-              toast.success('Colors swapped · $0');
+              toast.success(`Colors swapped · ~$0.21`);
               window.location.href = `/app/projects/${slug}/generate/image/${res.data.generationId}`;
             }}
           />
@@ -429,13 +450,13 @@ function EditCopyBlock({
   disabled: boolean;
   initialCopy: Record<LayoutSlot, string>;
   layoutId: LayoutId;
-  onSubmit: (copy: Record<LayoutSlot, string | undefined>) => Promise<void>;
+  onSubmit: (args: {
+    copy: Record<LayoutSlot, string | undefined>;
+    quickFix: boolean;
+  }) => Promise<void>;
 }) {
   const [values, setValues] = useState<Record<LayoutSlot, string>>(initialCopy);
-  // Re-seed when the user clicks a different asset (the parent re-renders
-  // with a new initialCopy). Exhaustive deps would mean re-seeding on
-  // every keystroke; we only want the seed when the parent's identity
-  // changes, which the slot-value tuple cleanly tracks.
+  const [quickFix, setQuickFix] = useState(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
   useEffect(() => {
     setValues(initialCopy);
@@ -467,21 +488,53 @@ function EditCopyBlock({
           </label>
         ))}
       </div>
+
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={quickFix}
+          onChange={(e) => setQuickFix(e.target.checked)}
+          disabled={disabled}
+          className="mt-0.5"
+        />
+        <span className="flex-1 leading-snug">
+          <span className="block font-medium">Quick text fix</span>
+          <span className="block text-xs text-ink-3">
+            Edits with the source as a reference; only the listed text changes, the rest of the
+            composition stays. Faster, more stable for single-slot tweaks.
+          </span>
+        </span>
+      </label>
+
+      <div
+        className="border p-2 text-xs leading-snug"
+        style={{ borderColor: 'rgba(20,17,13,0.18)' }}
+      >
+        <span className="mono-eyebrow block text-ink-3">Cost</span>
+        <span>
+          Editing text triggers a fresh AI render. ~$0.21 per edit · ~15 seconds. Every edit is
+          saved as a new variant — flip between original and edits in the strip above.
+        </span>
+      </div>
+
       <button
         type="button"
         disabled={disabled}
         onClick={() =>
           onSubmit({
-            eyebrow: values.eyebrow || undefined,
-            headline: values.headline || undefined,
-            subheadline: values.subheadline || undefined,
-            cta: values.cta || undefined,
-            wordmark: values.wordmark || undefined,
+            copy: {
+              eyebrow: values.eyebrow || undefined,
+              headline: values.headline || undefined,
+              subheadline: values.subheadline || undefined,
+              cta: values.cta || undefined,
+              wordmark: values.wordmark || undefined,
+            },
+            quickFix,
           })
         }
         className="btn-ink w-full disabled:opacity-50"
       >
-        {disabled ? 'Working…' : 'Re-render overlay · $0'}
+        {disabled ? 'Working…' : `Apply edit · ~$0.21${quickFix ? ' (quick-fix)' : ''}`}
       </button>
     </section>
   );

@@ -1,11 +1,7 @@
 import 'server-only';
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
-import type {
-  LayoutPromptTemplate as Layout,
-  PlannedCopy,
-  TextRole,
-} from './layoutTemplates';
+import type { LayoutPromptTemplate as Layout, PlannedCopy, TextRole } from './layoutTemplates';
 import { getOpenAI } from './openai';
 
 // Re-export so callers that already import { PlannedCopy } from copyPlanner

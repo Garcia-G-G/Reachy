@@ -9,6 +9,41 @@ import { getOpenAI } from './openai';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
+ * RESEARCH NOTES (post May-2026 AI-typography pivot)
+ *
+ * Sourced 2026-05-15 from platform.openai.com docs, openai-node SDK v6+
+ * types, and the OpenAI cookbook image-gen prompting guide.
+ *
+ *   1. NO `reasoning_effort` on gpt-image-2. That param is a Responses-
+ *      API knob on GPT-5 text models. The image-generate / image-edit
+ *      ImageGenerateParams / ImageEditParams in openai-node do not
+ *      accept it; passing it will be rejected by the API. The "thinking
+ *      mode" toggle in the ChatGPT product UI is not exposed via API.
+ *
+ *   2. NO `strength` / `input_fidelity` / adherence knob on gpt-image-2.
+ *      `input_fidelity` exists on ImageEditParams (legacy field for
+ *      gpt-image-1 / 1.5) but is a NO-OP on gpt-image-2 per the cookbook
+ *      ("input_fidelity does not work for this model because output is
+ *      already high fidelity by default"). Wavespeed reports the param
+ *      can FAIL the request on gpt-image-2 — omit it. Adherence is
+ *      controlled purely by prompt language.
+ *
+ *   3. Multi-reference: up to 16 images per `images.edit` call (per
+ *      openai-node JSDoc). The cookbook documents a TRAINED labeling
+ *      convention ("Image 1: source. Image 2: brand logo…") that the
+ *      model recognizes; image[0] is not semantically privileged, but
+ *      order must match the labels you write in the prompt. Quality
+ *      degrades past ~4 refs in practice (Wavespeed 2026 review).
+ *
+ *   4. Text accuracy: OpenAI claims ~99% character-level on Latin
+ *      script (launch comms; no primary URL exposes the figure
+ *      directly). Independent benchmarks measure ~98.5% (Atlas Cloud
+ *      Q2 2026). Spanish accents (é/ñ/í) + brand-exact hex compliance
+ *      are NOT benchmarked by any primary source — both are
+ *      MVP-accepted risk; the prompt's [QUALITY] section demands
+ *      accent preservation for ES briefs.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
  * Provider catalog snapshot — 2026-05-14 (refresh before adding models).
  * The full per-model capability table lives in src/lib/image-models.ts;
  * this header just captures the API-level facts the dispatch needs.

@@ -47,9 +47,27 @@ export default async function GenerationEditorPage({ params }: EditorPageProps) 
     .orderBy(asc(asset.createdAt));
 
   const params2 = (gen.params ?? {}) as {
+    aiPromptState?: EditorComposeState & {
+      brandColors?: { ink: string; paper: string; accent: string };
+    };
     composeState?: EditorComposeState;
     costBreakdown?: { cents: number; parts?: Record<string, number | undefined> };
   };
+  // Post-pivot (May 2026): prefer aiPromptState. Fall back to composeState
+  // for legacy rows. The editor uses `legacy: true` to surface a
+  // re-generate banner instead of edit affordances.
+  const stateForEditor: (EditorComposeState & { legacy?: boolean }) | null = params2.aiPromptState
+    ? {
+        layoutId: params2.aiPromptState.layoutId,
+        mode: params2.aiPromptState.mode,
+        copy: params2.aiPromptState.copy,
+        colors: params2.aiPromptState.brandColors,
+        variantAxes: params2.aiPromptState.variantAxes,
+        legacy: false,
+      }
+    : params2.composeState
+      ? { ...params2.composeState, legacy: true }
+      : null;
 
   const bundle = await getBrandKitForProject(project.id);
 
@@ -65,7 +83,7 @@ export default async function GenerationEditorPage({ params }: EditorPageProps) 
       costBreakdown={params2.costBreakdown ?? null}
       format={gen.format}
       model={gen.model}
-      composeState={params2.composeState ?? null}
+      composeState={stateForEditor}
       brandVisualStyle={(bundle?.brandKit?.visualStyle ?? null) as VisualStyleKey | null}
       assets={assets.map<EditorAsset>((a) => ({
         id: a.id,

@@ -647,7 +647,11 @@ export async function rerenderOverlay(
             },
           ],
         },
-        editOf: { generationId: sourceGen.id, assetId: sourceAsset.id, quickFix: parsed.data.quickFix },
+        editOf: {
+          generationId: sourceGen.id,
+          assetId: sourceAsset.id,
+          quickFix: parsed.data.quickFix,
+        },
       },
       costCents,
       finishedAt: new Date(),
@@ -998,7 +1002,12 @@ export async function swapColors(
   // Build a synthetic brand kit with the new colors for the prompt.
   const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
   const recoloredKit = kit
-    ? { ...kit, primaryColor: parsed.data.colors.ink, bgColor: parsed.data.colors.paper, accentColor: parsed.data.colors.accent }
+    ? {
+        ...kit,
+        primaryColor: parsed.data.colors.ink,
+        bgColor: parsed.data.colors.paper,
+        accentColor: parsed.data.colors.accent,
+      }
     : null;
 
   const basePrompt = buildImagePrompt({
@@ -1069,9 +1078,7 @@ export async function swapColors(
           quality: srcParams.aiPromptState?.quality ?? 'high',
           effort: 'balanced' as const,
           language,
-          variants: [
-            { prompt: recolorPrompt, copy: priorCopy, layoutId, label: 'recolor' },
-          ],
+          variants: [{ prompt: recolorPrompt, copy: priorCopy, layoutId, label: 'recolor' }],
         },
         colorSwapOf: { generationId: srcGen.id, assetId: sourceAsset.id },
       },

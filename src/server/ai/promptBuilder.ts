@@ -60,7 +60,8 @@ interface BuildArgs {
  *  display fonts to their character; fall through to a generic descriptor
  *  for unknowns. */
 function deriveBrandFontHint(fontHeading: string | null | undefined): string {
-  if (!fontHeading) return 'high-contrast editorial serif with hairline strokes and a confident wedge serif';
+  if (!fontHeading)
+    return 'high-contrast editorial serif with hairline strokes and a confident wedge serif';
   const name = fontHeading.toLowerCase().trim();
   if (name.includes('fraunces') || name.includes('playfair') || name.includes('didone')) {
     return 'high-contrast editorial serif with hairline strokes and a confident wedge serif (Fraunces / Didone family character)';
@@ -112,8 +113,7 @@ export function buildImagePrompt({
   // Wordmark falls back to project name (case-preserving). The AI gets
   // this verbatim so it renders the exact characters.
   const brandWordmark =
-    (brandKit?.fontHeading && brandKit.fontHeading.match(/wordmark:\s*(.+)/i)?.[1]) ??
-    project.name;
+    (brandKit?.fontHeading && brandKit.fontHeading.match(/wordmark:\s*(.+)/i)?.[1]) ?? project.name;
   const brandFontHint = deriveBrandFontHint(brandKit?.fontHeading);
 
   const sections: string[] = [];
@@ -140,9 +140,7 @@ export function buildImagePrompt({
   const briefHeader = project.audience?.trim()
     ? `Project ${project.name} · audience: ${project.audience.trim()}.`
     : `Project ${project.name}.`;
-  sections.push(
-    `[BRIEF]\n${briefHeader} The subject of this image: """${safeIdea}"""`,
-  );
+  sections.push(`[BRIEF]\n${briefHeader} The subject of this image: """${safeIdea}"""`);
 
   // 5b. Brand keyword evocation (when provided).
   if (brandKit?.keywords && brandKit.keywords.length > 0) {

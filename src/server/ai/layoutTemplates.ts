@@ -156,7 +156,8 @@ const heroCentered: LayoutPromptTemplate = {
   slots: ['eyebrow', 'headline', 'cta'],
   negativeSpaceHint:
     'Keep the central 50% of the frame visually CALM — soft tones, low contrast, no busy details. Push texture, gradients, and accent shapes toward the edges so the centered typography breathes.',
-  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint }) =>
+    `
 HERO · CENTERED LAYOUT
 Composition: focal subject sits in the lower third or fades into the upper edges; the visual center stays open for centered typography. Use the brand palette (paper as base, ink for text, accent for one small element).
 
@@ -177,13 +178,14 @@ const heroSplitLeft: LayoutPromptTemplate = {
   slots: ['eyebrow', 'headline', 'subheadline', 'cta'],
   negativeSpaceHint:
     'Left 45% of the frame is editorial copy space — keep it CALM. Right 55% holds the focal subject / visual texture. The vertical seam between the two zones must read clean, not muddy.',
-  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint }) =>
+    `
 HERO · SPLIT LEFT LAYOUT
 Composition: 45/55 vertical split. LEFT 45% is editorial copy space, color ${brandColors.paper}. RIGHT 55% is the focal subject and visual scene. The seam between them is clean (no gradient mush).
 
 Typography on the LEFT panel, stacked vertically, left-aligned with a comfortable margin from the left edge (~6%):
 ${slotLine('Eyebrow (small mono UPPERCASE, tracking ~0.2em, color ' + brandColors.accent + ', ~2% tall)', copy.eyebrow, 'near the top, ~10% from top')}
-${slotLine('Headline (oversized ' + brandFontHint + ', weight 700, tight leading, color ' + brandColors.ink + ', ~9% tall, wraps to 3-4 lines)', copy.headline, 'just below eyebrow, occupies most of the left panel\'s vertical space')}
+${slotLine('Headline (oversized ' + brandFontHint + ', weight 700, tight leading, color ' + brandColors.ink + ', ~9% tall, wraps to 3-4 lines)', copy.headline, "just below eyebrow, occupies most of the left panel's vertical space")}
 ${slotLine('Subheadline (sans-serif, regular weight, color ' + brandColors.ink + ' at 75% opacity, ~2.2% tall, max 3 lines)', copy.subheadline, 'below headline')}
 ${slotLine('CTA (small mono UPPERCASE, color ' + brandColors.paper + ' on ' + brandColors.ink + ' pill button)', copy.cta, 'bottom of the left panel, ~85% from top')}
 
@@ -199,7 +201,8 @@ const quoteSlab: LayoutPromptTemplate = {
   slots: ['headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
     'The CENTER of the frame holds a solid-color paper slab; the photo lives in the borders / edges. The slab is the visual anchor — keep its interior PURE solid color, no texture.',
-  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) =>
+    `
 QUOTE SLAB LAYOUT
 Composition: a solid rectangular slab fills the center 70% of the frame in color ${brandColors.paper}. The background bleeds around it (~15% margin on all sides) with the focal scene/texture.
 
@@ -220,7 +223,8 @@ const announcementBanner: LayoutPromptTemplate = {
   slots: ['eyebrow', 'headline', 'cta'],
   negativeSpaceHint:
     'Horizontal banner composition — the visual breaks into three vertical bands (LEFT decorative texture, CENTER typography zone, RIGHT decorative texture). Center stays calm.',
-  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint }) =>
+    `
 ANNOUNCEMENT BANNER LAYOUT
 Composition: horizontal three-band split. Left and right thirds carry small decorative elements (icons, geometric shapes, accent strokes) in ${brandColors.accent}. Center third hosts the announcement copy on ${brandColors.paper}.
 
@@ -241,7 +245,8 @@ const cardSoft: LayoutPromptTemplate = {
   slots: ['eyebrow', 'headline', 'subheadline', 'cta', 'wordmark'],
   negativeSpaceHint:
     'A card-like rectangle fills the inner 75% of the frame (margins of ~12% on all sides). Within the card, the upper 30% is reserved for a visual element; the lower 70% is the copy stack.',
-  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) =>
+    `
 SOFT CARD LAYOUT
 Composition: a card-like rectangle occupies the inner 75% of the frame, color ${brandColors.paper}, with a SOFT shadow underneath (~10px blur, 8% opacity, offset down-right). Outside the card the frame is a complementary muted tone of ${brandColors.paper}.
 
@@ -266,7 +271,8 @@ const quoteLarge: LayoutPromptTemplate = {
   slots: ['headline', 'subheadline'],
   negativeSpaceHint:
     'Entire frame is type-led — no card, no slab. The visual is a subtle photographic or textural background that the giant quote sits ON TOP OF. Background must read at ~70% the visual weight of the text.',
-  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint }) =>
+    `
 LARGE QUOTE LAYOUT (NO CARD)
 Composition: full-frame photographic or textural background tinted ${brandColors.paper}. The text dominates — background reads at ~70% weight of the typography.
 
@@ -286,7 +292,8 @@ const editorialMargin: LayoutPromptTemplate = {
   slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
     'Left 25% column is a narrow editorial margin (metadata strip). Right 75% is the main editorial column. The narrow column hosts mono UPPERCASE marginalia; the wide column hosts the editorial body.',
-  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) =>
+    `
 EDITORIAL MARGIN LAYOUT
 Composition: a vertical 1-px rule of ${brandColors.ink} at 30% opacity divides the frame into a LEFT 25% margin column and a RIGHT 75% main column. Background is ${brandColors.paper}, with a small photographic / textural element in the upper-right corner of the main column.
 
@@ -310,7 +317,8 @@ const featureStack: LayoutPromptTemplate = {
   slots: ['eyebrow', 'headline', 'subheadline', 'cta'],
   negativeSpaceHint:
     'Top 25% of the frame holds a visual element (illustration, photo, geometric shape). Middle 50% is the typography stack. Bottom 25% is breathing room with a small CTA.',
-  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint }) =>
+    `
 FEATURE STACK LAYOUT
 Composition: vertical three-band — TOP 25% visual element on ${brandColors.paper} background, MIDDLE 50% typography zone, BOTTOM 25% breathing room with a single CTA.
 
@@ -332,7 +340,8 @@ const editorialCollage: LayoutPromptTemplate = {
   slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
     'Asymmetric editorial composition — no center card, no balanced grid. Focal subject occupies the RIGHT 55%. LEFT 45% is breathing room with intentional negative space.',
-  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) =>
+    `
 EDITORIAL COLLAGE LAYOUT
 Composition: asymmetric, magazine-cover energy. Focal subject occupies the right 55% of the frame with photographic depth. Left 45% is intentional negative space on ${brandColors.paper}.
 
@@ -354,7 +363,8 @@ const textMaskCutout: LayoutPromptTemplate = {
   slots: ['headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
     'Background fills the entire frame with ${brandColors.paper}. A single dominant word forms a massive cut-out revealing the focal subject through the letterforms.',
-  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint, brandWordmark }) =>
+    `
 TEXT MASK CUTOUT LAYOUT
 Composition: background is solid ${brandColors.paper}. Foreground: ONE dominant word from the headline is rendered as MASSIVE cut-out letterforms (filling ~75% of frame width, vertically centered) revealing a photographic / textural scene INSIDE the letterforms themselves — the letters are windows into the focal subject.
 
@@ -375,7 +385,8 @@ const badgeStamp: LayoutPromptTemplate = {
   slots: ['eyebrow', 'headline', 'subheadline'],
   negativeSpaceHint:
     'Asymmetric layout — left half is typography, right half is a circular accent stamp containing the eyebrow as inked text. Background is paper-toned.',
-  promptDirective: ({ copy, brandColors, brandFontHint }) => `
+  promptDirective: ({ copy, brandColors, brandFontHint }) =>
+    `
 BADGE STAMP LAYOUT
 Composition: background is ${brandColors.paper}. Right half of the frame contains a circular accent stamp/disc in ${brandColors.accent} (~24% of frame width, vertically centered, soft printed-stamp character — ink-on-paper feel, slight imperfection at the edges). Left half hosts the main typography.
 
@@ -429,7 +440,10 @@ export const DEFAULT_LAYOUT_FOR_FORMAT: Record<ImageFormat, LayoutId> = {
   'email-banner-wide': 'announcement-banner',
 };
 
-export function getLayout(input: { layoutId?: LayoutId; format?: ImageFormat }): LayoutPromptTemplate {
+export function getLayout(input: {
+  layoutId?: LayoutId;
+  format?: ImageFormat;
+}): LayoutPromptTemplate {
   if (input.layoutId) return LAYOUTS[input.layoutId];
   if (input.format) return LAYOUTS[DEFAULT_LAYOUT_FOR_FORMAT[input.format]];
   return LAYOUTS['hero-centered'];

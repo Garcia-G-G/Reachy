@@ -37,11 +37,7 @@ import {
   VISUAL_STYLE_META,
   type VisualStyleKey,
 } from '@/lib/visual-styles-meta';
-import {
-  enqueueImageGeneration,
-  enqueueVariations,
-  rerenderOverlay,
-} from '@/server/actions/images';
+import { enqueueImageGeneration, enqueueVariations } from '@/server/actions/images';
 
 interface GenerateImageFormProps {
   projectId: string;
@@ -236,12 +232,8 @@ export function GenerateImageForm({
   const [n, setN] = useState<1 | 2 | 4>(1);
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
-  // Edit-copy modal state. Open when an asset id is set.
-  const [editTarget, setEditTarget] = useState<{
-    generationId: string;
-    assetId: string;
-    publicUrl: string | null;
-  } | null>(null);
+  // Edit-copy state was removed in the May-2026 AI-typography pivot.
+  // Editing copy now navigates to the editor page (see onEditCopy below).
   // More-like-this modal state. Open when an asset is set.
   const [moreLikeThisTarget, setMoreLikeThisTarget] = useState<{
     assetId: string;
@@ -763,13 +755,13 @@ export function GenerateImageForm({
           layoutId={layoutOverride ?? DEFAULT_LAYOUT_FOR_FORMAT[format]}
           selectedAssetIdx={selectedAssetIdx}
           onSelectAsset={setSelectedAssetIdx}
-          onEditCopy={(asset) =>
-            setEditTarget({
-              generationId: 'generationId' in run ? run.generationId : '',
-              assetId: asset.id,
-              publicUrl: asset.publicUrl,
-            })
-          }
+          onEditCopy={(_asset) => {
+            // Editing copy now triggers a fresh AI render (~$0.21) and
+            // lives in the dedicated editor page so the user sees the
+            // cost banner + quick-fix toggle in proper context.
+            if (run.kind !== 'done' || !('generationId' in run)) return;
+            window.location.href = `/app/projects/${slug}/generate/image/${run.generationId}`;
+          }}
           onMoreLikeThis={(asset) =>
             setMoreLikeThisTarget({ assetId: asset.id, publicUrl: asset.publicUrl })
           }
@@ -777,52 +769,12 @@ export function GenerateImageForm({
           regenerateDisabled={formDisabled || noProvider || idea.trim().length < 3}
         />
       </aside>
-      {editTarget?.generationId && (
-        <EditCopyModal
-          target={editTarget}
-          layoutId={
-            (run.kind === 'done' && (run.composeState?.layoutId as LayoutId | null)) ||
-            layoutOverride ||
-            DEFAULT_LAYOUT_FOR_FORMAT[format]
-          }
-          // Pre-populate from the matching frame's copy when this row is a
-          // sequence. Find the asset's index inside run.assets so we pick
-          // the right element of composeState.copy (which is an array in
-          // sequence mode).
-          initialCopy={(() => {
-            if (run.kind !== 'done' || !run.composeState) return {};
-            const cs = run.composeState;
-            if (cs.mode === 'sequence' && Array.isArray(cs.copy)) {
-              const idx = run.assets.findIndex((a) => a.id === editTarget.assetId);
-              return cs.copy[Math.max(0, idx)] ?? {};
-            }
-            // Exploration: shared copy across the n variants.
-            return Array.isArray(cs.copy) ? (cs.copy[0] ?? {}) : (cs.copy ?? {});
-          })()}
-          onClose={() => setEditTarget(null)}
-          onRendered={(publicUrl, newAssetId) => {
-            setRun((current) => {
-              if (current.kind !== 'done') return current;
-              return {
-                ...current,
-                assets: [
-                  {
-                    id: newAssetId,
-                    publicUrl,
-                    width: current.assets[0]?.width ?? null,
-                    height: current.assets[0]?.height ?? null,
-                    storageKey: null,
-                  },
-                  ...current.assets,
-                ],
-              };
-            });
-            setSelectedAssetIdx(0);
-            setEditTarget(null);
-            toast.success('Overlay re-rendered (no cost — typography only)');
-          }}
-        />
-      )}
+      {/* Edit-copy modal removed in the May-2026 AI-typography pivot.
+          Editing copy now triggers a fresh AI render (~$0.21) and lives
+          in the dedicated editor page so users see the cost banner +
+          quick-fix toggle + edits strip with clear UX context. The
+          "Edit copy" button in the result panel now navigates to the
+          editor page for this generation. */}
       {moreLikeThisTarget && (
         <MoreLikeThisModal
           target={moreLikeThisTarget}
@@ -1044,127 +996,6 @@ function ResultPanel({
           {typeof run.costCents === 'number' && ` · ${t('costNote', { cents: run.costCents })}`}
         </p>
       )}
-    </div>
-  );
-}
-
-interface EditCopyModalProps {
-  target: { generationId: string; assetId: string; publicUrl: string | null };
-  layoutId: LayoutId | 'none';
-  /** Previous copy for this asset — pre-populates the inputs so users
-   *  edit a slot instead of having to retype every field. */
-  initialCopy: Record<string, string | undefined>;
-  onClose: () => void;
-  onRendered: (publicUrl: string, assetId: string) => void;
-}
-
-function EditCopyModal({ target, layoutId, initialCopy, onClose, onRendered }: EditCopyModalProps) {
-  // Layout 'none' shouldn't open the modal in the first place (the Edit
-  // Copy button is hidden), but defensively bail.
-  const slots: readonly LayoutSlot[] = layoutId === 'none' ? [] : LAYOUT_SLOTS[layoutId];
-  const [values, setValues] = useState<Record<LayoutSlot, string>>({
-    eyebrow: initialCopy.eyebrow ?? '',
-    headline: initialCopy.headline ?? '',
-    subheadline: initialCopy.subheadline ?? '',
-    cta: initialCopy.cta ?? '',
-    wordmark: initialCopy.wordmark ?? '',
-  });
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleRender() {
-    setSubmitting(true);
-    try {
-      const result = await rerenderOverlay({
-        generationId: target.generationId,
-        assetId: target.assetId,
-        copy: {
-          eyebrow: values.eyebrow || undefined,
-          headline: values.headline || undefined,
-          subheadline: values.subheadline || undefined,
-          cta: values.cta || undefined,
-          wordmark: values.wordmark || undefined,
-        },
-      });
-      if (!result.ok) {
-        toast.error(`Re-render failed: ${result.error}`);
-        return;
-      }
-      if (!result.data.publicUrl) {
-        toast.error('Re-rendered but R2 returned no public URL');
-        return;
-      }
-      onRendered(result.data.publicUrl, result.data.assetId);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/70 p-6"
-      role="dialog"
-      aria-modal
-      aria-label="Edit overlay copy"
-    >
-      {/* Backdrop button — covers the whole viewport and closes the modal
-          on click or Enter/Space. Using a real <button> instead of a
-          click-only <div> satisfies the a11y rules and gives keyboard
-          users a focusable exit. */}
-      <button
-        type="button"
-        aria-label="Close dialog"
-        className="absolute inset-0 cursor-default bg-transparent"
-        onClick={onClose}
-      />
-      <div className="relative w-full max-w-xl space-y-6 bg-paper p-8 border border-ink">
-        <div>
-          <h3 style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 28 }}>
-            Edit overlay copy
-          </h3>
-          <p className="mono-eyebrow mt-2 text-ink-3">
-            Re-renders typography on the existing background · $0.00 · {'<'} 1s
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          {slots.map((slot) => (
-            <div key={slot}>
-              <label htmlFor={`copy-${slot}`} className="mono-eyebrow mb-2 block capitalize">
-                {slot}
-              </label>
-              <input
-                id={`copy-${slot}`}
-                type="text"
-                value={values[slot]}
-                onChange={(e) => setValues((v) => ({ ...v, [slot]: e.target.value }))}
-                className="field"
-                placeholder={`Enter the ${slot}…`}
-              />
-            </div>
-          ))}
-        </div>
-
-        <div className="flex items-center justify-end gap-3 border-t border-ink-3/30 pt-6">
-          <button
-            type="button"
-            className="mono-eyebrow text-ink-3 hover:text-ink"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn-ink disabled:opacity-50"
-            onClick={handleRender}
-            disabled={submitting}
-          >
-            {submitting ? 'Re-rendering…' : 'Re-render overlay'}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
