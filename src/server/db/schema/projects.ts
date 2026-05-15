@@ -4,6 +4,7 @@ import { asset } from './assets';
 import { user } from './auth';
 import { brandKit } from './brandKits';
 import { generation } from './generations';
+import { ingestion } from './ingestion';
 
 export const project = pgTable(
   'project',
@@ -18,6 +19,16 @@ export const project = pgTable(
     websiteUrl: text('website_url'),
     audience: text('audience'),
     tone: text('tone'),
+    /**
+     * Set when the project was auto-created from an autopilot
+     * ingestion (Step 2). Lets us link the project's settings page
+     * back to "originally extracted from this upload" and show the
+     * source bundle as provenance. Null for projects created the
+     * old-fashioned way (manual + brand-kit form).
+     */
+    sourceIngestionId: uuid('source_ingestion_id').references(() => ingestion.id, {
+      onDelete: 'set null',
+    }),
     archivedAt: timestamp('archived_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')

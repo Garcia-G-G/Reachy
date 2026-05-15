@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { project } from './projects';
 
 export type BrandVoice = {
@@ -64,6 +64,25 @@ export const brandKit = pgTable(
       .$type<BrandVisualStyle>()
       .default('editorial-collage')
       .notNull(),
+    /**
+     * R2 keys of bundle images the autopilot ingestion identified as
+     * brand-relevant references (logo candidates, hero photos, etc.).
+     * Step 4's reel pipeline uses these as edit references to anchor
+     * outputs in the brand's existing visual vocabulary.
+     *
+     * Populated by autoCreateProjectFromBrief from
+     * ProductBrief.referenceImages; users can edit + reorder in the
+     * brand-kit UI. Schema is jsonb so the array can hold richer
+     * { key, hint } records later without a migration.
+     */
+    referenceAssetKeys: jsonb('reference_asset_keys').$type<string[]>().default([]).notNull(),
+    /** When false, downstream image-gen prompts inject a "no photographic
+     *  humans" guardrail. Set by the brand-kit settings UI; default
+     *  is true since most brands are fine with people-in-photos. */
+    allowsHumans: boolean('allows_humans').default(true).notNull(),
+    /** When true, image-gen runs through the best-of-K critic at
+     *  effort=high. Used by Step 5's quality-gate gallery. */
+    qualityGateEnabled: boolean('quality_gate_enabled').default(true).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()

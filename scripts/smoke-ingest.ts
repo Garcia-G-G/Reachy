@@ -23,7 +23,6 @@ async function main() {
   // Dynamic imports so dotenv loads before src/env.ts runs.
   const { aggregate } = await import('../src/server/ingest/aggregate');
   const { routeAndParse } = await import('../src/server/ingest/dispatch');
-  const { routeFile } = await import('../src/server/config/parserRouting');
 
   const SAMPLES_DIR = path.resolve(__dirname, '..', 'planning', 'sample-inputs');
   const FILES = [
@@ -32,7 +31,7 @@ async function main() {
     'sample.xlsx',
   ] as const;
 
-  const ingestionId = 'smoke-' + Date.now();
+  const ingestionId = `smoke-${Date.now()}`;
   const userId = 'smoke';
   const extractedPrefix = `uploads/${userId}/${ingestionId}/extracted`;
 

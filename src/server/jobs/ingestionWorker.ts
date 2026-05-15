@@ -6,6 +6,7 @@ import { db } from '@/server/db/client';
 import { ingestion } from '@/server/db/schema/ingestion';
 import { aggregate } from '@/server/ingest/aggregate';
 import { routeAndParse } from '@/server/ingest/dispatch';
+import { runBriefExtractionFor } from '@/server/ingest/runBriefExtraction';
 import type { ParseCtx, ParsedFile } from '@/server/ingest/types';
 import { getR2Object } from '@/server/storage/r2';
 import { createBullConnection, QUEUE_NAMES } from './connection';
@@ -145,6 +146,23 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
         console.log(
           `[reachy:ingest] gen ${ingestionId} ready · ${bundle.textBlocks.length} blocks · ${bundle.images.length} images · ${bundle.tables.length} tables · ${bundle.codeContext.length} code-files · mix=${JSON.stringify(bundle.fileTypeMix)}`,
         );
+
+        // Step 2 — brief extraction. Failure here does NOT regress the
+        // ingestion status to 'failed' (the bundle is still good).
+        // Step 3's approval UI shows a "re-extract" button when
+        // bundle.brief is missing or carries an autofillError.
+        try {
+          const briefRes = await runBriefExtractionFor(ingestionId);
+          const b = briefRes.stored;
+          console.log(
+            `[reachy:ingest] gen ${ingestionId} brief ready · project=${b.projectSlug ?? '(not created)'} · tone=${b.brief.tone} · langs=${b.brief.languages.join(',')} · cost=${b.costCents}¢ · model=${b.briefModel} · vision=${b.visionModel ?? 'skipped'}`,
+          );
+        } catch (briefErr) {
+          const briefMsg = briefErr instanceof Error ? briefErr.message : String(briefErr);
+          console.warn(
+            `[reachy:ingest] gen ${ingestionId} brief extraction failed — ingestion still ready: ${briefMsg}`,
+          );
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[reachy:ingest] gen ${ingestionId} failed:`, message);

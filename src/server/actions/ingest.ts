@@ -126,3 +126,72 @@ function safeBasename(name: string): string {
   const base = name.split('/').pop() ?? name;
   return base.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 180);
 }
+
+// ─── Step 2 — brief extraction + project autofill ────────────────────
+
+import { runBriefExtractionFor, type StoredBrief } from '@/server/ingest/runBriefExtraction';
+
+export type { StoredBrief };
+
+const runBriefInput = z.object({ ingestionId: z.string().uuid() });
+
+/**
+ * Server Action wrapper around the Step-2 orchestrator. Adds the auth
+ * check + shapes the response for client callers. The BullMQ worker
+ * calls `runBriefExtractionFor` directly (no Next request context),
+ * so brief extraction also runs automatically after every successful
+ * ingest.
+ *
+ * Calling this on an ingestion that already has bundle.brief OVERWRITES
+ * the prior result — Step 3's approval UI surfaces a "re-extract"
+ * button that uses this.
+ */
+export async function runBriefExtraction(
+  input: z.input<typeof runBriefInput>,
+): Promise<ActionResult<StoredBrief>> {
+  const session = await getSession();
+  if (!session) return { ok: false, error: 'unauthenticated' };
+
+  const parsed = runBriefInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
+  }
+
+  const [row] = await db
+    .select({ userId: ingestion.userId })
+    .from(ingestion)
+    .where(eq(ingestion.id, parsed.data.ingestionId))
+    .limit(1);
+  if (!row) return { ok: false, error: 'not-found' };
+  if (row.userId !== session.user.id) return { ok: false, error: 'forbidden' };
+
+  try {
+    const result = await runBriefExtractionFor(parsed.data.ingestionId);
+    return { ok: true, data: result.stored };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+}
+
+const getBriefInput = z.object({ ingestionId: z.string().uuid() });
+
+export async function getBrief(
+  input: z.input<typeof getBriefInput>,
+): Promise<ActionResult<StoredBrief | null>> {
+  const session = await getSession();
+  if (!session) return { ok: false, error: 'unauthenticated' };
+  const parsed = getBriefInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
+  }
+  const [row] = await db
+    .select()
+    .from(ingestion)
+    .where(eq(ingestion.id, parsed.data.ingestionId))
+    .limit(1);
+  if (!row) return { ok: false, error: 'not-found' };
+  if (row.userId !== session.user.id) return { ok: false, error: 'forbidden' };
+  const bundle = (row.bundle ?? null) as ({ brief?: StoredBrief } & Record<string, unknown>) | null;
+  return { ok: true, data: bundle?.brief ?? null };
+}

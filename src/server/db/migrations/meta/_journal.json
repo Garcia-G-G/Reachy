@@ -50,6 +50,13 @@
       "when": 1778872991148,
       "tag": "0006_shocking_devos",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778875112960,
+      "tag": "0007_living_zeigeist",
+      "breakpoints": true
     }
   ]
 }

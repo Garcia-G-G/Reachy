@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { user } from './auth';
 
 /**
@@ -33,6 +33,10 @@ export const ingestion = pgTable('ingestion', {
     .notNull(),
   bundle: jsonb('bundle'),
   errorMessage: text('error_message'),
+  /** Cumulative LLM cost in cents — parser pipeline is free CPU,
+   *  the cost comes from Step 2's brief-extraction + vision-pass
+   *  calls. Populated by runBriefExtraction; null until then. */
+  costCents: integer('cost_cents').default(0).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   finishedAt: timestamp('finished_at'),
 });
