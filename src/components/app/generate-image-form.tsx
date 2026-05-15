@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
+import { LayoutPreview } from '@/components/app/layout-previews';
 import {
   IMAGE_FORMAT_CATEGORIES,
   IMAGE_FORMAT_CATEGORY_LABELS,
@@ -554,35 +555,48 @@ export function GenerateImageForm({
         </div>
 
         <div>
-          <label htmlFor="gen-layout" className="mono-eyebrow mb-3 block">
-            Layout
-            <span className="ml-2 text-ink-3 normal-case">
-              — default for {IMAGE_FORMATS[format].label}:{' '}
-              <strong>{LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label}</strong>
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <span className="mono-eyebrow">Layout</span>
+            <span className="mono-eyebrow text-ink-3">
+              default for {IMAGE_FORMATS[format].label}:{' '}
+              <strong className="text-ink">
+                {LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label}
+              </strong>
             </span>
-          </label>
-          <select
-            id="gen-layout"
-            value={layoutOverride ?? ''}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === '') setLayoutOverride(null);
-              else if (v === 'none') setLayoutOverride('none');
-              else setLayoutOverride(v as LayoutId);
-            }}
-            disabled={formDisabled}
-            className="field cursor-pointer"
-          >
-            <option value="">
-              Format default ({LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label})
-            </option>
+          </div>
+          {/* Visual layout picker — 3-col grid of schematic SVG previews.
+              Picking one sets layoutOverride. The first tile is "Default"
+              (delegates to DEFAULT_LAYOUT_FOR_FORMAT) and the last is
+              "No overlay" (raw AI image, no typography). */}
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+            <LayoutTile
+              active={layoutOverride === null}
+              disabled={formDisabled}
+              label="Default"
+              sublabel={LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label}
+              onClick={() => setLayoutOverride(null)}
+              previewId={DEFAULT_LAYOUT_FOR_FORMAT[format]}
+            />
             {LAYOUT_IDS.map((id) => (
-              <option key={id} value={id}>
-                {LAYOUT_META[id].label} — {LAYOUT_META[id].tagline}
-              </option>
+              <LayoutTile
+                key={id}
+                active={layoutOverride === id}
+                disabled={formDisabled}
+                label={LAYOUT_META[id].label}
+                sublabel={LAYOUT_META[id].tagline}
+                onClick={() => setLayoutOverride(id)}
+                previewId={id}
+              />
             ))}
-            <option value="none">No overlay (raw AI background)</option>
-          </select>
+            <LayoutTile
+              active={layoutOverride === 'none'}
+              disabled={formDisabled}
+              label="No overlay"
+              sublabel="Raw AI image, no typography"
+              onClick={() => setLayoutOverride('none')}
+              previewId={null}
+            />
+          </div>
         </div>
 
         <fieldset className="space-y-3">
@@ -1111,5 +1125,67 @@ function MoreLikeThisModal({ target, initialIdea, onClose, onSubmit }: MoreLikeT
         </div>
       </div>
     </div>
+  );
+}
+
+interface LayoutTileProps {
+  active: boolean;
+  disabled?: boolean;
+  label: string;
+  sublabel: string;
+  onClick: () => void;
+  /** When non-null renders the matching LayoutPreview; when null renders
+   *  a "no overlay" placeholder (an X across the frame). */
+  previewId: LayoutId | null;
+}
+
+function LayoutTile({ active, disabled, label, sublabel, onClick, previewId }: LayoutTileProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex flex-col items-stretch gap-2 border p-2 text-left transition disabled:cursor-not-allowed disabled:opacity-50"
+      style={{
+        borderColor: active ? 'var(--ink, #14110D)' : 'rgba(20,17,13,0.18)',
+        boxShadow: active
+          ? '0 1px 0 0 rgba(20,17,13,0.05), 0 8px 24px -8px rgba(20,17,13,0.25)'
+          : 'none',
+        background: active ? 'var(--paper, #F1EBDF)' : 'transparent',
+      }}
+      aria-pressed={active}
+    >
+      <div className="flex items-center justify-center" style={{ minHeight: 80 }}>
+        {previewId ? (
+          <LayoutPreview layoutId={previewId} />
+        ) : (
+          <svg viewBox="0 0 64 80" width={64} height={80} role="img" aria-label="no overlay">
+            <title>No overlay (raw AI image)</title>
+            <rect
+              x={0.5}
+              y={0.5}
+              width={63}
+              height={79}
+              fill="#F1EBDF"
+              stroke="#14110D"
+              strokeWidth={1}
+            />
+            <line x1={6} y1={6} x2={58} y2={74} stroke="#9c9486" strokeWidth={1.5} />
+            <line x1={58} y1={6} x2={6} y2={74} stroke="#9c9486" strokeWidth={1.5} />
+          </svg>
+        )}
+      </div>
+      <div>
+        <span
+          className="block leading-tight"
+          style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 13 }}
+        >
+          {label}
+        </span>
+        <span className="mt-1 block text-[10px] leading-snug text-ink-3 line-clamp-2">
+          {sublabel}
+        </span>
+      </div>
+    </button>
   );
 }

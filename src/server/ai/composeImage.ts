@@ -239,9 +239,54 @@ function renderBackdrops(
 }
 
 /**
+ * Build the SVG <text> markup the mask path uses. Mirrors renderBlock's
+ * geometry but renders into a single <text> element with explicit fill
+ * (no fontcolor variable) — for use inside an SVG <mask> definition
+ * where the fill color drives mask visibility (white = visible).
+ *
+ * We deliberately skip word-wrapping here. text-mask-cutout is intended
+ * for ONE short word (REACHY / LAUNCH / etc); wrapping would make
+ * multi-line masks that look messy and split the AI image awkwardly.
+ */
+function renderMaskText(
+  block: TextBlock,
+  text: string,
+  width: number,
+  height: number,
+  fillColor: string,
+): string {
+  const xPx = block.x * width;
+  const yPx = block.y * height;
+  const sizePx = block.sizeFrac * height;
+  const family = fontFamily(block.font);
+  const transformed = block.upper ? text.toUpperCase() : text;
+  const letterSpacing = block.letterSpacingEm ? `${block.letterSpacingEm}em` : 'normal';
+  const weight = block.weight ?? (block.font === 'display' ? 700 : 500);
+  const anchor = block.align === 'left' ? 'start' : block.align === 'right' ? 'end' : 'middle';
+  return [
+    `<text`,
+    `  x="${xPx}"`,
+    `  y="${yPx}"`,
+    `  font-family="${family}"`,
+    `  font-size="${sizePx}"`,
+    `  font-weight="${weight}"`,
+    `  fill="${fillColor}"`,
+    `  text-anchor="${anchor}"`,
+    `  letter-spacing="${letterSpacing}"`,
+    `  dominant-baseline="middle"`,
+    `>${escapeSvg(transformed)}</text>`,
+  ].join(' ');
+}
+
+/**
  * Build the SVG overlay string. Returns a complete document with the
  * @font-face block, optional backdrops, then one <text> per layout
  * block whose copy is non-empty.
+ *
+ * When the layout sets a `mask` field, the named block becomes a cutout
+ * shape instead of rendered text: the SVG instead paints `colors.paper`
+ * over the WHOLE frame with a mask that hides paint inside the
+ * letterforms — so the underlying AI image only shows through there.
  */
 export async function buildOverlaySvg(
   layout: Layout,
@@ -252,7 +297,31 @@ export async function buildOverlaySvg(
 ): Promise<string> {
   const fontFaces = await allFontFacesCss();
   const backdrops = renderBackdrops(layout, width, height, colors);
+
+  // Mask path: when layout.mask is set, find the named block + its copy,
+  // and build a <mask> where the text shape is BLACK (hidden) on a
+  // WHITE field (visible). A `colors.paper` rect masked with this hides
+  // the paper INSIDE the text → reveals AI image inside the letters.
+  // The matching block is excluded from the visible-text rendering.
+  let maskDef = '';
+  let maskedPaperRect = '';
+  const maskExcludedRole = layout.mask?.textBlock;
+  if (layout.mask) {
+    const maskBlock = layout.blocks.find((b) => b.role === layout.mask?.textBlock);
+    const maskText = maskBlock ? resolveText(maskBlock, copy) : null;
+    if (maskBlock && maskText) {
+      maskDef = [
+        `<mask id="textcutout" maskUnits="userSpaceOnUse">`,
+        `  <rect x="0" y="0" width="${width}" height="${height}" fill="white"/>`,
+        `  ${renderMaskText(maskBlock, maskText, width, height, 'black')}`,
+        `</mask>`,
+      ].join('\n');
+      maskedPaperRect = `<rect x="0" y="0" width="${width}" height="${height}" fill="${colors.paper}" mask="url(#textcutout)"/>`;
+    }
+  }
+
   const texts = layout.blocks
+    .filter((block) => block.role !== maskExcludedRole)
     .map((block) => {
       const text = resolveText(block, copy);
       if (!text) return '';
@@ -266,7 +335,13 @@ export async function buildOverlaySvg(
     `<defs>`,
     `<style>${fontFaces}</style>`,
     backdrops.filterDefs,
+    maskDef,
     `</defs>`,
+    // Order matters: paper-with-cutout sits BELOW the backdrops/text
+    // so accent stamps and wordmarks land on top of the cutout, not
+    // behind it. (For text-mask-cutout the wordmark renders on the
+    // paper field, not on the AI image inside the letters.)
+    maskedPaperRect,
     backdrops.rects,
     texts,
     `</svg>`,

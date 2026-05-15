@@ -21,15 +21,16 @@ interface BuildArgs {
 }
 
 /**
- * Build the AI prompt for the BACKGROUND image. The renderer composes
- * brand-typography on top after the image lands, so the AI should not
- * try to render text — every prior version of this file injected
- * typography hints into the prompt and got back gibberish letterforms.
+ * Build the AI prompt for the IMAGE behind the typographic overlay. The
+ * renderer composes brand-typography on top after the image lands, so
+ * the AI should NOT render text — but it SHOULD produce a strong
+ * editorial composition with depth, focal subject, and planned negative
+ * space. Earlier versions said "background only / nothing else" and got
+ * back flat gradients; we now push the model toward magazine-cover
+ * energy instead.
  *
  * The negativeSpaceHint from the layout tells the model where to keep
- * the frame quiet so the overlay has room. The visualStyle.promptStatic
- * still drives palette and composition (NO real people, NO typography
- * inside the pixels).
+ * the frame quiet for the overlay; visualStyle drives palette and form.
  */
 export function buildImagePrompt({
   idea,
@@ -60,8 +61,16 @@ export function buildImagePrompt({
   // subject. OpenAI's 2026 Model Spec recommends this for untrusted text.
   const safeIdea = idea.trim().replace(/"""/g, '"\\""');
   const lines: string[] = [];
-  lines.push(`Subject (the background only — do NOT render any text): """${safeIdea}"""`);
-  lines.push(`Aspect ratio target: ${fm.w}x${fm.h} (${fm.label}).`);
+  // Editorial directive FIRST — establishes the "magazine cover, not
+  // stock gradient" mental model before the rest of the prompt lands.
+  // This is the load-bearing line that fights the "flat AI gradient"
+  // failure mode. We do NOT use the phrasing "background only" or
+  // "nothing else" — those produce empty visuals.
+  lines.push(
+    'EDITORIAL COMPOSITION: photographic depth, intentional negative space, ONE clear focal element, magazine-spread aesthetic. Avoid flat abstract gradients, generic geometric shapes, balanced symmetric compositions. Think: small-press magazine cover, premium product editorial, art-direction-led brand photograph. Not stock background.',
+  );
+  lines.push(`Subject — what the image should show: """${safeIdea}"""`);
+  lines.push(`Aspect ratio: ${fm.w}x${fm.h} (${fm.label}).`);
   lines.push(`Project: ${project.name}.`);
   if (audience) lines.push(`Audience: ${audience}.`);
   if (voiceTone) lines.push(`Visual tone: ${voiceTone}.`);
@@ -70,20 +79,21 @@ export function buildImagePrompt({
     lines.push(`Keywords to evoke: ${brandKit.keywords.slice(0, 8).join(', ')}.`);
   }
   // Layout-driven negative space — tells the model where to leave room
-  // for the overlaid typography. This is the load-bearing line.
-  lines.push(`COMPOSITION: ${layout.negativeSpaceHint}`);
-  // Style body keeps the palette + form guidelines but the typographic
-  // bits inside it are still useful (the style's "no text, no people"
-  // language reinforces our top-level guardrail).
+  // for the overlaid typography. Specific per-layout instructions.
+  lines.push(`COMPOSITION FRAMING: ${layout.negativeSpaceHint}`);
+  // Style body — drives palette + form. Still useful even though we've
+  // moved away from "background only" language elsewhere.
   lines.push(`Visual style: ${style.label}. ${style.promptStatic}`);
   // Restated at the tail — image models weight tail tokens more strongly.
+  // We keep the no-text guardrail hard but no longer call the image a
+  // "background" (that's the word that produces empty gradients).
   if (language === 'es') {
     lines.push(
-      'CRÍTICO: NO renderices texto, letras, palabras o números dentro de la imagen. NO firmas, NO marcas de agua. Solo el fondo abstracto/visual; la tipografía la añadimos nosotros encima.',
+      'ABSOLUTAMENTE NADA DE TEXTO: NO renderices letras, palabras, números ni tipografía dentro de la imagen. NO firmas, NO marcas de agua. La tipografía la añadimos en post-producción. Compón una imagen visualmente fuerte y editorial — pero sin texto en los píxeles.',
     );
   } else {
     lines.push(
-      'CRITICAL: do NOT render any text, letters, words, or numbers inside the image. No signatures, no watermarks. Background and visual composition only — typography is overlaid by our renderer afterward.',
+      'ABSOLUTELY NO TEXT: do NOT render letters, words, numbers, or typography inside the image. No signatures, no watermarks. Text will be added in post-production. Compose a visually strong, editorial image — just without any text in the pixels themselves.',
     );
   }
 

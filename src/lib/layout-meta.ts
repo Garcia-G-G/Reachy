@@ -18,9 +18,18 @@ export type LayoutId =
   | 'card-soft'
   | 'quote-large'
   | 'editorial-margin'
-  | 'feature-stack';
+  | 'feature-stack'
+  | 'editorial-collage'
+  | 'text-mask-cutout'
+  | 'badge-stamp';
 
+// Order = how the visual picker displays them. Designer-grade options
+// (editorial-collage, text-mask-cutout, badge-stamp) come first since
+// they're the IG-aesthetic flagships.
 export const LAYOUT_IDS: readonly LayoutId[] = [
+  'editorial-collage',
+  'text-mask-cutout',
+  'badge-stamp',
   'card-soft',
   'feature-stack',
   'quote-large',
@@ -32,6 +41,18 @@ export const LAYOUT_IDS: readonly LayoutId[] = [
 ];
 
 export const LAYOUT_META: Record<LayoutId, { label: string; tagline: string }> = {
+  'editorial-collage': {
+    label: 'Editorial · collage',
+    tagline: 'Oversized italic headline on full-bleed photo. Magazine spread.',
+  },
+  'text-mask-cutout': {
+    label: 'Text · cutout',
+    tagline: 'AI image revealed inside huge letterforms. Solid paper around.',
+  },
+  'badge-stamp': {
+    label: 'Badge · stamp',
+    tagline: 'Hero photo + circular accent stamp. Editorial poster vibe.',
+  },
   'card-soft': {
     label: 'Card · soft',
     tagline: 'Floating brand card with soft shadow over photo. IG-native feel.',
@@ -70,7 +91,9 @@ export const LAYOUT_META: Record<LayoutId, { label: string; tagline: string }> =
 export const DEFAULT_LAYOUT_FOR_FORMAT: Record<ImageFormat, LayoutId> = {
   hero: 'editorial-margin',
   og: 'editorial-margin',
-  'post-ig': 'card-soft',
+  // post-ig defaults to editorial-collage now (designer-grade flagship).
+  // card-soft was the prior default; remains explicitly pickable.
+  'post-ig': 'editorial-collage',
   square: 'feature-stack',
   'og-square': 'card-soft',
   'reel-cover': 'quote-large',
@@ -91,10 +114,17 @@ export const LAYOUT_SLOTS: Record<LayoutId, readonly LayoutSlot[]> = {
   'hero-split-left': ['eyebrow', 'headline', 'cta'],
   'quote-slab': ['headline', 'wordmark'],
   'announcement-banner': ['eyebrow', 'headline', 'subheadline'],
-  'card-soft': ['headline', 'subheadline'],
+  // card-soft promoted to 4-slot (eyebrow above card + wordmark below).
+  'card-soft': ['eyebrow', 'headline', 'subheadline', 'wordmark'],
   'quote-large': ['headline', 'wordmark'],
   'editorial-margin': ['eyebrow', 'headline', 'subheadline'],
   'feature-stack': ['eyebrow', 'headline', 'subheadline'],
+  'editorial-collage': ['eyebrow', 'headline', 'subheadline', 'wordmark'],
+  // text-mask-cutout uses only a single huge headline (1-2 words ideal)
+  // and a tiny wordmark in the corner. The headline is the mask shape,
+  // not visible text; the wordmark is the only visible literal copy.
+  'text-mask-cutout': ['headline', 'wordmark'],
+  'badge-stamp': ['eyebrow', 'headline', 'subheadline', 'wordmark'],
 };
 
 export type LayoutSlot = 'eyebrow' | 'headline' | 'subheadline' | 'cta' | 'wordmark';

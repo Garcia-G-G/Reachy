@@ -95,6 +95,22 @@ export interface BackdropRect {
   };
 }
 
+/** Cutout / mask treatment. When set, the layout's overlay covers the
+ *  whole frame with `colors.paper` EXCEPT where the named text block's
+ *  letterforms sit — there the AI background bleeds through. The named
+ *  block's `text` value is what's punched out; its other attributes
+ *  (font, size, position, alignment) define the cutout shape. The block
+ *  is implicitly NOT rendered as visible text — it becomes the mask.
+ *
+ *  Used by `text-mask-cutout` to produce magazine-style "image inside
+ *  letterforms" treatments. composeImage handles the SVG <mask> build. */
+export interface LayoutMask {
+  kind: 'text-fill-image';
+  /** Which TextBlock in `blocks[]` to use as the cutout shape. Match by
+   *  role; the matching block must be present in `blocks[]`. */
+  textBlock: TextRole;
+}
+
 export interface Layout {
   id: LayoutId;
   /** Human label for the picker. */
@@ -115,6 +131,10 @@ export interface Layout {
    *  the visual stack (last block renders on top). For typical layouts
    *  order is irrelevant since blocks don't overlap. */
   blocks: readonly TextBlock[];
+  /** Optional cutout / fill treatment — see LayoutMask. When set, the
+   *  named TextBlock becomes a mask hole revealing the AI image; the
+   *  rest of the canvas fills with `colors.paper`. */
+  mask?: LayoutMask;
 }
 
 export type LayoutId =
@@ -125,7 +145,10 @@ export type LayoutId =
   | 'card-soft'
   | 'quote-large'
   | 'editorial-margin'
-  | 'feature-stack';
+  | 'feature-stack'
+  | 'editorial-collage'
+  | 'text-mask-cutout'
+  | 'badge-stamp';
 
 /**
  * ─────────────────────────────────────────────────────────────────────
@@ -365,48 +388,85 @@ const announcementBanner: Layout = {
 const cardSoft: Layout = {
   id: 'card-soft',
   label: 'Card · soft',
-  slots: ['headline', 'subheadline'],
+  // 4 slots: eyebrow above the card, headline + sub inside, wordmark
+  // below the card. Reads like a print magazine cover stamp.
+  slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
   negativeSpaceHint:
-    'Treat the frame as the OUTER PHOTO — a colourful, textured, gradient-heavy scene where ANY part of the frame can be visually rich. The composition will be partially covered by a centered cream-coloured card with a soft drop shadow; you do NOT need to leave a quiet zone. Push for an evocative, premium IG aesthetic in the background: rich gradients, soft natural lighting, organic textures.',
+    'Center-weighted composition with RICH color and form spilling out from behind a centered floating card. The card will mask only the middle ~40% of the frame — push the most interesting part of the image into the VISIBLE HALO around the centered card: corners, edges, top quarter, bottom quarter. Photographic depth, gradient lighting, organic textures. Avoid flat solid fields.',
+  // Smaller card so the AI image dominates the frame — was 0.84×0.56,
+  // now 0.62×0.45 centered (with the y bumped to 0.275 so the card sits
+  // optical-centre). Lets the AI background read clearly on all four
+  // sides of the card.
   backdrops: [
     {
-      x: 0.08,
-      y: 0.22,
-      widthFrac: 0.84,
-      heightFrac: 0.56,
+      x: 0.19,
+      y: 0.275,
+      widthFrac: 0.62,
+      heightFrac: 0.45,
       color: 'paper',
       opacity: 1,
       cornerRadiusFrac: 0.022,
-      shadow: { blurPx: 28, offsetY: 18, opacity: 0.22 },
+      shadow: { blurPx: 32, offsetY: 22, opacity: 0.24 },
     },
   ],
   blocks: [
+    // Eyebrow ABOVE the card — mono uppercase on the AI image directly.
+    // Color = accent so it pops against the photo regardless of bg tone.
+    {
+      role: 'eyebrow',
+      textSource: 'eyebrow',
+      x: 0.5,
+      y: 0.18,
+      widthFrac: 0.7,
+      sizeFrac: 0.02,
+      font: 'mono',
+      align: 'center',
+      color: 'accent',
+      upper: true,
+      letterSpacingEm: 0.2,
+    },
+    // Headline INSIDE the card, top half.
     {
       role: 'headline',
       textSource: 'headline',
       x: 0.5,
-      y: 0.39,
-      widthFrac: 0.68,
-      sizeFrac: 0.062,
+      y: 0.36,
+      widthFrac: 0.5,
+      sizeFrac: 0.056,
       font: 'display',
       align: 'center',
       color: 'ink',
       weight: 600,
-      letterSpacingEm: -0.018,
-      lineHeightEm: 1.06,
+      letterSpacingEm: -0.02,
+      lineHeightEm: 1.05,
     },
+    // Subheadline INSIDE the card, bottom half.
     {
       role: 'subheadline',
       textSource: 'subheadline',
       x: 0.5,
-      y: 0.62,
-      widthFrac: 0.62,
-      sizeFrac: 0.024,
+      y: 0.57,
+      widthFrac: 0.48,
+      sizeFrac: 0.022,
       font: 'body',
       align: 'center',
       color: 'ink',
       weight: 400,
       lineHeightEm: 1.4,
+    },
+    // Wordmark BELOW the card — small mono, low-contrast over photo.
+    {
+      role: 'wordmark',
+      textSource: 'wordmark',
+      x: 0.5,
+      y: 0.78,
+      widthFrac: 0.6,
+      sizeFrac: 0.018,
+      font: 'mono',
+      align: 'center',
+      color: 'paper',
+      upper: true,
+      letterSpacingEm: 0.22,
     },
   ],
 };
@@ -602,6 +662,235 @@ const featureStack: Layout = {
   ],
 };
 
+/**
+ * Layout 9 — editorial-collage
+ *   Magazine-spread aesthetic. No card backdrop. The AI image fills the
+ *   frame; typography lands directly on it, asymmetric. Oversized italic
+ *   headline bleeds into the lower-left third, mono eyebrow top-left,
+ *   sub bottom-left, wordmark bottom-right. The new flagship for IG
+ *   posts (post-ig default).
+ */
+const editorialCollage: Layout = {
+  id: 'editorial-collage',
+  label: 'Editorial · collage',
+  slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
+  negativeSpaceHint:
+    'Compose with intentional empty space in the LEFT HALF of the frame, especially the lower-left quadrant. Push the strong subject — focal element, color block, hero shape — into the RIGHT 40% of the frame. Magazine-spread aesthetic: ONE clear focal element, photographic depth, planned negative space on the left where oversized typography will land. Avoid flat abstract gradients.',
+  blocks: [
+    {
+      role: 'eyebrow',
+      textSource: 'eyebrow',
+      x: 0.06,
+      y: 0.08,
+      widthFrac: 0.4,
+      sizeFrac: 0.018,
+      font: 'mono',
+      align: 'left',
+      color: 'ink',
+      upper: true,
+      letterSpacingEm: 0.22,
+    },
+    {
+      role: 'headline',
+      textSource: 'headline',
+      x: 0.05,
+      y: 0.5,
+      widthFrac: 0.62,
+      // Oversized — italic display at 16% of frame height. The brief
+      // says "bleeds onto the image" so we accept the headline can run
+      // over the right-side imagery; wrapLines breaks on word
+      // boundaries to keep it readable.
+      sizeFrac: 0.16,
+      font: 'italic',
+      align: 'left',
+      color: 'ink',
+      letterSpacingEm: -0.03,
+      lineHeightEm: 0.95,
+    },
+    {
+      role: 'subheadline',
+      textSource: 'subheadline',
+      x: 0.06,
+      y: 0.86,
+      widthFrac: 0.56,
+      sizeFrac: 0.024,
+      font: 'body',
+      align: 'left',
+      color: 'ink',
+      weight: 400,
+      lineHeightEm: 1.35,
+    },
+    {
+      role: 'wordmark',
+      textSource: 'wordmark',
+      x: 0.95,
+      y: 0.94,
+      widthFrac: 0.3,
+      sizeFrac: 0.016,
+      font: 'mono',
+      align: 'right',
+      color: 'ink',
+      upper: true,
+      letterSpacingEm: 0.22,
+    },
+  ],
+};
+
+/**
+ * Layout 10 — text-mask-cutout
+ *   Magazine-style "image inside letterforms". The AI image is revealed
+ *   ONLY through a single huge headline word; the rest of the canvas is
+ *   solid paper. Tiny wordmark in the corner is the only literal text
+ *   on top of the cutout.
+ *
+ *   composeImage's SVG mask pipeline handles this — the `mask` field
+ *   tells it which TextBlock becomes the cutout shape. That block is
+ *   NOT rendered as visible text (it's the mask); its geometry just
+ *   defines where the image bleeds through.
+ *
+ *   Best with high-contrast / chunky AI compositions: fine detail
+ *   reads as mush inside the letter shapes. The negativeSpaceHint
+ *   pushes the model toward bold gradients + chunky color blocks.
+ */
+const textMaskCutout: Layout = {
+  id: 'text-mask-cutout',
+  label: 'Text · mask cutout',
+  slots: ['headline', 'wordmark'],
+  negativeSpaceHint:
+    'HIGH CONTRAST composition with bold, chunky shapes — most of this image will only be visible inside large letterforms, so fine detail and small features will read as visual noise. Strong color blocks, dramatic gradients, simple silhouettes. Think saturated abstract art, not photoreal. ONE clear focal energy; avoid balanced symmetric noise.',
+  blocks: [
+    {
+      role: 'headline',
+      textSource: 'headline',
+      // The cutout block — composeImage detects mask.textBlock === 'headline'
+      // and uses this geometry to build the SVG <mask>. Position centered,
+      // huge font, single short word (REACHY / LAUNCH / etc).
+      x: 0.5,
+      y: 0.5,
+      widthFrac: 0.94,
+      sizeFrac: 0.32,
+      font: 'display',
+      align: 'center',
+      color: 'ink',
+      weight: 700,
+      letterSpacingEm: -0.04,
+      lineHeightEm: 0.92,
+    },
+    {
+      role: 'wordmark',
+      textSource: 'wordmark',
+      x: 0.95,
+      y: 0.94,
+      widthFrac: 0.3,
+      sizeFrac: 0.016,
+      font: 'mono',
+      align: 'right',
+      color: 'ink',
+      upper: true,
+      letterSpacingEm: 0.22,
+    },
+  ],
+  mask: { kind: 'text-fill-image', textBlock: 'headline' },
+};
+
+/**
+ * Layout 11 — badge-stamp
+ *   Editorial poster: hero AI image full-frame + small circular accent
+ *   "stamp" sticker overlay on the right edge. Headline italic on the
+ *   top of the photo; eyebrow lives INSIDE the stamp circle.
+ *
+ *   The "circle" is a rounded rect with cornerRadiusFrac=0.5 — produces
+ *   a true circle when the rect is square.
+ */
+const badgeStamp: Layout = {
+  id: 'badge-stamp',
+  label: 'Badge · stamp',
+  slots: ['eyebrow', 'headline', 'subheadline', 'wordmark'],
+  negativeSpaceHint:
+    'Photographic depth-of-field — SHARP focal subject in the LEFT 60% of the frame (a clear hero shape, character, product, or composition centerpiece). Soft bokeh / gentle gradient / negative space in the RIGHT 40% where a circular brand stamp will be overlaid. The subject should feel like a magazine cover photo, not a generic stock background.',
+  // The stamp is a ~24% diameter circle anchored mid-right. The blocks[]
+  // section places the eyebrow INSIDE this circle (same x/y, white-on-
+  // accent).
+  backdrops: [
+    {
+      x: 0.62,
+      y: 0.4,
+      widthFrac: 0.24,
+      heightFrac: 0.24,
+      color: 'accent',
+      opacity: 1,
+      // 50% of width → perfect circle when widthFrac === heightFrac (it
+      // does, both are 0.24 of frame width here — careful: heightFrac is
+      // a fraction of HEIGHT so on a 1080×1350 portrait the rect won't
+      // actually be square. composeImage uses width × frame-width and
+      // height × frame-height, so for portrait we'll get an ellipse.
+      // Accept this — looks intentional on most aspect ratios; users who
+      // want a true circle on portrait can pick square format.)
+      cornerRadiusFrac: 0.5,
+      shadow: { blurPx: 20, offsetY: 10, opacity: 0.18 },
+    },
+  ],
+  blocks: [
+    // Headline at top of frame — italic Instrument Serif, max 4 words.
+    {
+      role: 'headline',
+      textSource: 'headline',
+      x: 0.05,
+      y: 0.08,
+      widthFrac: 0.5,
+      sizeFrac: 0.075,
+      font: 'italic',
+      align: 'left',
+      color: 'ink',
+      letterSpacingEm: -0.025,
+      lineHeightEm: 1.0,
+    },
+    // Eyebrow inside the stamp — mono uppercase, paper color so it
+    // reads on accent-colored circle.
+    {
+      role: 'eyebrow',
+      textSource: 'eyebrow',
+      x: 0.74,
+      y: 0.5,
+      widthFrac: 0.22,
+      sizeFrac: 0.02,
+      font: 'mono',
+      align: 'center',
+      color: 'paper',
+      upper: true,
+      letterSpacingEm: 0.18,
+      lineHeightEm: 1.2,
+    },
+    // Subheadline below stamp — small italic, max 2 lines, color ink.
+    {
+      role: 'subheadline',
+      textSource: 'subheadline',
+      x: 0.62,
+      y: 0.74,
+      widthFrac: 0.32,
+      sizeFrac: 0.022,
+      font: 'italic',
+      align: 'center',
+      color: 'ink',
+      lineHeightEm: 1.3,
+    },
+    // Wordmark bottom-left mono.
+    {
+      role: 'wordmark',
+      textSource: 'wordmark',
+      x: 0.05,
+      y: 0.94,
+      widthFrac: 0.4,
+      sizeFrac: 0.016,
+      font: 'mono',
+      align: 'left',
+      color: 'ink',
+      upper: true,
+      letterSpacingEm: 0.22,
+    },
+  ],
+};
+
 export const LAYOUTS: Record<LayoutId, Layout> = {
   'hero-centered': heroCentered,
   'hero-split-left': heroSplitLeft,
@@ -611,6 +900,9 @@ export const LAYOUTS: Record<LayoutId, Layout> = {
   'quote-large': quoteLarge,
   'editorial-margin': editorialMargin,
   'feature-stack': featureStack,
+  'editorial-collage': editorialCollage,
+  'text-mask-cutout': textMaskCutout,
+  'badge-stamp': badgeStamp,
 };
 
 export const LAYOUT_IDS = Object.keys(LAYOUTS) as LayoutId[];
@@ -626,11 +918,12 @@ export const LAYOUT_IDS = Object.keys(LAYOUTS) as LayoutId[];
 export const DEFAULT_LAYOUT_FOR_FORMAT: Record<ImageFormat, LayoutId> = {
   hero: 'editorial-margin',
   og: 'editorial-margin',
-  // post-ig default switched from hero-centered → card-soft so IG posts
-  // come out feeling like real posts (floating brand card on a textured
-  // photo) instead of a PowerPoint title slide. The card-soft layout is
-  // tuned for the 1080x1350 4:5 aspect ratio.
-  'post-ig': 'card-soft',
+  // post-ig default: editorial-collage. Card-soft was a step up from
+  // hero-centered but still leaned on a centered backdrop card; the
+  // collage treatment removes that crutch and lets the AI background
+  // carry the visual weight (asymmetric italic display headline bleeds
+  // onto the photo). card-soft remains available as an explicit pick.
+  'post-ig': 'editorial-collage',
   square: 'feature-stack',
   'og-square': 'card-soft',
   'reel-cover': 'quote-large',
