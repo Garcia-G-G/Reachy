@@ -84,7 +84,9 @@ export function pickBoldnessModifier(
   variantIndex: number,
   seed: string,
 ): { index: number; modifier: string } {
-  if (variantIndex === 0) return { index: 0, modifier: BOLDNESS_MODIFIERS[0]! };
+  if (variantIndex === 0) {
+    return { index: 0, modifier: BOLDNESS_MODIFIERS[0] ?? '' };
+  }
   // Hash the seed to a deterministic offset; rotate through the
   // non-baseline modifiers (indices 1..N-1) for the remaining slots so
   // n=4 gets 4 distinct flavors.
@@ -94,7 +96,7 @@ export function pickBoldnessModifier(
   // pick distinct slots from the wheel.
   const offset = (hash + variantIndex - 1) % choices;
   const idx = 1 + offset;
-  return { index: idx, modifier: BOLDNESS_MODIFIERS[idx]! };
+  return { index: idx, modifier: BOLDNESS_MODIFIERS[idx] ?? '' };
 }
 
 /** Derive a character descriptor for the brand font. gpt-image-2 doesn't
@@ -156,7 +158,7 @@ export function buildImagePrompt({
   // Wordmark falls back to project name (case-preserving). The AI gets
   // this verbatim so it renders the exact characters.
   const brandWordmark =
-    (brandKit?.fontHeading && brandKit.fontHeading.match(/wordmark:\s*(.+)/i)?.[1]) ?? project.name;
+    brandKit?.fontHeading?.match(/wordmark:\s*(.+)/i)?.[1] ?? project.name;
   const brandFontHint = deriveBrandFontHint(brandKit?.fontHeading);
 
   const sections: string[] = [];

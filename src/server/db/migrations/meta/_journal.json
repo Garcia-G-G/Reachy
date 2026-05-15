@@ -43,6 +43,13 @@
       "when": 1778710446899,
       "tag": "0005_sticky_mystique",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778872991148,
+      "tag": "0006_shocking_devos",
+      "breakpoints": true
     }
   ]
 }

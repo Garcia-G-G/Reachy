@@ -9,6 +9,7 @@ import { allFontFacesCss, fontFamily } from '@/server/typography/fonts';
 
 // LEGACY TYPES — kept here so the file still parses standalone after
 // layoutTemplates.ts dropped the overlay schema. Do not reuse.
+// biome-ignore lint/correctness/noUnusedVariables: kept for legacy code-path call sites the linter cannot trace under @ts-nocheck
 type TextRole = 'eyebrow' | 'headline' | 'subheadline' | 'cta' | 'wordmark';
 type TextColorRole = 'ink' | 'paper' | 'accent';
 type TextBlock = unknown;

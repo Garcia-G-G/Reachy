@@ -63,3 +63,20 @@ export async function signedDownloadUrl(key: string, expiresInSec = 60 * 5): Pro
     expiresIn: expiresInSec,
   });
 }
+
+/** Fetch object bytes from R2 as a Buffer. Used by the ingestion
+ *  worker to pull each uploaded file back into memory for parsing. */
+export async function getR2Object(key: string): Promise<Buffer> {
+  if (!env.R2_BUCKET) throw new Error('R2_BUCKET is not set.');
+  const r2 = getR2();
+  const res = await r2.send(new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));
+  const body = res.Body as ReadableStream<Uint8Array> | NodeJS.ReadableStream | undefined;
+  if (!body) throw new Error(`R2 object ${key} has no body`);
+  const chunks: Buffer[] = [];
+  // S3 SDK returns a Node Readable in server runtimes; stream-collect.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for await (const chunk of body as AsyncIterable<Buffer | Uint8Array>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
