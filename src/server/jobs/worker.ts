@@ -7,6 +7,7 @@ async function main() {
   const { startImageWorker } = await import('./imageWorker');
   const { startVideoWorker } = await import('./videoWorker');
   const { startIngestionWorker } = await import('./ingestionWorker');
+  const { startCampaignWorker } = await import('./campaignWorker');
 
   const imageWorker = startImageWorker();
   console.log('[reachy:worker] image-gen worker started.');
@@ -17,9 +18,17 @@ async function main() {
   const ingestionWorker = startIngestionWorker();
   console.log('[reachy:worker] ingestion worker started.');
 
+  const campaignWorker = startCampaignWorker();
+  console.log('[reachy:worker] campaign worker started.');
+
   const shutdown = async (signal: string) => {
     console.log(`[reachy:worker] ${signal} received — closing workers...`);
-    await Promise.all([imageWorker.close(), videoWorker.close(), ingestionWorker.close()]);
+    await Promise.all([
+      imageWorker.close(),
+      videoWorker.close(),
+      ingestionWorker.close(),
+      campaignWorker.close(),
+    ]);
     process.exit(0);
   };
 

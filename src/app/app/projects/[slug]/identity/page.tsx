@@ -42,6 +42,8 @@ export default async function IdentityPage({ params }: IdentityPageProps) {
         keywords: kit?.keywords ?? [],
         languages: kit?.languages ?? ['en'],
         visualStyle: kit?.visualStyle ?? 'editorial',
+        allowsHumans: kit?.allowsHumans ?? true,
+        qualityGateEnabled: kit?.qualityGateEnabled ?? true,
       }}
     />
   );

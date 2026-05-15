@@ -62,6 +62,13 @@ const upsertBrandKitInput = z.object({
       'abstract',
     ])
     .optional(),
+  /** Toggle: may the reel pipeline render humans / faces. Defaults
+   *  to true post-migration; the brand-kit identity form exposes it. */
+  allowsHumans: z.boolean().optional(),
+  /** Toggle: should image generations route through the best-of-K
+   *  vision critic (effort=high). Step 5's quality-gate gallery flips
+   *  this. */
+  qualityGateEnabled: z.boolean().optional(),
 });
 
 export type UpsertBrandKitInput = z.infer<typeof upsertBrandKitInput>;
@@ -161,6 +168,14 @@ export async function upsertBrandKit(input: UpsertBrandKitInput): Promise<Action
   if (rest.visualStyle !== undefined) {
     insertValues.visualStyle = rest.visualStyle;
     updateSet.visualStyle = rest.visualStyle;
+  }
+  if (rest.allowsHumans !== undefined) {
+    insertValues.allowsHumans = rest.allowsHumans;
+    updateSet.allowsHumans = rest.allowsHumans;
+  }
+  if (rest.qualityGateEnabled !== undefined) {
+    insertValues.qualityGateEnabled = rest.qualityGateEnabled;
+    updateSet.qualityGateEnabled = rest.qualityGateEnabled;
   }
 
   const [row] = await db

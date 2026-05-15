@@ -27,6 +27,8 @@ interface IdentityFormProps {
     keywords: string[];
     languages: BrandLanguage[];
     visualStyle: BrandVisualStyle;
+    allowsHumans: boolean;
+    qualityGateEnabled: boolean;
   };
 }
 
@@ -86,6 +88,8 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
     initial.languages.length > 0 ? initial.languages : ['en'],
   );
   const [visualStyle, setVisualStyle] = useState<BrandVisualStyle>(initial.visualStyle);
+  const [allowsHumans, setAllowsHumans] = useState<boolean>(initial.allowsHumans);
+  const [qualityGateEnabled, setQualityGateEnabled] = useState<boolean>(initial.qualityGateEnabled);
 
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
   const isFirstRun = useRef(true);
@@ -120,6 +124,8 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
     keywordsRaw,
     languages,
     visualStyle,
+    allowsHumans,
+    qualityGateEnabled,
   ]);
 
   async function save() {
@@ -161,6 +167,8 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
       keywords,
       languages,
       visualStyle,
+      allowsHumans,
+      qualityGateEnabled,
     });
 
     if (ctrl.signal.aborted) return;
@@ -336,6 +344,57 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
                 </label>
               );
             })}
+          </div>
+        </Section>
+
+        {/* Reel policy toggles — added 2026-05 (Step 4 autopilot). */}
+        <Section title="Reel policy">
+          <p className="mono-eyebrow mb-6 text-ink-3">
+            Controls the directives the reel + image pipelines inject into Sora and gpt-image-2
+            prompts.
+          </p>
+          <div className="space-y-3">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allowsHumans}
+                onChange={(e) => setAllowsHumans(e.currentTarget.checked)}
+                className="mt-1 accent-ink"
+              />
+              <span className="block">
+                <span
+                  className="block"
+                  style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 18 }}
+                >
+                  Allow humans in reels
+                </span>
+                <span className="mono-eyebrow mt-1 block text-ink-3">
+                  When on, Sora may render stylized human animations (PMs at desks, customers giving
+                  feedback). When off, the pipeline injects a strict "no real people, no faces"
+                  directive into every prompt.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={qualityGateEnabled}
+                onChange={(e) => setQualityGateEnabled(e.currentTarget.checked)}
+                className="mt-1 accent-ink"
+              />
+              <span className="block">
+                <span
+                  className="block"
+                  style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 18 }}
+                >
+                  Quality gate
+                </span>
+                <span className="mono-eyebrow mt-1 block text-ink-3">
+                  When on, image generations route through the best-of-K vision critic
+                  (effort=high). Higher cost per asset, fewer dud renders.
+                </span>
+              </span>
+            </label>
           </div>
         </Section>
       </div>

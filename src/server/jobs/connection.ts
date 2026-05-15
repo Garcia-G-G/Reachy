@@ -18,4 +18,5 @@ export const QUEUE_NAMES = {
   imageGen: 'image-gen',
   videoGen: 'video-gen',
   ingestion: 'ingestion',
+  campaign: 'campaign',
 } as const;

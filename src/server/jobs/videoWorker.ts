@@ -22,10 +22,18 @@ import {
   soraCostCents,
   submitSora,
 } from '@/server/ai/openaiVideo';
+import { planSfxStingers } from '@/server/ai/planSfxStingers';
 import { canonicalizeVisualStyleKey, resolveVisualStyle } from '@/server/ai/visualStyles';
 import { isElevenLabsConfigured, synthesizeElevenLabs } from '@/server/audio/elevenlabs';
 import { generateMusic } from '@/server/audio/elevenlabsMusic';
 import { generateSfx } from '@/server/audio/elevenlabsSfx';
+import {
+  HUMAN_FORBID_SOFT_TEXT,
+  humanConstraintForFlag,
+  imageNegSpaceConstraintForFlag,
+} from '@/server/config/reelDirectives';
+import { OUTRO_TAIL_MARGIN_SEC, SFX_SLOTS, SFX_STABILITY } from '@/server/config/sfxSeeds';
+import type { ProductBriefTone } from '@/server/config/toneToVoice';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
@@ -290,7 +298,7 @@ async function runFfmpeg(
           const composedPrompt = [
             scene.imagePrompt,
             'Vertical 9:16 composition (1080×1920).',
-            'Subject sits in the central third; top 20% and bottom 25% remain visually quiet (no faces, no key product detail there).',
+            `Subject sits in the central third; top 20% and bottom 25% remain visually quiet (${imageNegSpaceConstraintForFlag(data.allowsHumans)}).`,
             'Modern editorial photography, no text, no watermark.',
           ].join(' ');
           // Inline scene images: fal.ai FLUX.2 [pro] — SOTA text-to-image
@@ -415,7 +423,15 @@ async function renderSceneTts(
         if (!text) return null;
         const path = join(tmp, `scene-tts-${i}.mp3`);
         if (useEleven) {
-          const synth = await synthesizeElevenLabs({ text, language: isEs ? 'es' : 'en' });
+          const synth = await synthesizeElevenLabs({
+            text,
+            language: isEs ? 'es' : 'en',
+            tone: data.tone as ProductBriefTone | undefined,
+            // Seed by generationId so retries of the SAME reel get
+            // the SAME voice, but two reels with the same tone get
+            // different voices from the catalog.
+            seed: data.generationId,
+          });
           await writeFile(path, synth.buffer);
           ttsCostCents += synth.costCents;
           return path;
@@ -755,7 +771,7 @@ async function runSoraOneShot(
       '',
       `Beat sheet (${imageSec}s of Sora-rendered footage, ${segPlan.length} segment${segPlan.length > 1 ? 's' : ''}: ${segPlan.join('+')}): ${beatSheet}`,
       '',
-      `Sustain the locked visual style and ACTIVE motion for the full ${imageSec} seconds — every pixel should be alive across the entire clip, never freezing. The motion described in the style is continuous and confident; let it BREATHE the full duration. Subtle camera push-in or parallax is welcome; hard cuts and whip pans are not. CRITICAL: NO text, NO letters, NO words, NO numbers visible in the rendered video. NO real people, NO faces. The beat sheet is for pacing the visual rhythm — let the energy build with each beat — but the overlay text is added separately by our renderer, so do not render words inside the video.`,
+      `Sustain the locked visual style and ACTIVE motion for the full ${imageSec} seconds — every pixel should be alive across the entire clip, never freezing. The motion described in the style is continuous and confident; let it BREATHE the full duration. Subtle camera push-in or parallax is welcome; hard cuts and whip pans are not. CRITICAL: NO text, NO letters, NO words, NO numbers visible in the rendered video. ${humanConstraintForFlag(data.allowsHumans)} The beat sheet is for pacing the visual rhythm — let the energy build with each beat — but the overlay text is added separately by our renderer, so do not render words inside the video.`,
     ].join(' ');
 
     // Step 1+2: submit (or resume) the segment chain.
@@ -804,7 +820,7 @@ async function runSoraOneShot(
           const submitted = await extendSora({
             model: soraModel,
             sourceVideoId: prev.jobId,
-            prompt: buildExtendPrompt(masterPrompt, i, segPlan.length),
+            prompt: buildExtendPrompt(masterPrompt, i, segPlan.length, data.allowsHumans),
             durationSec: segDur,
           });
           job = { ...submitted, retries: 0 };
@@ -918,8 +934,15 @@ async function runSoraOneShot(
       renderSceneTts(data, tmp),
       useElevenAudio
         ? generateMusic({
+            // Per-reel brief drives a fresh music prompt — the
+            // tagline + first scene's narration is a good seed.
+            brief: [data.plan.tagline, data.plan.scenes[0]?.narration]
+              .filter(Boolean)
+              .join(' · ')
+              .slice(0, 300),
             visualStyle: canonicalizeVisualStyleKey(data.visualStyle),
             durationSec: totalDur,
+            brandTone: data.tone ?? null,
           }).catch((err) => {
             console.warn(
               `[reachy:music] gen ${data.generationId} music failed — continuing without music: ${(err as Error).message}`,
@@ -928,7 +951,7 @@ async function runSoraOneShot(
           })
         : Promise.resolve(null),
       useElevenAudio
-        ? generateSfxBundleForReel(totalDur).catch((err) => {
+        ? generateSfxBundleForReel({ totalDurationSec: totalDur, data }).catch((err) => {
             console.warn(
               `[reachy:sfx] gen ${data.generationId} sfx failed — continuing without sfx: ${(err as Error).message}`,
             );
@@ -1046,11 +1069,12 @@ function buildExtendPrompt(
   masterPrompt: string,
   segmentIndex: number,
   totalSegments: number,
+  allowsHumans?: boolean,
 ): string {
   return [
     masterPrompt,
     '',
-    `[Continuation ${segmentIndex + 1} of ${totalSegments}] Continue smoothly from the previous frame. Preserve the exact visual style, camera framing, and pacing established in the prior segment. The scene is one continuous shot — no cut, no transition, no re-establishing camera move. CRITICAL: NO text, NO letters, NO words, NO numbers visible. NO real people, NO faces.`,
+    `[Continuation ${segmentIndex + 1} of ${totalSegments}] Continue smoothly from the previous frame. Preserve the exact visual style, camera framing, and pacing established in the prior segment. The scene is one continuous shot — no cut, no transition, no re-establishing camera move. CRITICAL: NO text, NO letters, NO words, NO numbers visible. ${humanConstraintForFlag(allowsHumans)}`,
   ].join(' ');
 }
 
@@ -1061,45 +1085,53 @@ function buildExtendPrompt(
  * Returned hits include their reel-relative start times so composeOneShot
  * can adelay each to its target.
  */
-async function generateSfxBundleForReel(
-  totalDurationSec: number,
-): Promise<Array<{ path: string; startSec: number; costCents: number }>> {
-  const midpoint = totalDurationSec / 2;
-  const tailStart = Math.max(0, totalDurationSec - 0.8);
-  // Punchy, audible stingers — earlier descriptions ("soft", "subtle",
-  // "gentle") asked ElevenLabs for whispers that vanished under the
-  // narration. These are written to be PRESENT: a confident hook at t=0,
-  // a satisfying transition mid-reel, a snappy outro hit. The disk cache
-  // keys on the description text + duration + promptInfluence, so changing
-  // the strings here also acts as a cache bust.
-  const requests: Array<{ description: string; durationSec: number; startSec: number }> = [
-    {
-      description:
-        'bright modern intro stinger, crisp synth swell with a soft transient on the downbeat, confident and premium — feels like a product reveal moment, not a whisper',
-      durationSec: 1.2,
-      startSec: 0,
-    },
-    {
-      description:
-        'attention-grabbing transition whoosh with a satisfying bass thump on the tail, modern and editorial, energetic',
-      durationSec: 1.0,
-      startSec: midpoint,
-    },
-    {
-      description:
-        'punchy outro snap with a short reverb tail, conclusive and crisp — the audio equivalent of a button press that confirms an action',
-      durationSec: 0.8,
-      startSec: tailStart,
-    },
-  ];
+async function generateSfxBundleForReel(args: {
+  totalDurationSec: number;
+  data: VideoGenJobData;
+}): Promise<Array<{ path: string; startSec: number; costCents: number }>> {
+  const { totalDurationSec, data } = args;
+
+  // Per-reel SFX plan via gpt-4o-mini — replaces the prior three
+  // hardcoded description strings. The disk cache in elevenlabsSfx.ts
+  // keys on description + duration, so stingers naturally cache when
+  // two reels happen to land on similar descriptions.
+  const plan = await planSfxStingers({
+    brief: [data.plan.tagline, data.plan.scenes[0]?.narration]
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 300),
+    visualStyle: data.visualStyle ?? 'editorial-collage',
+    durationSec: totalDurationSec,
+    scenes: data.plan.scenes.map((s) => ({
+      slot: s.slot,
+      durationSec: s.durationSec,
+      narration: s.narration ?? '',
+    })),
+    brandTone: data.tone ?? null,
+  });
+  console.log(
+    `[reachy:sfx] gen ${data.generationId} plan intro="${plan.intro.slice(0, 80)}…" midpoint="${plan.midpoint.slice(0, 80)}…" outro="${plan.outro.slice(0, 80)}…"`,
+  );
+
+  // Timings + durations come from sfxSeeds.ts (policy, not derived).
+  const requests = SFX_SLOTS.map((slot) => {
+    const description =
+      slot.kind === 'intro' ? plan.intro : slot.kind === 'midpoint' ? plan.midpoint : plan.outro;
+    const startSec =
+      slot.kind === 'intro'
+        ? 0
+        : slot.kind === 'midpoint'
+          ? totalDurationSec / 2
+          : Math.max(0, totalDurationSec - slot.durationSec - OUTRO_TAIL_MARGIN_SEC);
+    return { description, durationSec: slot.durationSec, startSec };
+  });
+
   const results = await Promise.all(
     requests.map(async (req) => {
       const sfx = await generateSfx({
         description: req.description,
         durationSec: req.durationSec,
-        // 0.85 (was 0.6) — keep the model close to our "punchy/bright/snap"
-        // language. Looser values regress toward generic ambient hits.
-        promptInfluence: 0.85,
+        promptInfluence: SFX_STABILITY,
       });
       return { path: sfx.path, startSec: req.startSec, costCents: sfx.costCents };
     }),
@@ -1170,11 +1202,15 @@ async function getStoredSoraJobs(
 const MODERATION_BLOCK =
   /blocked by our moderation|moderation system|safety system|content policy/i;
 
-/** Build a moderation-safe Sora prompt: visualStyle motion + generic abstract subject. */
+/** Build a moderation-safe Sora prompt: visualStyle motion + generic
+ *  abstract subject. Always uses the FORBID-soft variant — when
+ *  Sora's moderation has already rejected the original prompt, we
+ *  fall back to a strict abstract scene regardless of brandKit
+ *  policy. The wording lives in src/server/config/reelDirectives.ts. */
 function buildSafeSoraPrompt(visualStyle: string | null | undefined): string {
   const style = resolveVisualStyle(visualStyle);
   return [
     style.promptMotion,
-    'Subject: a purely abstract motion-graphics scene matching the style above. No specific objects, no products, no people, no recognizable items, no readable text. Pure form, color, and motion only.',
+    `Subject: a purely abstract motion-graphics scene matching the style above. No specific objects, no products, ${HUMAN_FORBID_SOFT_TEXT}. Pure form, color, and motion only.`,
   ].join(' ');
 }

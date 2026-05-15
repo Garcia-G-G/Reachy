@@ -1,6 +1,8 @@
 import 'server-only';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import { env } from '@/env';
+import type { ProductBriefTone } from '@/server/config/toneToVoice';
+import { pickVoiceFromCatalog } from '@/server/config/voiceCatalog';
 
 /**
  * ElevenLabs v3 TTS. Replaces OpenAI gpt-4o-mini-tts for reel narration
@@ -21,15 +23,13 @@ import { env } from '@/env';
 let cached: ElevenLabsClient | null = null;
 
 /**
- * ElevenLabs is "configured" only when both an API key AND at least one voice
- * are set — without a voice we can't synthesize anything. Per-language voices
- * are preferred; the catch-all ELEVENLABS_VOICE_ID is a fallback.
+ * ElevenLabs is "configured" when the API key is set. Voice IDs come
+ * from ENV pins (when present) OR the curated catalog
+ * (src/server/config/voiceCatalog.ts) — the catalog always has at
+ * least one entry per language, so the key alone is sufficient.
  */
 export function isElevenLabsConfigured(): boolean {
-  if (!env.ELEVENLABS_API_KEY) return false;
-  return Boolean(
-    env.ELEVENLABS_VOICE_ID || env.ELEVENLABS_VOICE_ID_EN || env.ELEVENLABS_VOICE_ID_ES,
-  );
+  return Boolean(env.ELEVENLABS_API_KEY);
 }
 
 /**
@@ -39,11 +39,43 @@ export function isElevenLabsConfigured(): boolean {
  *   3. Caller-provided voiceId argument (if synthesizeElevenLabs got one)
  *   4. null → caller falls back to OpenAI TTS
  */
-function resolveVoiceId(language: 'es' | 'en', override?: string): string | null {
-  if (override) return override;
-  if (language === 'es' && env.ELEVENLABS_VOICE_ID_ES) return env.ELEVENLABS_VOICE_ID_ES;
-  if (language === 'en' && env.ELEVENLABS_VOICE_ID_EN) return env.ELEVENLABS_VOICE_ID_EN;
-  return env.ELEVENLABS_VOICE_ID ?? null;
+/**
+ * Resolve the voice ID for a (language, tone, seed) tuple.
+ *
+ * Priority order:
+ *   1. Caller-supplied `override` (e.g., the form's per-reel pick).
+ *   2. Per-language ENV pin (`ELEVENLABS_VOICE_ID_ES` / `_EN`).
+ *   3. Catch-all ENV pin (`ELEVENLABS_VOICE_ID`).
+ *   4. Curated catalog (`src/server/config/voiceCatalog.ts`) — picks
+ *      deterministically by `seed` (typically the generationId), so
+ *      same reel on retry = same voice, different reels with the same
+ *      tone get different voices.
+ *
+ *  Returns null only when no ENV is set AND the catalog has no entry
+ *  for the language (which shouldn't happen — `default` is always
+ *  populated). The caller falls back to OpenAI TTS on null.
+ */
+function resolveVoiceId(args: {
+  language: 'es' | 'en';
+  override?: string;
+  tone?: ProductBriefTone | null;
+  seed?: string;
+}): string | null {
+  if (args.override) return args.override;
+  if (args.language === 'es' && env.ELEVENLABS_VOICE_ID_ES) return env.ELEVENLABS_VOICE_ID_ES;
+  if (args.language === 'en' && env.ELEVENLABS_VOICE_ID_EN) return env.ELEVENLABS_VOICE_ID_EN;
+  if (env.ELEVENLABS_VOICE_ID) return env.ELEVENLABS_VOICE_ID;
+  // Fall through to the curated catalog. The picker is deterministic
+  // by seed so retries are stable.
+  if (args.seed) {
+    const entry = pickVoiceFromCatalog({
+      language: args.language,
+      tone: args.tone ?? null,
+      seed: args.seed,
+    });
+    return entry.id;
+  }
+  return null;
 }
 
 function getClient(): ElevenLabsClient {
@@ -61,6 +93,13 @@ export interface ElevenLabsSynthArgs {
   language: 'es' | 'en';
   /** Override the env-configured default voice. */
   voiceId?: string;
+  /** Brand voice tone — picked up by the catalog resolver when no
+   *  ENV pin is set. Null falls through to language defaults. */
+  tone?: ProductBriefTone | null;
+  /** Deterministic seed for the catalog picker (typically the
+   *  generationId). Same seed = same voice on retries; different
+   *  seeds = different voices on parallel reels with the same tone. */
+  seed?: string;
 }
 
 export interface ElevenLabsSynthResult {
@@ -86,7 +125,12 @@ export async function synthesizeElevenLabs(
   args: ElevenLabsSynthArgs,
 ): Promise<ElevenLabsSynthResult> {
   const client = getClient();
-  const voiceId = resolveVoiceId(args.language, args.voiceId);
+  const voiceId = resolveVoiceId({
+    language: args.language,
+    override: args.voiceId,
+    tone: args.tone ?? null,
+    seed: args.seed,
+  });
   if (!voiceId) {
     throw new Error(
       `No ElevenLabs voice configured for language=${args.language}. ` +

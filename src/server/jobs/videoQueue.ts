@@ -23,6 +23,16 @@ export interface VideoGenJobData {
   visualStyle?: VisualStyleKey;
   /** For engine='ffmpeg': absolute R2 publicUrl of each image-backed scene's image. */
   sceneImageUrls?: Array<string | null>;
+  /** Brand-kit toggle for whether the reel may show humans / faces.
+   *  Defaults to true server-side when the brand kit's
+   *  `allows_humans` column is null (pre-Step-2 row). The video
+   *  worker reads this to pick the human-constraint directive for
+   *  the Sora prompt (see src/server/config/reelDirectives.ts). */
+  allowsHumans?: boolean;
+  /** Brand-kit tone (snapshot at enqueue time). The video worker
+   *  uses this to pick a voice from the curated catalog when no
+   *  ENV-pinned voice override is set. */
+  tone?: string;
 }
 
 let cached: Queue<VideoGenJobData> | null = null;

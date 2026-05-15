@@ -285,6 +285,12 @@ export async function composeReelAction(input: ComposeReelInput): Promise<Action
           parsed.data.visualStyle ?? kit?.visualStyle ?? null,
         ),
         sceneImageUrls: parsed.data.sceneImageUrls,
+        // Brand-kit policy toggles snapshot at enqueue time so the
+        // video worker doesn't re-read the brand_kit row mid-job
+        // (and the policy in effect at approve-time is the one Sora
+        // actually sees).
+        allowsHumans: kit?.allowsHumans ?? true,
+        tone: proj.tone ?? undefined,
       },
       { jobId: gen.id },
     );

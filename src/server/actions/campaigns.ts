@@ -198,6 +198,7 @@ export async function approveCampaign(
     .select({
       campaignId: campaign.id,
       campaignStatus: campaign.status,
+      projectId: campaign.projectId,
       ownerUserId: project.userId,
     })
     .from(campaign)
@@ -215,12 +216,27 @@ export async function approveCampaign(
     .set({ status: 'running', approvedAt: new Date() })
     .where(eq(campaign.id, parsed.data.campaignId));
 
-  // Step 4 wires the bulk-worker enqueue here. For now we just flip
-  // the status so the review UI clears + the project list can show
-  // "running". See planning/04-AUTOPILOT-BULK-GEN-REEL-RELAX.md.
-  console.log(
-    `[reachy:campaign] approved campaign=${row.campaignId} — Step 4 bulk worker not yet wired`,
-  );
+  // Step 4 — enqueue the bulk-fan-out worker. jobId === campaignId so
+  // a double-approve collapses into a single job (BullMQ rejects the
+  // second add).
+  try {
+    const queue = (await import('@/server/jobs/campaignQueue')).getCampaignQueue();
+    await queue.add(
+      'fan-out',
+      { campaignId: parsed.data.campaignId, projectId: row.projectId },
+      { jobId: parsed.data.campaignId },
+    );
+  } catch (err) {
+    // Rollback the status flip so the review UI can retry — the
+    // campaign is functionally still "awaiting approval" if we
+    // couldn't enqueue it.
+    await db
+      .update(campaign)
+      .set({ status: 'awaiting_approval', approvedAt: null })
+      .where(eq(campaign.id, parsed.data.campaignId));
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `enqueue failed: ${msg}` };
+  }
 
   return { ok: true, data: { status: 'running' } };
 }
