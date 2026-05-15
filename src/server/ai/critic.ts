@@ -89,6 +89,13 @@ export async function pickBest(args: CriticArgs): Promise<CriticVerdict> {
 
   const openai = getOpenAI();
   const model = args.model ?? 'gpt-4o-mini';
+  // GPT-5.x reasoning models reject `temperature`, `top_p`,
+  // `frequency_penalty`, `presence_penalty`, `logit_bias`. They DO
+  // accept `reasoning_effort`. For a critic, `minimal` keeps latency
+  // close to non-reasoning while still benefiting from the model's
+  // visual-reasoning improvements. (Audited against the May 2026
+  // OpenAI docs: developers.openai.com/api/docs/models/gpt-5.4-nano.)
+  const isGpt5 = /^gpt-5/i.test(model);
 
   const userContent: Array<
     | { type: 'text'; text: string }
@@ -144,12 +151,20 @@ export async function pickBest(args: CriticArgs): Promise<CriticVerdict> {
       },
     },
     max_completion_tokens: 200,
+    ...(isGpt5 ? { reasoning_effort: 'minimal' as const } : {}),
   });
 
   const choice = completion.choices[0];
   if (!choice) throw new Error('critic: no choices');
+  // Strict JSON schema mode does NOT catch refusals — those still
+  // surface as `message.refusal`. Length-cut completions don't either;
+  // the model can output partial JSON before the token budget hits.
+  // Treat both as hard failures (caller falls back to candidate 1).
   if (choice.message.refusal) {
     throw new Error(`critic: refused — ${choice.message.refusal}`);
+  }
+  if (choice.finish_reason === 'length') {
+    throw new Error('critic: response truncated by max_completion_tokens');
   }
   const content = choice.message.content;
   if (!content) throw new Error('critic: empty response');

@@ -1,6 +1,6 @@
 'use server';
 
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { QUALITY_TIERS, type QualityTier } from '@/lib/image-models';
@@ -1031,7 +1031,11 @@ export async function getRecentGenerations({
 
   if (rows.length === 0) return [];
 
-  // Pull first asset per generation in one query.
+  // Scope the asset query to JUST the generations we're returning,
+  // not the whole project — saves us scanning every asset row on
+  // projects with thousands of generated images. inArray + index on
+  // (generation_id, created_at) make this a single index seek.
+  const generationIds = rows.map((r) => r.generationId);
   const allAssets = await db
     .select({
       generationId: asset.generationId,
@@ -1039,7 +1043,7 @@ export async function getRecentGenerations({
       createdAt: asset.createdAt,
     })
     .from(asset)
-    .where(eq(asset.projectId, proj.id))
+    .where(inArray(asset.generationId, generationIds))
     .orderBy(asset.createdAt);
   const firstByGen = new Map<string, string | null>();
   for (const a of allAssets) {

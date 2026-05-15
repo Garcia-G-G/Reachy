@@ -1,6 +1,7 @@
 import 'server-only';
 import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
+import { formatPlanAsBrief, planArtDirection } from '@/server/ai/artDirector';
 import { type BrandColors, composeImage, type PlannedCopy } from '@/server/ai/composeImage';
 import { planCopy, planCopySequence } from '@/server/ai/copyPlanner';
 import { pickBest } from '@/server/ai/critic';
@@ -10,12 +11,12 @@ import { getLayout, type LayoutId, resolveSequenceHint } from '@/server/ai/layou
 import { buildImagePrompt, pickVariantAxis } from '@/server/ai/promptBuilder';
 import { enhancePrompt } from '@/server/ai/promptEnhancer';
 import type { VisualStyleKey } from '@/server/ai/visualStyles';
-import { getBrandReferenceImages } from '@/server/lib/brandReferences';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { brandKit } from '@/server/db/schema/brandKits';
 import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
+import { getBrandReferenceImages } from '@/server/lib/brandReferences';
 import { putR2 } from '@/server/storage/r2';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 import type { ImageGenJobData } from './queue';
@@ -318,9 +319,52 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               perVariantPrompt = editPrompt;
             }
 
+            // Effort=high gets a CHAIN-OF-THOUGHT art-director plan
+            // BEFORE the enhancer. The plan names focal subject /
+            // placement / lighting / depth / palette distribution /
+            // mood — concrete decisions the enhancer can riff on. Per
+            // ImageGen-CoT (arxiv 2510.05593) + Hunyuan PromptEnhancer
+            // (CVPR 2026), this 1-step CoT pass yields ~12% composition
+            // fidelity improvement over single-step enhancers. Cost
+            // ~0.02¢ per call.
+            //
+            // Worth doing for every variant when effort=high so each
+            // multi-strategy axis gets its OWN plan (different layout
+            // = different focal placement). Skipped for fast/balanced
+            // — they trade off depth for predictable latency.
+            if (
+              effortTier === 'high' &&
+              provider === 'openai' &&
+              !sourceRawUrl &&
+              (activeLayout ?? layout)
+            ) {
+              const plannedLayout = activeLayout ?? layout;
+              if (plannedLayout) {
+                try {
+                  const plan = await planArtDirection({
+                    idea: idea ?? '',
+                    format,
+                    layoutLabel: plannedLayout.label,
+                    layoutNegativeSpaceHint: plannedLayout.negativeSpaceHint,
+                    visualStyle: (activeStyle ?? kit?.visualStyle ?? 'abstract') as string,
+                    brandPalette: colors,
+                    audience: proj?.audience ?? null,
+                  });
+                  perVariantPrompt = `${formatPlanAsBrief(plan.plan)}\n\n${perVariantPrompt}`;
+                  copyCostCents += plan.costCents;
+                } catch (err) {
+                  console.warn(
+                    `[reachy:image] gen ${generationId} variant ${varIdx + 1}/${n} art-director failed — skipping CoT: ${err instanceof Error ? err.message : String(err)}`,
+                  );
+                }
+              }
+            }
+
             // Optional pre-render prompt enhancer for balanced + high.
             // Adds ~0.1¢ per call but produces noticeably better image
-            // prompts than the raw template.
+            // prompts than the raw template. For effort=high the enhancer
+            // also sees the art-director plan above and weaves it into
+            // the dense prompt.
             if (
               (effortTier === 'balanced' || effortTier === 'high') &&
               provider === 'openai' &&

@@ -6,6 +6,40 @@ import { brandKit } from '@/server/db/schema/brandKits';
 import { generation } from '@/server/db/schema/generations';
 
 /**
+ * In-process buffer cache for brand reference URLs. Used to avoid
+ * re-downloading the same brand logo for every frame of a sequence
+ * generation (4 frames = 4 redundant fetches before). TTL is short
+ * (10 minutes) so brand kit edits propagate quickly; entries are
+ * keyed by URL not project so editing the logo URL evicts cleanly.
+ *
+ * Map size is intentionally unbounded — at <50 entries per worker
+ * process it stays inside Node's heap budget; eviction by TTL keeps
+ * the long-running worker healthy without an LRU.
+ */
+interface CachedRef {
+  buffer: Buffer;
+  fetchedAt: number;
+}
+const REF_CACHE_TTL_MS = 10 * 60 * 1000;
+const refCache = new Map<string, CachedRef>();
+
+async function fetchAndCache(url: string): Promise<Buffer | null> {
+  const cached = refCache.get(url);
+  if (cached && Date.now() - cached.fetchedAt < REF_CACHE_TTL_MS) {
+    return cached.buffer;
+  }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    refCache.set(url, { buffer: buf, fetchedAt: Date.now() });
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Brand reference image loader for the worker's images.edit calls.
  *
  * Lives in /server/lib/ (no 'use server' directive) so the worker can
@@ -23,26 +57,14 @@ import { generation } from '@/server/db/schema/generations';
  * is valid (the action enqueued it). Don't expose this directly to
  * untrusted callers.
  */
-export async function getBrandReferenceImages(
-  projectId: string,
-): Promise<Buffer[]> {
-  const [kit] = await db
-    .select()
-    .from(brandKit)
-    .where(eq(brandKit.projectId, projectId))
-    .limit(1);
+export async function getBrandReferenceImages(projectId: string): Promise<Buffer[]> {
+  const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, projectId)).limit(1);
 
   const buffers: Buffer[] = [];
 
   if (kit?.logoUrl) {
-    try {
-      const res = await fetch(kit.logoUrl);
-      if (res.ok) {
-        buffers.push(Buffer.from(await res.arrayBuffer()));
-      }
-    } catch {
-      // ignore — logo fetch failures are non-fatal.
-    }
+    const buf = await fetchAndCache(kit.logoUrl);
+    if (buf) buffers.push(buf);
   }
 
   const [recentDone] = await db
@@ -65,14 +87,8 @@ export async function getBrandReferenceImages(
       .orderBy(asc(asset.createdAt))
       .limit(1);
     if (recentAsset?.publicUrl) {
-      try {
-        const res = await fetch(recentAsset.publicUrl);
-        if (res.ok) {
-          buffers.push(Buffer.from(await res.arrayBuffer()));
-        }
-      } catch {
-        // ignore
-      }
+      const buf = await fetchAndCache(recentAsset.publicUrl);
+      if (buf) buffers.push(buf);
     }
   }
 

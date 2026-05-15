@@ -93,6 +93,18 @@ export async function enhancePrompt(args: EnhancePromptArgs): Promise<EnhancePro
   if (choice.message.refusal) {
     throw new Error(`promptEnhancer: refused — ${choice.message.refusal}`);
   }
+  // Truncated completions can emit partial / unusable prompts. Fall
+  // back to the caller's basePrompt below instead of shipping a stub.
+  if (choice.finish_reason === 'length') {
+    return {
+      prompt: args.basePrompt,
+      costCents: 1,
+      usage: {
+        promptTokens: completion.usage?.prompt_tokens ?? 0,
+        completionTokens: completion.usage?.completion_tokens ?? 0,
+      },
+    };
+  }
   const text = choice.message.content?.trim();
   if (!text) {
     // Fall back to the base prompt — better to ship the original than

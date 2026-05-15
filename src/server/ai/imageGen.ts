@@ -196,10 +196,17 @@ async function openaiImage(input: GenerateImageInput): Promise<GenerateImageResu
   // Brand reference images (logo + prior best generation) are appended
   // AFTER the primary edit source. Per OpenAI's prompting guide for
   // gpt-image-2, multi-image is "compose elements" semantics — image[0]
-  // is the primary, image[1..] are references. We cap at 4 refs total
-  // (5 images including source) — quality degrades past that per the
-  // cookbook §5.9 guidance. Mask, when supported, applies only to
-  // image[0] so the refs don't get clobbered.
+  // is the primary, image[1..] are references. Community consensus
+  // 2026: 3–5 well-chosen refs outperform 16 mixed (refs compete for
+  // influence). We cap at 4 refs (5 images including source). Mask
+  // applies only to image[0] so refs aren't clobbered.
+  //
+  // Labeled prefix per OpenAI's cookbook (developers.openai.com/cookbook
+  // /examples/multimodal/image-gen-models-prompting-guide §5.9): naming
+  // the role of each image meaningfully improves how the model uses
+  // them. The first ref is the brand logo (when present); subsequent
+  // refs are prior brand assets. The variation/sequence flows pass the
+  // primary user source first.
   const refs = (input.brandReferenceImages ?? []).slice(0, 4);
   const editImages = editSource
     ? await Promise.all(
@@ -210,17 +217,24 @@ async function openaiImage(input: GenerateImageInput): Promise<GenerateImageResu
         ),
       )
     : null;
+  if (editImages && refs.length > 0) {
+    const refLabels = refs.map((_, i) =>
+      i === 0
+        ? `Image ${i + 2}: brand logo / wordmark — STYLE REFERENCE, do NOT copy literally`
+        : `Image ${i + 2}: prior brand asset — STYLE / PALETTE REFERENCE, do NOT copy composition`,
+    );
+    dispatchPrompt =
+      `Image 1: primary source — this is the composition to evolve. ${refLabels.join(' ')} ` +
+      `Anchor the output to the brand's visual vocabulary from the references; do NOT reproduce them. ${dispatchPrompt}`;
+  }
   const result = editImages
     ? await openai.images.edit({
         model: input.model,
-        // Single-ref path passes the bare File; multi-ref passes the array.
-        // The non-null assertion on editImages[0] is safe because the
-        // outer branch guarantees editImages.length >= 1.
-        image:
-          editImages.length === 1
-            ? // biome-ignore lint/style/noNonNullAssertion: branch guarantees non-empty
-              editImages[0]!
-            : editImages,
+        // The SDK's `image` param accepts both `Uploadable` and
+        // `Uploadable[]`; passing a 1-element array works for both
+        // single-source variation and multi-ref edit. Keeping it as
+        // an array unconditionally simplifies the call site.
+        image: editImages,
         prompt: dispatchPrompt,
         n: input.n,
         size,

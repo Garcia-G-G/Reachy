@@ -104,11 +104,28 @@ export function GenerationEditor(props: GenerationEditorProps) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Poll while not terminal.
+  // Refs hold the latest status so the poll callback can decide to
+  // stop without us re-binding the interval on every status transition
+  // (the previous version listed `status` in the dep array — that
+  // tore down and rebuilt the timer on every poll response, wasting
+  // a setInterval/clearInterval pair each tick).
+  const statusRef = useRef(status);
   useEffect(() => {
-    if (status === 'done' || status === 'failed') return;
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    // If we already landed in a terminal state on first render (i.e.
+    // the user opened an old gen URL), skip the poll entirely.
+    if (statusRef.current === 'done' || statusRef.current === 'failed') return;
     pollRef.current = setInterval(async () => {
+      if (statusRef.current === 'done' || statusRef.current === 'failed') {
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+        return;
+      }
       try {
         const res = await fetch(`/api/generations/${generationId}/status`, {
           cache: 'no-store',
@@ -126,17 +143,17 @@ export function GenerationEditor(props: GenerationEditorProps) {
         setCostCents(json.costCents);
         setAssets(json.assets);
         if (json.composeState) setComposeState(json.composeState);
-        if (json.status === 'done' || json.status === 'failed') {
-          if (pollRef.current) clearInterval(pollRef.current);
-        }
       } catch {
         // ignore network blips — next tick retries.
       }
     }, 2_000);
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
-  }, [generationId, status]);
+  }, [generationId]);
 
   const fm = IMAGE_FORMATS[format as ImageFormat] ?? { w: 1080, h: 1080, label: format };
   const aspect = `${fm.w} / ${fm.h}`;
@@ -377,9 +394,7 @@ export function GenerationEditor(props: GenerationEditorProps) {
           <ActionsBlock
             disabled={status !== 'done' || !selected}
             assetUrl={selected?.publicUrl ?? null}
-            assetId={selected?.id ?? null}
             generationId={generationId}
-            slug={slug}
             isSequence={Boolean(isSequence) && assets.length > 1}
             assets={assets}
             pendingAction={pendingAction}
@@ -572,9 +587,7 @@ function ColorsBlock({
 function ActionsBlock({
   disabled,
   assetUrl,
-  assetId,
   generationId,
-  slug,
   isSequence,
   assets,
   pendingAction,
@@ -582,18 +595,12 @@ function ActionsBlock({
 }: {
   disabled: boolean;
   assetUrl: string | null;
-  assetId: string | null;
   generationId: string;
-  slug: string;
   isSequence: boolean;
   assets: EditorAsset[];
   pendingAction: string | null;
   onMoreLikeThis: () => Promise<void>;
 }) {
-  // Suppress unused-variable warnings for context-only props.
-  void assetId;
-  void generationId;
-  void slug;
   async function downloadCarousel() {
     try {
       const { default: JSZip } = await import('jszip');
