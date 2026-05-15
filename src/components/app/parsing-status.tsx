@@ -17,6 +17,7 @@ interface StatusResponse {
     fileTypeMix: Record<string, number>;
     totalSizeBytes: number;
   } | null;
+  campaign: { id: string; status: string } | null;
 }
 
 export function ParsingStatus({ ingestionId }: { ingestionId: string }) {
@@ -24,6 +25,7 @@ export function ParsingStatus({ ingestionId }: { ingestionId: string }) {
   const [networkError, setNetworkError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statusRef = useRef<'parsing' | 'ready' | 'failed' | null>(null);
+  const redirectedRef = useRef(false);
 
   useEffect(() => {
     const fetchOnce = async () => {
@@ -37,13 +39,24 @@ export function ParsingStatus({ ingestionId }: { ingestionId: string }) {
         setData(json);
         setNetworkError(null);
         statusRef.current = json.status;
+        // Hand-off to the review page as soon as the campaign reaches
+        // awaiting_approval. We only redirect once; the in-flight
+        // poll might fire again before useEffect cleanup runs.
+        if (
+          !redirectedRef.current &&
+          json.status === 'ready' &&
+          json.campaign?.status === 'awaiting_approval'
+        ) {
+          redirectedRef.current = true;
+          window.location.href = `/app/projects/new-from-upload/${ingestionId}/review`;
+        }
       } catch (err) {
         setNetworkError(err instanceof Error ? err.message : 'network error');
       }
     };
     fetchOnce();
     pollRef.current = setInterval(() => {
-      if (statusRef.current === 'ready' || statusRef.current === 'failed') {
+      if (statusRef.current === 'failed' || redirectedRef.current) {
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
         return;

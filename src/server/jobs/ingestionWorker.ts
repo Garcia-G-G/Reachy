@@ -7,6 +7,7 @@ import { ingestion } from '@/server/db/schema/ingestion';
 import { aggregate } from '@/server/ingest/aggregate';
 import { routeAndParse } from '@/server/ingest/dispatch';
 import { runBriefExtractionFor } from '@/server/ingest/runBriefExtraction';
+import { runCampaignPlanForIngestion } from '@/server/ingest/runCampaignPlan';
 import type { ParseCtx, ParsedFile } from '@/server/ingest/types';
 import { getR2Object } from '@/server/storage/r2';
 import { createBullConnection, QUEUE_NAMES } from './connection';
@@ -157,6 +158,27 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
           console.log(
             `[reachy:ingest] gen ${ingestionId} brief ready · project=${b.projectSlug ?? '(not created)'} · tone=${b.brief.tone} · langs=${b.brief.languages.join(',')} · cost=${b.costCents}¢ · model=${b.briefModel} · vision=${b.visionModel ?? 'skipped'}`,
           );
+
+          // Step 3 — campaign plan. Only runs when Step 2 auto-created
+          // a project (no project ⇒ no campaign can be linked). Plan
+          // failures DO NOT regress the ingestion — the review page
+          // surfaces a "re-plan" affordance.
+          if (b.projectId) {
+            try {
+              const planRes = await runCampaignPlanForIngestion({
+                ingestionId,
+                projectId: b.projectId,
+              });
+              console.log(
+                `[reachy:ingest] gen ${ingestionId} campaign ${planRes.reused ? 'reused' : 'planned'} · campaign=${planRes.campaignId} · assets=${planRes.plan.assets.length} · cost=${planRes.costCents}¢ · model=${planRes.modelUsed}`,
+              );
+            } catch (planErr) {
+              const planMsg = planErr instanceof Error ? planErr.message : String(planErr);
+              console.warn(
+                `[reachy:ingest] gen ${ingestionId} campaign plan failed — ingestion + brief still ready: ${planMsg}`,
+              );
+            }
+          }
         } catch (briefErr) {
           const briefMsg = briefErr instanceof Error ? briefErr.message : String(briefErr);
           console.warn(

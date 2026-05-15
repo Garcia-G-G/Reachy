@@ -57,6 +57,13 @@
       "when": 1778875112960,
       "tag": "0007_living_zeigeist",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778876870846,
+      "tag": "0008_vengeful_wild_pack",
+      "breakpoints": true
     }
   ]
 }

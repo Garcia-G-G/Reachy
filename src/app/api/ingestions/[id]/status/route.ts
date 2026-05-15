@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { db } from '@/server/db/client';
+import { campaign } from '@/server/db/schema/campaigns';
 import { ingestion } from '@/server/db/schema/ingestion';
 import { getSession } from '@/server/getSession';
 
@@ -48,6 +49,22 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       }
     : null;
 
+  // Step 3 hand-off: when a campaign for this ingestion has reached
+  // 'awaiting_approval', surface its id so the parsing page can
+  // redirect to /review. The poller stops as soon as it sees this.
+  const campaignRows = await db
+    .select({ id: campaign.id, status: campaign.status })
+    .from(campaign)
+    .where(
+      and(
+        eq(campaign.ingestionId, row.id),
+        inArray(campaign.status, ['awaiting_approval', 'running', 'done', 'failed']),
+      ),
+    )
+    .orderBy(desc(campaign.createdAt))
+    .limit(1);
+  const activeCampaign = campaignRows[0] ?? null;
+
   return NextResponse.json(
     {
       id: row.id,
@@ -56,6 +73,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       createdAt: row.createdAt,
       finishedAt: row.finishedAt,
       summary,
+      campaign: activeCampaign ? { id: activeCampaign.id, status: activeCampaign.status } : null,
     },
     { headers: { 'Cache-Control': 'no-store, must-revalidate' } },
   );
