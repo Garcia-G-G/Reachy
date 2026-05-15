@@ -118,17 +118,41 @@ function buildSchema(
   };
 }
 
+/** Per-language voice rules. Generic anti-cliché lines are universal,
+ *  but the cliché LIST itself is language-specific — the LLM hits the
+ *  worst Spanish marketing tropes ("eleva tu marca", "lleva al
+ *  siguiente nivel") that an English-only stop-list never catches. */
+function defaultVoiceRules(language: 'en' | 'es'): string[] {
+  const common = [
+    '- No exclamation marks. No emoji.',
+    '- No quotation marks around your output.',
+    '- Sentence case unless a slot is explicitly UPPERCASE in layout (eyebrow / cta are uppercased downstream — write them in sentence case here).',
+    '- No first-person pronouns unless the brand voice clearly requires them.',
+  ];
+  if (language === 'es') {
+    return [
+      `- Output language: Spanish (es-MX, neutral Latin American).`,
+      ...common,
+      '- No marketing clichés. AVOID: "eleva tu marca", "lleva al siguiente nivel", "potencia tu", "revoluciona", "transforma tu", "desbloquea", "impulsa tu", "domina el", "el secreto de", "todo lo que necesitas", "descubre cómo", "soluciones que [verb]", any rhyming verb pairs ("crea y conecta", "diseña y triunfa").',
+      '- Concrete nouns over abstract nouns. Prefer "más clientes" over "crecimiento", "ventas este mes" over "resultados".',
+      '- Active voice. "Vende más" beats "incrementa tus ventas". Imperative when natural.',
+    ];
+  }
+  return [
+    `- Output language: English (US).`,
+    ...common,
+    '- No marketing clichés. AVOID: "unlock", "revolutionize", "transform", "level up", "take it to the next level", "elevate your brand", "supercharge", "game-changing", "the secret to", "everything you need", "discover how", any solution-clichés ("solutions that scale").',
+    '- Concrete nouns over abstract nouns. Prefer "more customers" over "growth", "sales this month" over "results".',
+    '- Active voice. "Sell more" beats "increase your sales". Imperative when natural.',
+  ];
+}
+
 function buildSystemPrompt(args: PlanCopyArgs): string {
   const lines: string[] = [
     'You are the copywriter for a marketing-asset generator. Your job: produce SHORT, brand-coherent text snippets that will be rendered as typography on top of a generated background image.',
     '',
     'Strict rules:',
-    `- Output language: ${args.language === 'es' ? 'Spanish (es-MX, neutral Latin American)' : 'English (US)'}.`,
-    '- No exclamation marks. No emoji.',
-    '- No quotation marks around your output.',
-    '- Sentence case unless a slot is explicitly UPPERCASE in layout (eyebrow / cta are uppercased downstream — write them in sentence case here).',
-    '- No first-person pronouns ("I", "we") unless the brand voice clearly requires them.',
-    '- No clichés like "unlock", "revolutionize", "transform", "level up".',
+    ...defaultVoiceRules(args.language),
     '',
     `Layout: ${args.layout.label} (${args.layout.id}). It uses ONLY these slots: ${args.layout.slots.join(', ')}.`,
     "Fill every slot with text that fits the slot's role. Do not write a complete brief into one slot.",
@@ -297,9 +321,8 @@ function buildSequenceSystemPrompt(args: PlanCopySequenceArgs): string {
       ' · …", … so the viewer reads the progression. Each numbered eyebrow gets a SHORT thematic suffix (1-3 words, uppercase).',
     '- Headlines progress: tease in frame 1, develop in mid, resolve in the last. Same length / shape per frame so the typographic rhythm holds.',
     '- Subheadlines may be EMPTY on clean reveal frames (intermediate frames where the visual carries the beat). When non-empty, 8-18 words.',
-    '- No exclamation marks. No emoji. No quotation marks around the output.',
-    '- Sentence case. Spanish or English per the user setting; do not mix languages mid-sequence.',
-    `- Output language: ${args.language === 'es' ? 'Spanish (es-MX, neutral Latin American)' : 'English (US)'}.`,
+    '- Do NOT mix languages mid-sequence.',
+    ...defaultVoiceRules(args.language),
     '',
     `Layout: ${args.layout.label} (${args.layout.id}). Each frame fills these slots: ${args.layout.slots.join(', ')}.`,
   ];

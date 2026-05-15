@@ -79,26 +79,35 @@ export interface VisualStyleEntry {
 // no text), and aligns stylistically with the safe-prompt fallback Sora
 // retry uses on moderation blocks. See planning/SORA-STYLE-RESULTS.md.
 
+// ─────────────────────────────────────────────────────────────────────────
+// Palette interpolation — visualStyles use {ink}, {paper}, {accent}
+// placeholders. promptBuilder substitutes them with the brand kit's
+// actual hex values at runtime. Previously the styles embedded literal
+// hexes (#f1ebdf / #14110d / #b6481a) which SILENTLY OVERRODE the
+// brand kit's palette in the AI prompt — bug found 2026-05-15. The
+// brand kit is now the single source of truth for colour.
+// ─────────────────────────────────────────────────────────────────────────
+
 export const VISUAL_STYLES: Record<VisualStyleKey, VisualStyleEntry> = {
   editorial: {
     label: 'Editorial motion',
     tagline: 'Warm paper layout with multiple geometric marks; type added by overlay.',
     soraFriendly: false,
     promptStatic: [
-      'STYLE: warm cream paper background with visible grain and slight aging at the edges, like a high-quality editorial print magazine spread.',
-      'Composition: 3-4 geometric marks arranged with editorial layout balance — a thin horizontal rule across the upper third, an oversized ink-colored shape (rectangle, half-circle, or punctuation) as the focal point in the central zone, a small burnt-sienna accent block in a quadrant for visual weight, and a thin vertical line at one edge.',
+      'STYLE: warm paper-toned background with visible grain and slight aging at the edges, like a high-quality editorial print magazine spread.',
+      'Composition: 3-4 geometric marks arranged with editorial layout balance — a thin horizontal rule across the upper third, an oversized ink-colored shape (rectangle, half-circle, or punctuation) as the focal point in the central zone, a small accent-colored block in a quadrant for visual weight, and a thin vertical line at one edge.',
       'Treat the frame as a magazine page mock with intentional negative space. Mid-century print design sensibility (Massimo Vignelli / Dieter Rams).',
-      'Palette: warm off-white paper (#f1ebdf) background, deep ink (#14110d) for primary marks, burnt sienna (#b6481a) for one accent only.',
+      'Palette: {paper} as the background, {ink} for primary marks, {accent} for one highlight only.',
       'Camera: completely static. NO zoom, NO pan, NO parallax.',
       'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography of any kind in the image. NO real people, NO faces, NO photographs, NO UI screens, NO logos. Type is added by the renderer in a separate layer.',
     ].join(' '),
     promptMotion: [
-      'STYLE: warm cream paper background with visible grain and slight aging at the edges, like a high-quality editorial print magazine spread being assembled in front of you.',
-      'Composition: 3-4 geometric marks arranged with editorial layout balance — a thin horizontal rule across the upper third, an oversized ink-colored shape (rectangle, half-circle, or punctuation) as the focal point in the central zone, a small burnt-sienna accent block in a quadrant for visual weight, and a thin vertical line at one edge.',
-      'MOTION over the clip duration: shapes drift in slowly from off-frame in the first 2 seconds with subtle easing, then settle into their final positions. The horizontal rule extends from left to right over 1 second like a pen stroke. The accent block pulses once gently near the midpoint. Camera holds completely still — only the elements move. Slow, deliberate, premium editorial pace. NO fast cuts, NO whip pans, NO camera shake.',
+      'STYLE: warm paper-toned background with visible grain and slight aging at the edges, like a high-quality editorial print magazine spread being assembled in front of you.',
+      'Composition: 3-4 geometric marks arranged with editorial layout balance — a thin horizontal rule across the upper third, an oversized ink-colored shape as the focal point, a small accent-colored block for visual weight, and a thin vertical line at one edge.',
+      'MOTION: shapes drift in slowly from off-frame in the first 2 seconds with subtle easing, then settle. The horizontal rule extends like a pen stroke. The accent block pulses once gently near the midpoint. Camera holds completely still — only the elements move. Slow, deliberate, premium editorial pace.',
       'Mid-century print design sensibility (Massimo Vignelli / Dieter Rams), but in motion.',
-      'Palette: warm off-white paper (#f1ebdf) background, deep ink (#14110d) for primary marks, burnt sienna (#b6481a) for one accent only.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography of any kind in the image. NO real people, NO faces, NO photographs, NO UI screens, NO logos. Type is added by the renderer in a separate layer.',
+      'Palette: {paper} as the background, {ink} for primary marks, {accent} for one highlight only.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography of any kind. NO real people, NO faces, NO photographs, NO UI screens, NO logos.',
     ].join(' '),
   },
   'paper-cutout': {
@@ -106,20 +115,20 @@ export const VISUAL_STYLES: Record<VisualStyleKey, VisualStyleEntry> = {
     tagline: 'Layered colored paper shapes with hard drop shadows.',
     soraFriendly: false,
     promptStatic: [
-      'STYLE: flat paper cutout collage on warm cream background, with visible paper grain across all layers and hard drop shadows at a 30-degree angle.',
-      'Composition: 3-4 layered geometric paper shapes (one circle, one rectangle, one half-moon or quarter-arc, one thin strip) in solid brand colors, overlapping with intentional hierarchy. The largest shape anchors the composition; smaller shapes provide rhythm.',
+      'STYLE: flat paper cutout collage on a warm paper-toned background, with visible paper grain across all layers and hard drop shadows at a 30-degree angle.',
+      'Composition: 3-4 layered geometric paper shapes (one circle, one rectangle, one half-moon or quarter-arc, one thin strip) in solid brand colors, overlapping with intentional hierarchy.',
       'Style of Headway / Fable summaries — tactile, hand-cut feel, slight imperfection at the edges.',
-      'Palette: cream (#fde9d8) background, deep ink (#14110d), forest green (#1f3a2f), burnt sienna (#b6481a) — distribute the colors across the shapes, no shape uses more than one color.',
+      'Palette: {paper} background, {ink} for the dominant shape, {accent} for the highlight shape. Use the brand palette exactly — no extra colours.',
       'Camera: completely static.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography. NO real people, NO faces, NO photographs, NO realistic illustration, NO icons. Just clean cutout shapes.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography. NO real people, NO faces. Just clean cutout shapes.',
     ].join(' '),
     promptMotion: [
-      'STYLE: flat paper cutout collage on warm cream background, with visible paper grain and hard drop shadows at a 30-degree angle that lengthen and shorten as shapes move.',
-      'Composition: 3-4 layered geometric paper shapes (one circle, one rectangle, one half-moon or quarter-arc, one thin strip) in solid brand colors.',
-      'MOTION over the clip duration: each shape slides into frame from a different edge with a soft easing curve over the first 2 seconds — the largest first, then the rest in cascading rhythm. Once settled, the shapes breathe with a tiny up-and-down float (3-4 pixels) and their drop shadows shift accordingly. Near the midpoint, the smallest shape rotates 15 degrees and snaps back. Camera holds completely still — only the paper moves. Tactile, hand-placed feel.',
+      'STYLE: flat paper cutout collage on a warm paper-toned background, with visible paper grain and hard drop shadows that lengthen and shorten as shapes move.',
+      'Composition: 3-4 layered geometric paper shapes in solid brand colors.',
+      'MOTION: each shape slides into frame from a different edge with a soft easing curve over the first 2 seconds — the largest first, then the rest in cascading rhythm. Once settled, the shapes breathe with a tiny up-and-down float and their drop shadows shift accordingly. Near the midpoint, the smallest shape rotates 15 degrees and snaps back. Camera holds completely still — only the paper moves.',
       'Style of Headway / Fable summaries — tactile, hand-cut, slight imperfection at the edges.',
-      'Palette: cream (#fde9d8) background, deep ink (#14110d), forest green (#1f3a2f), burnt sienna (#b6481a) — distribute across the shapes, no shape uses more than one color.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography. NO real people, NO faces, NO photographs, NO realistic illustration, NO icons. Just clean cutout shapes.',
+      'Palette: {paper} background, {ink} for the dominant shape, {accent} for the highlight shape.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people. Just clean cutout shapes.',
     ].join(' '),
   },
   'flat-2d': {
@@ -128,17 +137,17 @@ export const VISUAL_STYLES: Record<VisualStyleKey, VisualStyleEntry> = {
     soraFriendly: true,
     promptStatic: [
       'STYLE: flat 2D vector illustration scene, Lottie/Rive aesthetic, like a Duolingo or Mailchimp marketing illustration.',
-      'Composition: ONE central cartoon icon (a heart, a star, a check mark, a speech bubble, a thumbs-up — pick the one most relevant) with thick black outlines and solid fill, surrounded by 2-3 small supporting decorative shapes (dots, sparkles, or small geometric ornaments) to add liveliness without clutter.',
-      'Palette: one saturated brand color as solid background, white or off-white for the icon fill, black for outlines, one accent color for supporting elements.',
+      'Composition: ONE central cartoon icon (a heart, a star, a check mark, a speech bubble — pick the one most relevant) with thick {ink} outlines and a solid {paper} or {accent} fill, surrounded by 2-3 small supporting decorative shapes.',
+      'Palette: {accent} as the solid background field, {paper} for the icon fill, {ink} for outlines. Use exactly these brand hex values, no other colours.',
       'Camera: completely static.',
       'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO faces, NO realistic photographs. Cartoon icons only.',
     ].join(' '),
     promptMotion: [
-      'STYLE: bold, energetic flat 2D vector animation, Lottie/Rive feel — picture a Duolingo or Mailchimp marketing animation cranked up: confident motion, no hesitation.',
-      'Composition: ONE central cartoon icon (a heart, a star, a check mark, a speech bubble, a thumbs-up — pick the one most relevant to the narration) with thick black outlines and solid fill, with 4-6 supporting decorative shapes (dots, sparkles, confetti, small geometric ornaments) orbiting and entering from off-frame.',
-      'MOTION (continuous, full clip, visibly dynamic): the central icon SLAMS in from a 0.3x scale with an overshoot bounce in the first 0.5s, lands and pulses confidently (scale 0.92x ↔ 1.10x every 1.5s). Supporting shapes constantly enter and exit — confetti bursts from behind the icon every 2-3s, sparkles rotate and orbit at varying radii, small shapes whip across the frame on diagonals. Background color subtly shifts hue (within the brand palette) across the clip. A slow, controlled camera push-in (5% zoom over the full duration) adds depth. Lively, kinetic, joyful — never static.',
-      'Palette: one saturated brand color as solid background (with a subtle gradient to a neighboring hue), white or off-white for the icon fill, black for outlines, one accent color for supporting elements.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO faces, NO realistic photographs. Cartoon icons only.',
+      'STYLE: bold, energetic flat 2D vector animation, Lottie/Rive feel — Duolingo or Mailchimp marketing animation cranked up.',
+      'Composition: ONE central cartoon icon with thick {ink} outlines and a solid {paper} or {accent} fill, plus 4-6 supporting decorative shapes orbiting from off-frame.',
+      'MOTION (continuous, full clip): the central icon SLAMS in from 0.3x scale with an overshoot bounce in the first 0.5s, then pulses confidently (scale 0.92x ↔ 1.10x every 1.5s). Supporting shapes constantly enter and exit — confetti bursts, sparkles rotate, small shapes whip across diagonals. A slow camera push-in (5% zoom over the full duration) adds depth. Lively, kinetic, joyful — never static.',
+      'Palette: {accent} as the solid background field, {paper} for the icon fill, {ink} for outlines.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. Cartoon icons only.',
     ].join(' '),
   },
   infographic: {
@@ -146,18 +155,18 @@ export const VISUAL_STYLES: Record<VisualStyleKey, VisualStyleEntry> = {
     tagline: 'Multiple chart elements arranged like a mini editorial dashboard.',
     soraFriendly: false,
     promptStatic: [
-      'STYLE: minimalist data visualization composition on clean off-white background, like a New York Times infographic or The Pudding article.',
-      'Composition: 2-3 chart elements arranged in editorial hierarchy — for example a primary bar chart (3-5 solid color bars of varying heights) as the focal point, a small donut chart in a corner, and a thin trend line connecting two abstract markers. NO numbers or labels rendered as text — just the abstract chart shapes.',
-      'Palette: off-white (#f7f4ed) background, deep ink (#14110d) for primary data, one brand accent color for the highlighted data point, neutral mid-grey for secondary marks.',
+      'STYLE: minimalist data visualization composition on a clean {paper}-toned background, like a New York Times infographic or The Pudding article.',
+      'Composition: 2-3 chart elements in editorial hierarchy — a primary bar chart (3-5 solid color bars of varying heights) as the focal point, a small donut chart in a corner, and a thin trend line connecting two abstract markers. NO numbers or labels rendered as text.',
+      'Palette: {paper} background, {ink} for primary data marks, {accent} for the ONE highlighted data point. Use only these brand colours.',
       'Camera: completely static.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers in the image. NO axis labels, NO chart titles. NO real people. Pure shape, color, and abstract data form.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers in the image. NO axis labels, NO chart titles. Pure shape, color, and abstract data form.',
     ].join(' '),
     promptMotion: [
-      'STYLE: minimalist data visualization in motion, on clean off-white background — a New York Times or Pudding infographic coming to life.',
-      'Composition: 2-3 chart elements arranged in editorial hierarchy — a primary bar chart (3-5 solid color bars) as the focal point, a small donut chart in a corner, and a thin trend line connecting two abstract markers.',
-      'MOTION over the clip duration: bars grow from the baseline upward to their final heights with spring physics over the first 2 seconds, the tallest bar arriving last. The trend line draws itself stroke-by-stroke from left to right with a 1-second flourish. The donut chart fills in clockwise like a stopwatch over 1.5 seconds. Near the midpoint, the highlighted accent-color element pulses once gently. Camera holds completely still — the data is the protagonist.',
-      'Palette: off-white (#f7f4ed) background, deep ink (#14110d) for primary data, one brand accent color for the highlighted data point, neutral mid-grey for secondary marks.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers in the image. NO axis labels, NO chart titles. NO real people. Pure shape, color, and abstract data form in motion.',
+      'STYLE: minimalist data visualization in motion, on a clean {paper}-toned background.',
+      'Composition: 2-3 chart elements — bars, a donut, a trend line.',
+      'MOTION: bars grow from the baseline upward with spring physics over the first 2 seconds, the tallest arriving last. The trend line draws itself stroke-by-stroke. The donut fills clockwise. Near the midpoint, the {accent}-highlighted element pulses once gently. Camera static.',
+      'Palette: {paper} background, {ink} for primary data, {accent} for the highlighted point.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO axis labels.',
     ].join(' '),
   },
   isometric: {
@@ -166,17 +175,17 @@ export const VISUAL_STYLES: Record<VisualStyleKey, VisualStyleEntry> = {
     soraFriendly: true,
     promptStatic: [
       'STYLE: isometric 3D illustration scene, soft and clean, like Notion or Linear marketing illustrations.',
-      'Composition: 2-3 floating isometric elements in 3D perspective with subtle drop shadows — a primary card or block as the focal point, a smaller secondary block at a different elevation, and optionally one tiny abstract figure (3-color silhouette, no facial features) interacting with the elements.',
-      'Palette: soft pastel pink, sky blue, or cream background; element surfaces in soft pastel gradients with deep navy outlines.',
+      'Composition: 2-3 floating isometric elements in 3D perspective with subtle drop shadows — a primary card as the focal point, a smaller secondary block at a different elevation, optionally one tiny abstract figure (silhouette, no facial features).',
+      'Palette: {paper} background; element surfaces in {ink} and {accent} gradients with crisp outlines. Use the brand hex values exactly.',
       'Camera: static isometric perspective at 30 degrees.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO readable UI. NO real people, NO realistic faces. The cards are intentionally blank.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO readable UI. NO real people. The cards are intentionally blank.',
     ].join(' '),
     promptMotion: [
-      'STYLE: kinetic isometric 3D illustration in motion, soft and clean — Notion-meets-Linear marketing animation with confident dimensional storytelling.',
-      'Composition: 3-4 floating isometric elements at 30-degree perspective with crisp drop shadows — a primary card or block as the focal point, 1-2 secondary blocks at different elevations, and one tiny abstract figure (3-color silhouette, no facial features) actively interacting with the elements.',
-      'MOTION (continuous, visibly active across the whole clip): the primary card floats up and down on a 2s loop with a 30-pixel vertical range, its drop shadow stretching and contracting in sync. Secondary blocks orbit slowly around the primary at staggered elevations, drifting in from the edges over the first 2s. The tiny figure walks confidently between the blocks, arms swinging, hopping onto a block near the midpoint. Cards rotate gently around their vertical axis (10-degree wobble). Soft particles (sparkles or tiny dots) drift upward through the scene, parallax-shifted by depth. The camera does a slow controlled orbital nudge (3-degree azimuth shift over the clip) to add 3D parallax. Lively, alive, dimensional.',
-      'Palette: soft pastel pink, sky blue, or cream background; element surfaces in soft pastel gradients with deep navy outlines.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO readable UI. NO real people, NO realistic faces. The cards are intentionally blank.',
+      'STYLE: kinetic isometric 3D illustration in motion, soft and clean.',
+      'Composition: 3-4 floating isometric elements at 30-degree perspective with crisp drop shadows.',
+      'MOTION (continuous): the primary card floats up and down on a 2s loop, drop shadow stretching in sync. Secondary blocks orbit slowly at staggered elevations. A tiny figure walks confidently between the blocks. Cards wobble 10° around their vertical axis. Soft particles drift upward. Slow controlled orbital camera nudge (3° azimuth shift). Alive, dimensional.',
+      'Palette: {paper} background; surfaces in {ink} and {accent} gradients.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. The cards are intentionally blank.',
     ].join(' '),
   },
   abstract: {
@@ -185,20 +194,40 @@ export const VISUAL_STYLES: Record<VisualStyleKey, VisualStyleEntry> = {
     soraFriendly: true,
     promptStatic: [
       'STYLE: premium abstract motion graphics composition, like Apple/Stripe/Vercel marketing visuals.',
-      'Composition: 2-3 large soft color blobs with smooth gradients, arranged with intentional overlap and negative space. The primary blob is the focal point; secondary blobs add depth.',
-      'Palette: rich gradients — pink-to-purple, sky-to-mint, or warm cream-to-sienna — on a near-black or warm cream background.',
+      'Composition: 2-3 large soft color blobs with smooth gradients, intentional overlap and negative space.',
+      'Palette: rich {ink}↔{accent} gradients on a {paper} or near-black background. Use the brand hex values as the dominant hues — accent for highlights only.',
       'Camera: completely static.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO objects, NO UI, NO icons. Pure form and color.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO UI, NO icons. Pure form and color.',
     ].join(' '),
     promptMotion: [
-      'STYLE: cinematic premium abstract motion graphics — think Apple keynote intro, Stripe product reveal, Linear launch trailer — with luminous, hypnotic, ever-evolving forms that command attention.',
-      'Composition: 3-4 large soft color blobs with smooth gradients, arranged with intentional overlap and depth, plus volumetric light beams, drifting particles, and a soft chromatic aberration glow at the edges.',
-      'MOTION (continuous, lush, dynamic — never static): the blobs morph aggressively and breathe — each blob inhales and exhales between 0.7x and 1.4x scale on its own rhythm, edges deform like liquid mercury. Gradient hues drift smoothly across each blob in waves, cycling through the palette every 4-5 seconds. Volumetric light beams sweep slowly across the frame from off-screen, creating soft god-ray bands. Particles drift upward and across with parallax. Two blobs collide and fuse at the midpoint then separate dramatically. A subtle slow camera push-in (8% zoom over the full duration) adds depth and momentum. The frame is alive: every pixel moving, every gradient breathing. Hypnotic, premium, cinematic.',
-      'Palette: rich, saturated gradients — pink-to-purple-to-cyan, sky-to-mint-to-gold, or warm cream-to-sienna-to-blush — on a deep near-black or rich warm cream background. Allow chromatic glow halos.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO objects, NO UI, NO icons. Pure form, color, and light in continuous motion.',
+      'STYLE: cinematic premium abstract motion graphics — Apple keynote intro, Stripe product reveal, Linear launch trailer.',
+      'Composition: 3-4 large soft color blobs with smooth gradients, volumetric light beams, drifting particles, and a soft chromatic glow at the edges.',
+      'MOTION (continuous, lush): blobs morph aggressively, breathing between 0.7x and 1.4x scale. Gradient hues drift slowly through the palette every 4-5 seconds. Volumetric light beams sweep from off-screen. Particles drift upward. Two blobs collide at the midpoint and separate. Subtle slow camera push-in (8% zoom). The frame is alive: every pixel moving.',
+      'Palette: rich {ink}↔{accent} gradients on a {paper} or near-black background.',
+      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. Pure form, color, and light in continuous motion.',
     ].join(' '),
   },
 };
+
+/**
+ * Substitute the {ink} / {paper} / {accent} placeholders in a style's
+ * prompt body with the given brand hex values. Called by promptBuilder
+ * before the style line lands in the AI prompt.
+ *
+ * Garcia's bug from 2026-05-15: the style entries embedded literal
+ * hex values for the editorial palette (#f1ebdf / #14110d / #b6481a)
+ * which silently shadowed the brand kit's actual palette inside the
+ * AI prompt. This function is the canonical substitution path.
+ */
+export function interpolatePalette(
+  template: string,
+  palette: { ink: string; paper: string; accent: string },
+): string {
+  return template
+    .replaceAll('{ink}', palette.ink)
+    .replaceAll('{paper}', palette.paper)
+    .replaceAll('{accent}', palette.accent);
+}
 
 /** Resolve a brand kit's `visualStyle` field (nullable) to a usable entry. */
 export function resolveVisualStyle(key: string | null | undefined): VisualStyleEntry {

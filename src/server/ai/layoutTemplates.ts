@@ -21,6 +21,15 @@ import type { ImageFormat } from './formats';
 
 export type TextRole = 'eyebrow' | 'headline' | 'subheadline' | 'cta' | 'wordmark';
 export type TextSource = TextRole | 'static';
+/** `aiAccent` is a SPECIAL role — its block is NOT rendered by the
+ *  SVG overlay. Instead, promptBuilder collects all aiAccent blocks
+ *  and injects per-block "IN-IMAGE TEXT" directives into the AI
+ *  prompt so the model renders the text inside the picture itself
+ *  (with natural integration: paper texture, perspective, lighting).
+ *  Used for tiny editorial labels and badge inner-text where the
+ *  brand-exact font fidelity matters less than the AI's ability to
+ *  paint the text onto the composition. */
+export type BlockRole = TextRole | 'static' | 'aiAccent';
 export type TextAlign = 'left' | 'center' | 'right';
 /** Which slot in the resolved palette this run paints with. Resolved
  *  against brandKit at compose time so a layout works on any brand. */
@@ -28,8 +37,10 @@ export type TextColorRole = 'ink' | 'paper' | 'accent';
 
 export interface TextBlock {
   /** Logical role — drives font + default weight + which copy field
-   *  populates it. `static` blocks render the fixed `text` field below. */
-  role: TextRole | 'static';
+   *  populates it. `static` blocks render the fixed `text` field below.
+   *  `aiAccent` blocks are NOT rendered by composeImage — promptBuilder
+   *  collects them and asks the AI to paint the text inside the image. */
+  role: BlockRole;
   /** Anchor X within the frame, normalized [0, 1]. The point this refers
    *  to is determined by `align`: left → top-left, center → top-center,
    *  right → top-right of the text box. */
@@ -64,6 +75,16 @@ export interface TextBlock {
   /** Optional absolute line-height in em. Defaults to 1.1 for display,
    *  1.3 for body. */
   lineHeightEm?: number;
+  /** Optional max height as a fraction of the frame, used by the
+   *  auto-fit shrink loop in composeImage. When undefined, inferred
+   *  as `sizeFrac × lineHeightEm × 4` (assume max 4 lines tall).
+   *  Long Spanish copy will shrink to stay within this. */
+  heightFrac?: number;
+  /** Required when role === 'aiAccent'. Directive injected into the
+   *  AI prompt describing WHERE the text lands and HOW it should look
+   *  inside the image. composeImage ignores this; promptBuilder
+   *  consumes it. */
+  promptIntegration?: string;
 }
 
 /** Optional solid block painted under the text — e.g. a coloured slab
@@ -144,16 +165,34 @@ export interface Layout {
 }
 
 /** Default continuity instruction used when a layout doesn't define
- *  its own sequenceHint. Conservative — tells the model to preserve
- *  the prior frame faithfully with only a small ambient evolution. */
+ *  its own sequenceHint. Built on the "narrow-preserve + explicit-action"
+ *  pattern (the most reliable edit-pipeline framing for gpt-image-2):
+ *  list a tight set of attributes that MUST carry over, then tell the
+ *  model WHAT to change with an action verb and a magnitude. Vague
+ *  hints like "subtle evolution" yield either identical frames or
+ *  random redesigns — neither is a usable carousel beat. */
 function genericSequenceHint(frameIndex: number, totalFrames: number): string {
-  return (
-    `Frame ${frameIndex + 1} of ${totalFrames} — direct continuation of the previous frame. ` +
-    `Preserve the EXACT palette, lighting direction, focal subject, and overall composition. ` +
-    `Allow only a subtle ambient evolution — slight light shift, gentle texture drift, ` +
-    `or marginal repositioning. The viewer should read this as the SAME scene, one beat later — ` +
-    `not a redesign.`
-  );
+  const beat = frameIndex / Math.max(totalFrames - 1, 1); // 0..1 across the sequence
+  const action = (() => {
+    if (frameIndex === 0) return 'Establish the scene. This is the opening frame.';
+    if (frameIndex === totalFrames - 1) {
+      return 'CLOSE the sequence. Shift focal element ~20% toward frame center, scale UP ~10%, deepen the dominant shadow by ~15%. This frame must LAND.';
+    }
+    const pctLeft = Math.round((1 - beat) * 30) + 5; // 5..35
+    return `EVOLVE the prior frame. Shift focal element ~${pctLeft}% LEFT of its prior position, reduce scale ~10%, rotate ambient lighting ~15° clockwise.`;
+  })();
+  return [
+    `Frame ${frameIndex + 1} of ${totalFrames} — direct continuation of the previous frame.`,
+    'PRESERVE EXACTLY (do not redesign):',
+    '- color palette (same hex values, same relative areas)',
+    '- focal subject identity (same object, same material, same era)',
+    '- art style and rendering technique',
+    '- camera focal length / lens character',
+    '',
+    `CHANGE (action this frame): ${action}`,
+    '',
+    'Treat this like a single photograph in a 4-shot series — the viewer reads ONE evolving scene, not four different posters.',
+  ].join('\n');
 }
 
 /** Public helper: resolve a layout's sequenceHint, falling back to the
@@ -716,7 +755,11 @@ const editorialCollage: Layout = {
     'Compose with intentional empty space in the LEFT HALF of the frame, especially the lower-left quadrant. Push the strong subject — focal element, color block, hero shape — into the RIGHT 40% of the frame. Magazine-spread aesthetic: ONE clear focal element, photographic depth, planned negative space on the left where oversized typography will land. Avoid flat abstract gradients.',
   blocks: [
     {
-      role: 'eyebrow',
+      // Eyebrow handed off to the AI — small editorial label printed
+      // inside the image rather than overlaid. Natural integration with
+      // the photo's grain / lighting beats vector-perfect typography
+      // at this scale.
+      role: 'aiAccent',
       textSource: 'eyebrow',
       x: 0.06,
       y: 0.08,
@@ -727,6 +770,8 @@ const editorialCollage: Layout = {
       color: 'ink',
       upper: true,
       letterSpacingEm: 0.22,
+      promptIntegration:
+        'In the UPPER-LEFT corner of the frame (approximately 6% from the left edge, 8% from the top), integrate a small editorial label in a clean sans-serif mono font, UPPERCASE, ink-toned, approximately 1.8% of frame height tall, with generous letter-spacing. Treat it as printed on the image — let it pick up the paper grain / lighting subtly.',
     },
     {
       role: 'headline',
@@ -734,11 +779,10 @@ const editorialCollage: Layout = {
       x: 0.05,
       y: 0.5,
       widthFrac: 0.62,
-      // Oversized — italic display at 16% of frame height. The brief
-      // says "bleeds onto the image" so we accept the headline can run
-      // over the right-side imagery; wrapLines breaks on word
-      // boundaries to keep it readable.
+      // Oversized — italic display at 16% of frame height. Auto-fit
+      // in composeImage shrinks if long Spanish copy would overflow.
       sizeFrac: 0.16,
+      heightFrac: 0.4,
       font: 'italic',
       align: 'left',
       color: 'ink',
@@ -897,10 +941,10 @@ const badgeStamp: Layout = {
       letterSpacingEm: -0.025,
       lineHeightEm: 1.0,
     },
-    // Eyebrow inside the stamp — mono uppercase, paper color so it
-    // reads on accent-colored circle.
+    // Eyebrow inside the stamp — AI paints the label directly onto
+    // the orange/accent disc so it picks up the stamp's printed feel.
     {
-      role: 'eyebrow',
+      role: 'aiAccent',
       textSource: 'eyebrow',
       x: 0.74,
       y: 0.5,
@@ -912,6 +956,8 @@ const badgeStamp: Layout = {
       upper: true,
       letterSpacingEm: 0.18,
       lineHeightEm: 1.2,
+      promptIntegration:
+        'Inside the orange/accent-colored circular stamp on the right side of the frame (center around 74% from the left edge, 50% from the top), render a short label in clean sans-serif mono UPPERCASE text, paper-colored so it reads against the accent disc. Arrange the text as if printed/inked into the stamp — slight imperfection, generous letter-spacing, ink-on-paper feel.',
     },
     // Subheadline below stamp — small italic, max 2 lines, color ink.
     {

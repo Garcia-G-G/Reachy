@@ -130,6 +130,40 @@ function wrapLines(text: string, widthPx: number, fontSizePx: number): string[] 
   return lines;
 }
 
+/**
+ * Auto-fit shrink: try the block's declared sizeFrac; if the wrapped
+ * output exceeds the block's heightFrac (or 4 lines), shrink by 10%
+ * and retry. Cap at 8 attempts; floor at 0.5× original to keep things
+ * readable. Returns the final size + line array.
+ *
+ * Before this, long Spanish copy bled off the canvas because the
+ * sizeFrac was a fixed numeric literal in the layout — no auto-fit.
+ * The shrink is binary on the SAME wrap heuristic so the math stays
+ * cheap; we don't need real font metrics for editorial copy lengths.
+ */
+function autoFitWrap(
+  text: string,
+  widthPx: number,
+  initialSizePx: number,
+  maxHeightPx: number,
+  lineHeightEm: number,
+  maxLines = 4,
+): { sizePx: number; lines: string[]; shrunk: boolean } {
+  const minSizePx = initialSizePx * 0.5;
+  let sizePx = initialSizePx;
+  let lines = wrapLines(text, widthPx, sizePx);
+  for (let i = 0; i < 8; i++) {
+    const totalHeight = lines.length * sizePx * lineHeightEm;
+    const fits = lines.length <= maxLines && totalHeight <= maxHeightPx;
+    if (fits || sizePx <= minSizePx) {
+      return { sizePx, lines, shrunk: i > 0 };
+    }
+    sizePx = Math.max(minSizePx, sizePx * 0.9);
+    lines = wrapLines(text, widthPx, sizePx);
+  }
+  return { sizePx, lines, shrunk: true };
+}
+
 function renderBlock(
   block: TextBlock,
   text: string,
@@ -137,11 +171,15 @@ function renderBlock(
   height: number,
   colors: BrandColors,
 ): string {
+  // aiAccent blocks are rendered by the AI inside the image — skip
+  // them in the SVG overlay. promptBuilder collects them separately.
+  if (block.role === 'aiAccent') return '';
+
   // Pixel coordinates from normalized fractions.
   const xPx = block.x * width;
   const yPx = block.y * height;
   const widthPx = block.widthFrac * width;
-  const sizePx = block.sizeFrac * height;
+  const initialSizePx = block.sizeFrac * height;
   const family = fontFamily(block.font);
   const color = resolveColor(block.color, colors);
   const align = block.align;
@@ -150,7 +188,13 @@ function renderBlock(
   const lineHeightEm =
     block.lineHeightEm ?? (block.font === 'display' || block.font === 'italic' ? 1.05 : 1.3);
 
-  const lines = wrapLines(transformed, widthPx, sizePx);
+  // Auto-fit: shrink size if wrapped output overflows the block's
+  // height budget. heightFrac defaults to assuming 4 lines × lineHeight.
+  const heightFrac = block.heightFrac ?? block.sizeFrac * lineHeightEm * 4;
+  const maxHeightPx = heightFrac * height;
+  const fit = autoFitWrap(transformed, widthPx, initialSizePx, maxHeightPx, lineHeightEm);
+  const sizePx = fit.sizePx;
+  const lines = fit.lines;
   if (lines.length === 0) return '';
 
   // SVG text-anchor maps from layout `align` cleanly: left→start,

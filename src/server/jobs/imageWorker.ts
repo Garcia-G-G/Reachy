@@ -8,7 +8,7 @@ import { pickBest } from '@/server/ai/critic';
 import { getFormat } from '@/server/ai/formats';
 import { generateImage } from '@/server/ai/imageGen';
 import { getLayout, type LayoutId, resolveSequenceHint } from '@/server/ai/layoutTemplates';
-import { buildImagePrompt, pickVariantAxis } from '@/server/ai/promptBuilder';
+import { buildImagePrompt, pickVariantAxis, resolveAiAccents } from '@/server/ai/promptBuilder';
 import { enhancePrompt } from '@/server/ai/promptEnhancer';
 import type { VisualStyleKey } from '@/server/ai/visualStyles';
 import { db } from '@/server/db/client';
@@ -294,14 +294,44 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               strategyHint = axis.strategyHint;
             }
 
+            // aiAccent layouts NEED the planned copy BEFORE the image
+            // prompt is built — the AI has to paint the actual eyebrow /
+            // badge text into the image, not generic placeholder text.
+            // So we plan copy early when:
+            //   - we're rebuilding the prompt (multi-strategy), OR
+            //   - the active layout has aiAccent blocks (regardless of mode).
+            // Otherwise we keep the original lazy planning at compose time.
+            const layoutForCopy = activeLayout ?? layout;
+            const layoutHasAiAccent =
+              layoutForCopy?.blocks.some((b) => b.role === 'aiAccent') ?? false;
+            const needEarlyCopy = (multiStrategyOn && layout) || layoutHasAiAccent;
+
+            let earlyCopy: PlannedCopy | null = null;
+            if (needEarlyCopy && layoutForCopy) {
+              const planEarly = await planCopy({
+                idea: idea ?? '',
+                layout: layoutForCopy,
+                language: language ?? 'en',
+                project: proj
+                  ? { name: proj.name, audience: proj.audience, tone: proj.tone }
+                  : { name: 'Project', audience: null, tone: null },
+                brandKit: kit ?? null,
+              });
+              copyCostCents += planEarly.costCents;
+              earlyCopy = planEarly.copy;
+            }
+
+            const aiAccents =
+              earlyCopy && layoutForCopy ? resolveAiAccents(layoutForCopy, earlyCopy) : [];
+
             // Per-variant prompt. For the FIRST variant in single-shot
             // mode we keep using the worker's already-built editPrompt
-            // (covers the variation flow's prefix). For multi-strategy
-            // variants we rebuild via buildImagePrompt with the
-            // perturbed axes — the action's enqueued prompt was built
-            // for the requested axes, so it'd be stale for variant 2..N.
+            // UNLESS the layout has aiAccent blocks — in that case the
+            // action-built prompt is missing the AI-text directives, so
+            // we rebuild here with the freshly-resolved aiAccents.
+            const shouldRebuildPrompt = (multiStrategyOn && layoutForCopy) || aiAccents.length > 0;
             let perVariantPrompt: string;
-            if (multiStrategyOn && layout) {
+            if (shouldRebuildPrompt && layoutForCopy) {
               perVariantPrompt = buildImagePrompt({
                 idea: idea ?? '',
                 format,
@@ -311,9 +341,10 @@ export function startImageWorker(): Worker<ImageGenJobData> {
                 brandKit: kit ?? null,
                 language: language ?? 'en',
                 visualStyleOverride: activeStyle ?? undefined,
-                layout: activeLayout ?? layout,
+                layout: layoutForCopy,
                 effort: effortTier,
                 strategyHint: strategyHint ?? undefined,
+                aiAccents: aiAccents.length > 0 ? aiAccents : undefined,
               });
             } else {
               perVariantPrompt = editPrompt;
@@ -445,20 +476,28 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               const rawUpload = await putR2(rawKey, sized, 'image/png');
               rawUploads.push({ key: rawUpload.key, publicUrl: rawUpload.publicUrl });
 
-              // Per-variant copy plan against THIS variant's layout.
-              const planForVariant = await planCopy({
-                idea: idea ?? '',
-                layout: activeLayout,
-                language: language ?? 'en',
-                project: proj
-                  ? { name: proj.name, audience: proj.audience, tone: proj.tone }
-                  : { name: 'Project', audience: null, tone: null },
-                brandKit: kit ?? null,
-              });
-              copyCostCents += planForVariant.costCents;
+              // Per-variant copy plan against THIS variant's layout —
+              // reuse the early plan when we made one (multi-strategy
+              // or aiAccent layouts), otherwise plan it now.
+              let planCopyForVariant: PlannedCopy;
+              if (earlyCopy) {
+                planCopyForVariant = earlyCopy;
+              } else {
+                const planForVariant = await planCopy({
+                  idea: idea ?? '',
+                  layout: activeLayout,
+                  language: language ?? 'en',
+                  project: proj
+                    ? { name: proj.name, audience: proj.audience, tone: proj.tone }
+                    : { name: 'Project', audience: null, tone: null },
+                  brandKit: kit ?? null,
+                });
+                copyCostCents += planForVariant.costCents;
+                planCopyForVariant = planForVariant.copy;
+              }
               composeCostCents += 1;
-              if (varIdx === 0) copy = planForVariant.copy; // legacy single-copy carrier
-              variantCopies.push(planForVariant.copy);
+              if (varIdx === 0) copy = planCopyForVariant; // legacy single-copy carrier
+              variantCopies.push(planCopyForVariant);
               variantLayoutIds.push(activeLayout.id);
               variantLabels.push(strategyLabel);
 
@@ -467,7 +506,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
                 width: fm.w,
                 height: fm.h,
                 layout: activeLayout,
-                copy: planForVariant.copy,
+                copy: planCopyForVariant,
                 colors,
               });
               composedBuffers.push(composed);

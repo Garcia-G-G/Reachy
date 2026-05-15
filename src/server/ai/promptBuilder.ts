@@ -2,9 +2,9 @@ import 'server-only';
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
 import { getFormat, type ImageFormat } from './formats';
-import type { Layout } from './layoutTemplates';
+import type { Layout, TextBlock } from './layoutTemplates';
 import type { VisualStyleKey } from './visualStyles';
-import { resolveVisualStyle } from './visualStyles';
+import { interpolatePalette, resolveVisualStyle } from './visualStyles';
 
 /**
  * Build the AI prompt for the IMAGE behind the typographic overlay.
@@ -34,6 +34,15 @@ import { resolveVisualStyle } from './visualStyles';
 
 export type EffortLevel = 'fast' | 'balanced' | 'high';
 
+/** Resolved copy slot value for an aiAccent block — what the AI should
+ *  render INSIDE the image. Built from the layout's `aiAccent` blocks
+ *  paired with the planned-copy text at the same role. */
+export interface AiAccentSpec {
+  role: string;
+  text: string;
+  promptIntegration: string;
+}
+
 interface BuildArgs {
   idea: string;
   format: ImageFormat;
@@ -50,6 +59,11 @@ interface BuildArgs {
    *  when set, the builder mentions which axis this variant explores so
    *  the model leans into the contrast instead of repeating itself. */
   strategyHint?: string;
+  /** Resolved aiAccent specs — blocks the AI must render INSIDE the
+   *  image. When non-empty the no-text guardrail is loosened to an
+   *  exception list. The worker builds this by pairing the layout's
+   *  aiAccent TextBlocks with the planned copy. */
+  aiAccents?: AiAccentSpec[];
 }
 
 export function buildImagePrompt({
@@ -62,6 +76,7 @@ export function buildImagePrompt({
   layout,
   effort = 'balanced',
   strategyHint,
+  aiAccents,
 }: BuildArgs): string {
   const fm = getFormat(format);
   const styleKey = visualStyleOverride ?? brandKit?.visualStyle ?? null;
@@ -77,6 +92,13 @@ export function buildImagePrompt({
     paper: brandKit?.bgColor ?? '#F1EBDF',
     accent: brandKit?.accentColor ?? '#B6481A',
   };
+  // Interpolate the visualStyle's {ink}/{paper}/{accent} placeholders
+  // with the brand kit's actual hex values. Before this, the styles
+  // embedded literal hexes which silently shadowed the brand kit's
+  // palette inside the AI prompt — the brand kit's colours never
+  // reached the model. Bug fixed 2026-05-15.
+  const styleBody = interpolatePalette(style.promptStatic, palette);
+  const hasAiAccents = (aiAccents?.length ?? 0) > 0;
 
   const sections: string[] = [];
 
@@ -86,7 +108,7 @@ export function buildImagePrompt({
   );
 
   // 2. Style.
-  sections.push(`STYLE: ${style.label}. ${style.promptStatic}`);
+  sections.push(`STYLE: ${style.label}. ${styleBody}`);
 
   // 3. Layout — where to leave room for the typographic overlay.
   sections.push(`LAYOUT NEGATIVE SPACE: ${layout.negativeSpaceHint}`);
@@ -116,9 +138,7 @@ export function buildImagePrompt({
     sections.push(`STRATEGY: ${strategyHint}`);
   }
 
-  // 6. Effort cue — for non-reasoning models, an in-prompt "take time"
-  // instruction. Reasoning models get the real param via imageGen and
-  // ignore this gracefully.
+  // 6. Effort cue.
   if (effort === 'high') {
     sections.push(
       'EFFORT: take time to consider composition deliberately before rendering — choose the focal element, the lighting direction, and the colour distribution intentionally. Output a single coherent artwork, not a sketch.',
@@ -129,9 +149,35 @@ export function buildImagePrompt({
     );
   }
 
+  // 6b. aiAccent directives — explicit exceptions to the no-text rule.
+  // When the layout has any aiAccent TextBlock, the AI is asked to
+  // render those small accent pieces of text INSIDE the image (the
+  // brand-exact headline/wordmark is still composited as a vector
+  // overlay afterwards). Each accent gets a tightly-scoped directive
+  // describing position, font feel, size, and color.
+  if (hasAiAccents && aiAccents) {
+    const directives = aiAccents
+      .map((a, i) => `  (${i + 1}) ${a.promptIntegration.trim()} TEXT: "${a.text}".`)
+      .join('\n');
+    sections.push(
+      `IN-IMAGE TEXT — the following SMALL accent pieces of text MUST appear inside the image, integrated naturally with the composition (printed-on-the-image feel, not floating overlay):\n${directives}`,
+    );
+  }
+
   // 7. No-text guardrail at the tail — last position so the model
-  // weights it most heavily.
-  if (language === 'es') {
+  // weights it most heavily. When aiAccents is non-empty the guardrail
+  // becomes an exception list instead of an absolute ban.
+  if (hasAiAccents) {
+    if (language === 'es') {
+      sections.push(
+        'NO TEXTO EXCEPTO lo descrito en IN-IMAGE TEXT arriba: NO añadas otras letras, palabras, números, marcas de agua o firmas. Las únicas piezas de texto permitidas son las listadas arriba; el resto de la tipografía (headline + wordmark) se compone en post-producción.',
+      );
+    } else {
+      sections.push(
+        'NO TEXT EXCEPT what is described in IN-IMAGE TEXT above: do NOT add other letters, words, numbers, watermarks, or signatures. The ONLY text pieces allowed are those listed above; the rest of the typography (headline + wordmark) is composed in post-production.',
+      );
+    }
+  } else if (language === 'es') {
     sections.push(
       'ABSOLUTAMENTE NADA DE TEXTO en la imagen: NO letras, NO palabras, NO números, NO tipografía, NO firmas, NO marcas de agua. La tipografía se compone en post-producción.',
     );
@@ -141,11 +187,46 @@ export function buildImagePrompt({
     );
   }
 
-  // Aspect ratio is a single short line — separate from the structure
-  // so it doesn't dilute the editorial framing.
+  // Aspect ratio.
   sections.push(`Aspect ratio: ${fm.w}x${fm.h} (${fm.label}).`);
 
   return sections.join('\n\n');
+}
+
+/**
+ * Pair a layout's aiAccent TextBlocks with the planned-copy values to
+ * produce the AiAccentSpec[] the prompt builder consumes. Returns
+ * empty when the layout has no aiAccent blocks.
+ *
+ * Each spec carries the resolved text (from PlannedCopy[role] or the
+ * static `text` field), the layout's promptIntegration directive
+ * (which describes WHERE the text lands and HOW it should look), and
+ * the role name for downstream logging.
+ */
+export function resolveAiAccents(
+  layout: Layout,
+  copy: {
+    eyebrow?: string;
+    headline?: string;
+    subheadline?: string;
+    cta?: string;
+    wordmark?: string;
+  },
+): AiAccentSpec[] {
+  const out: AiAccentSpec[] = [];
+  for (const block of layout.blocks as readonly TextBlock[]) {
+    if (block.role !== 'aiAccent') continue;
+    const text = (() => {
+      if (block.textSource === 'static') return block.text?.trim() ?? '';
+      const slot = block.textSource as keyof typeof copy;
+      return copy[slot]?.trim() ?? '';
+    })();
+    if (!text) continue; // skip empty accents — no point asking AI to render blanks.
+    const directive = (block.promptIntegration ?? '').trim();
+    if (!directive) continue; // layout author forgot the directive — fail open.
+    out.push({ role: block.role, text, promptIntegration: directive });
+  }
+  return out;
 }
 
 /**
@@ -203,13 +284,75 @@ const ALT_LAYOUTS_FOR: Record<
   'announcement-banner': 'editorial-margin',
 };
 
+/**
+ * Deterministic but per-generation-varied alt layout picker. The
+ * previous static 1:1 map meant clicking Regenerate produced the
+ * SAME alt-layout rotation each time. This walks the layout family
+ * (cross-axis pairs only, never same-family swaps) starting from a
+ * different offset per generationId so two regenerations of the same
+ * brief land on different alternatives. Bug fixed 2026-05-15.
+ */
+const LAYOUT_FAMILY_PAIRS: Record<
+  import('./layoutTemplates').LayoutId,
+  readonly import('./layoutTemplates').LayoutId[]
+> = {
+  'editorial-collage': ['badge-stamp', 'text-mask-cutout', 'card-soft'],
+  'badge-stamp': ['editorial-collage', 'card-soft', 'text-mask-cutout'],
+  'text-mask-cutout': ['card-soft', 'badge-stamp', 'editorial-collage'],
+  'card-soft': ['text-mask-cutout', 'editorial-collage', 'badge-stamp'],
+  'feature-stack': ['quote-large', 'announcement-banner', 'card-soft'],
+  'quote-large': ['feature-stack', 'announcement-banner', 'card-soft'],
+  'editorial-margin': ['card-soft', 'feature-stack', 'announcement-banner'],
+  'hero-centered': ['feature-stack', 'card-soft', 'editorial-margin'],
+  'hero-split-left': ['editorial-margin', 'editorial-collage', 'announcement-banner'],
+  'quote-slab': ['quote-large', 'feature-stack', 'card-soft'],
+  'announcement-banner': ['editorial-margin', 'feature-stack', 'card-soft'],
+};
+
+const STYLE_FAMILY_PAIRS: Record<VisualStyleKey, readonly VisualStyleKey[]> = {
+  editorial: ['paper-cutout', 'abstract', 'infographic'],
+  'paper-cutout': ['editorial', 'flat-2d', 'isometric'],
+  'flat-2d': ['isometric', 'paper-cutout', 'abstract'],
+  infographic: ['abstract', 'editorial', 'isometric'],
+  isometric: ['flat-2d', 'abstract', 'paper-cutout'],
+  abstract: ['editorial', 'isometric', 'infographic'],
+};
+
+/** Fast deterministic hash of a string → 32-bit unsigned int. Used to
+ *  seed the per-generation rotation offset. Cyrb53-style. */
+function hashString(s: string): number {
+  let h1 = 0xdeadbeef ^ s.length;
+  let h2 = 0x41c6ce57 ^ s.length;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0) ^ ((h1 >>> 0) << 1);
+}
+
 export function pickVariantAxis(
   variantIndex: number,
   requestedLayoutId: import('./layoutTemplates').LayoutId,
   requestedStyleKey: VisualStyleKey,
+  /** Optional seed (e.g. generationId) — when provided the layout +
+   *  style alternatives are picked from a small pool offset by the
+   *  hash of the seed, so two regenerations of the same brief get
+   *  different rotations. When omitted, falls back to the legacy
+   *  deterministic 1:1 map for backwards compat. */
+  seed?: string,
 ): VariantAxis {
-  const altLayout = ALT_LAYOUTS_FOR[requestedLayoutId] ?? requestedLayoutId;
-  const altStyle = ALT_STYLES_FOR[requestedStyleKey] ?? requestedStyleKey;
+  let altLayout = ALT_LAYOUTS_FOR[requestedLayoutId] ?? requestedLayoutId;
+  let altStyle = ALT_STYLES_FOR[requestedStyleKey] ?? requestedStyleKey;
+  if (seed) {
+    const seedHash = hashString(seed);
+    const lp = LAYOUT_FAMILY_PAIRS[requestedLayoutId];
+    const sp = STYLE_FAMILY_PAIRS[requestedStyleKey];
+    if (lp && lp.length > 0) altLayout = lp[seedHash % lp.length] ?? altLayout;
+    if (sp && sp.length > 0) altStyle = sp[(seedHash + 1) % sp.length] ?? altStyle;
+  }
   switch (variantIndex) {
     case 0:
       return {
