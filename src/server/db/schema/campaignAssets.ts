@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { campaign } from './campaigns';
 import { generation } from './generations';
 
@@ -52,6 +52,25 @@ export const campaignAsset = pgTable('campaign_asset', {
    *  status page can show "what was requested" alongside the result
    *  without re-reading the campaign plan. */
   briefSnapshot: text('brief_snapshot'),
+  /** 0.0-10.0 score from the rubric critic (Step 5). Null when
+   *  brandKit.qualityGateEnabled was false at run time so the
+   *  gallery can render "no badge" instead of a fake 0. */
+  criticScore: numeric('critic_score', { precision: 3, scale: 1 }),
+  /** Specific complaints the critic surfaced — used both by the
+   *  gallery "Why?" modal and by the retry loop's hint injection. */
+  criticIssues: jsonb('critic_issues').$type<string[]>().default([]).notNull(),
+  /** How many times this slot has been re-dispatched after a failing
+   *  critic verdict. Caps at 2 (campaignWorker enforces). */
+  retriesCount: integer('retries_count').default(0).notNull(),
+  /** Cost of the critic LLM calls for this asset across attempts.
+   *  Separate from cost_cents so the gallery can show "$X.XX generation +
+   *  $0.0X quality gate" if we ever want to. */
+  criticCostCents: integer('critic_cost_cents').default(0).notNull(),
+  /** Secondary status flag — currently only 'quality_warning' when
+   *  the asset finished but never crossed the critic threshold after
+   *  2 retries. Kept separate from `status` so callers that filter
+   *  for 'done' still see warned assets in the gallery. */
+  statusDetail: text('status_detail'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   finishedAt: timestamp('finished_at'),
 });

@@ -71,6 +71,13 @@
       "when": 1778878259026,
       "tag": "0009_clever_mimic",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778880335340,
+      "tag": "0010_colorful_groot",
+      "breakpoints": true
     }
   ]
 }

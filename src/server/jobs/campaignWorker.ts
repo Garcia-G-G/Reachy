@@ -5,17 +5,21 @@ import type { LayoutId } from '@/lib/layout-meta';
 import { type SoraDuration, snapSoraDuration } from '@/lib/reel-cost';
 import { REEL_TEMPLATES, type ReelTemplateKey } from '@/lib/reel-templates';
 import { generateChannelCopy } from '@/server/ai/channelCopy';
+import { type AssetCriticResult, gradeCopy, gradeImage, gradeReel } from '@/server/ai/critic';
 import { getLayout } from '@/server/ai/layoutTemplates';
 import { buildImagePrompt } from '@/server/ai/promptBuilder';
 import { canonicalizeVisualStyleKey } from '@/server/ai/visualStyles';
 import { CAMPAIGN_CONCURRENCY } from '@/server/config/campaignConcurrency';
+import { CRITIC_MAX_RETRIES } from '@/server/config/criticThreshold';
 import { db } from '@/server/db/client';
+import { asset as assetTable } from '@/server/db/schema/assets';
 import { brandKit } from '@/server/db/schema/brandKits';
 import { campaignAsset } from '@/server/db/schema/campaignAssets';
 import { campaign } from '@/server/db/schema/campaigns';
 import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
 import type { CampaignPlan, PlannedAsset } from '@/server/ingest/planCampaign';
+import { getR2Object } from '@/server/storage/r2';
 import type { CampaignJobData } from './campaignQueue';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 import { getImageQueue } from './queue';
@@ -252,36 +256,43 @@ export function startCampaignWorker(): Worker<CampaignJobData> {
 
         if (asset.kind === 'image') {
           imageTasks.push(async () => {
-            await dispatchImage({
+            await dispatchWithCritic({
+              kind: 'image',
               asset,
               campaignAssetId,
               project: proj,
               brandKitRow: kit,
               language,
+              productBrief: briefSnapshot,
             });
           });
         } else if (asset.kind === 'copy') {
           copyTasks.push(async () => {
-            await dispatchCopy({
-              asset,
-              campaignAssetId,
-              brandKitRow: kit,
-              productBrief: briefSnapshot,
-              language,
-            });
-          });
-        } else if (asset.kind === 'reel') {
-          reelTasks.push(async () => {
-            await dispatchReel({
+            await dispatchWithCritic({
+              kind: 'copy',
               asset,
               campaignAssetId,
               project: proj,
               brandKitRow: kit,
-              _refImageKeys: refImages,
+              language,
+              productBrief: briefSnapshot,
+            });
+          });
+        } else if (asset.kind === 'reel') {
+          reelTasks.push(async () => {
+            await dispatchWithCritic({
+              kind: 'reel',
+              asset,
+              campaignAssetId,
+              project: proj,
+              brandKitRow: kit,
+              language,
+              productBrief: briefSnapshot,
             });
           });
         }
       }
+      void refImages; // future: pass into reel pipeline once it accepts refs
 
       // Reels are intentionally serial (existing videoWorker is
       // concurrency=1 inside) so we honor cap=1 here too.
@@ -530,4 +541,196 @@ async function dispatchReel(args: {
       .where(eq(campaignAsset.id, campaignAssetId));
     if (isPermanent(msg)) throw new UnrecoverableError(msg);
   }
+}
+
+// ─── Critic-aware orchestrator ──────────────────────────────────────
+
+/**
+ * Step-5 critic loop: dispatches the asset through the per-kind
+ * pipeline, fetches the produced artifact, runs gradeImage/Copy/Reel,
+ * and either accepts the score or re-dispatches with a retry hint
+ * up to CRITIC_MAX_RETRIES times. After exhaustion the asset
+ * survives with status_detail='quality_warning' so the campaign
+ * still finalizes — Garcia sees the warning in the gallery.
+ *
+ * When brand_kit.quality_gate_enabled === false, the loop runs once
+ * with no grading (cheap exploration mode).
+ */
+async function dispatchWithCritic(args: {
+  kind: 'image' | 'copy' | 'reel';
+  asset: PlannedAsset;
+  campaignAssetId: string;
+  project: typeof project.$inferSelect;
+  brandKitRow: typeof brandKit.$inferSelect | undefined;
+  language: 'en' | 'es';
+  productBrief: import('@/server/ingest/extractBrief').ProductBrief;
+}): Promise<void> {
+  const { kind, campaignAssetId, brandKitRow: kit, language } = args;
+  const qualityGate = kit?.qualityGateEnabled ?? true;
+  let retryHint: string | undefined;
+  let cumulativeCriticCents = 0;
+
+  for (let attempt = 0; attempt <= CRITIC_MAX_RETRIES; attempt++) {
+    const effectiveBrief =
+      attempt === 0 || !retryHint
+        ? args.asset.brief
+        : `${args.asset.brief}\n\nRevision note: ${retryHint}`;
+    const asset = mutateBrief(args.asset, effectiveBrief);
+
+    if (kind === 'image' && asset.kind === 'image') {
+      await dispatchImage({
+        asset,
+        campaignAssetId,
+        project: args.project,
+        brandKitRow: kit,
+        language,
+      });
+    } else if (kind === 'copy' && asset.kind === 'copy') {
+      await dispatchCopy({
+        asset,
+        campaignAssetId,
+        brandKitRow: kit,
+        productBrief: args.productBrief,
+        language,
+      });
+    } else if (kind === 'reel' && asset.kind === 'reel') {
+      await dispatchReel({
+        asset,
+        campaignAssetId,
+        project: args.project,
+        brandKitRow: kit,
+        _refImageKeys: [],
+      });
+    }
+
+    const [row] = await db
+      .select()
+      .from(campaignAsset)
+      .where(eq(campaignAsset.id, campaignAssetId))
+      .limit(1);
+    if (!row) return;
+    if (row.status === 'failed') return;
+    if (!qualityGate) return;
+
+    let result: AssetCriticResult | null = null;
+    try {
+      result = await runGraderForRow({ row, kind, args });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[reachy:campaign] gen ${args.campaignAssetId} grader threw — accepting asset: ${msg}`,
+      );
+      return;
+    }
+    cumulativeCriticCents += result.costCents;
+
+    if (result.passes) {
+      await db
+        .update(campaignAsset)
+        .set({
+          criticScore: result.score.toFixed(1),
+          criticIssues: result.issues,
+          criticCostCents: cumulativeCriticCents,
+        })
+        .where(eq(campaignAsset.id, campaignAssetId));
+      console.log(
+        `[reachy:campaign] gen ${campaignAssetId} ${kind} graded · score=${result.score} · pass · attempt=${attempt + 1}`,
+      );
+      return;
+    }
+
+    await db
+      .update(campaignAsset)
+      .set({
+        criticScore: result.score.toFixed(1),
+        criticIssues: result.issues,
+        criticCostCents: cumulativeCriticCents,
+        retriesCount: attempt + 1,
+      })
+      .where(eq(campaignAsset.id, campaignAssetId));
+
+    if (attempt >= CRITIC_MAX_RETRIES) {
+      await db
+        .update(campaignAsset)
+        .set({ statusDetail: 'quality_warning' })
+        .where(eq(campaignAsset.id, campaignAssetId));
+      console.log(
+        `[reachy:campaign] gen ${campaignAssetId} ${kind} graded · score=${result.score} · WARNING after ${attempt + 1} attempts`,
+      );
+      return;
+    }
+
+    retryHint = result.retryHint ?? result.issues.slice(0, 2).join(' · ');
+    console.log(
+      `[reachy:campaign] gen ${campaignAssetId} ${kind} graded · score=${result.score} · retry ${attempt + 1}/${CRITIC_MAX_RETRIES} · hint="${(retryHint ?? '').slice(0, 100)}"`,
+    );
+  }
+}
+
+function mutateBrief(asset: PlannedAsset, brief: string): PlannedAsset {
+  if (asset.kind === 'image') return { ...asset, brief };
+  if (asset.kind === 'copy') return { ...asset, brief };
+  return { ...asset, brief };
+}
+
+async function runGraderForRow(args: {
+  row: typeof campaignAsset.$inferSelect;
+  kind: 'image' | 'copy' | 'reel';
+  args: {
+    asset: PlannedAsset;
+    campaignAssetId: string;
+    project: typeof project.$inferSelect;
+    brandKitRow: typeof brandKit.$inferSelect | undefined;
+    language: 'en' | 'es';
+    productBrief: import('@/server/ingest/extractBrief').ProductBrief;
+  };
+}): Promise<AssetCriticResult> {
+  const { row, kind } = args;
+  const brandKitForCritic = (args.args.brandKitRow ?? null) as
+    | import('@/server/actions/brandKits').BrandKit
+    | null;
+
+  if (kind === 'copy') {
+    return gradeCopy({
+      text: row.copyOutput ?? '',
+      channel: (row.channel ??
+        'linkedin-post-short') as import('@/server/config/channelTemplates').ChannelKey,
+      brief: row.briefSnapshot ?? '',
+      brandKit: brandKitForCritic,
+      language: args.args.language,
+    });
+  }
+
+  if (kind === 'image') {
+    if (!row.generationId) throw new Error('grader: image missing generationId');
+    const [imageAsset] = await db
+      .select({ storageKey: assetTable.storageKey })
+      .from(assetTable)
+      .where(eq(assetTable.generationId, row.generationId))
+      .limit(1);
+    if (!imageAsset?.storageKey) throw new Error('grader: image asset row not found');
+    const buf = await getR2Object(imageAsset.storageKey);
+    const imageAssetTyped = args.args.asset as Extract<PlannedAsset, { kind: 'image' }>;
+    return gradeImage({
+      buffer: buf,
+      brief: row.briefSnapshot ?? '',
+      layoutLabel: imageAssetTyped.layoutId,
+      brandKit: brandKitForCritic,
+      language: args.args.language,
+    });
+  }
+
+  if (!row.generationId) throw new Error('grader: reel missing generationId');
+  const [reelAsset] = await db
+    .select({ storageKey: assetTable.storageKey })
+    .from(assetTable)
+    .where(eq(assetTable.generationId, row.generationId))
+    .limit(1);
+  if (!reelAsset?.storageKey) throw new Error('grader: reel asset row not found');
+  return gradeReel({
+    videoR2Key: reelAsset.storageKey,
+    brief: row.briefSnapshot ?? '',
+    brandKit: brandKitForCritic,
+    language: args.args.language,
+  });
 }

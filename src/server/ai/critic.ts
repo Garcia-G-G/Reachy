@@ -190,3 +190,414 @@ export async function pickBest(args: CriticArgs): Promise<CriticVerdict> {
     costCents: Math.max(1, Math.round(cents)),
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Step 5 — rubric-based grading critic (single asset, not best-of-K).
+// ═══════════════════════════════════════════════════════════════════
+
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import type { BrandKit } from '@/server/actions/brandKits';
+import { CHANNEL_TEMPLATES, type ChannelKey } from '@/server/config/channelTemplates';
+import { clichesFor } from '@/server/config/cliches';
+import {
+  type AssetCriticKind,
+  type RubricCriterion,
+  rubricFor,
+} from '@/server/config/criticRubrics';
+import { CRITIC_PASS_THRESHOLD } from '@/server/config/criticThreshold';
+import { getR2Object } from '@/server/storage/r2';
+import { type AudioStats, audioStats } from '@/server/video/audioStats';
+
+const GRADE_MODEL = 'gpt-4o-mini';
+
+export interface AssetCriticResult {
+  score: number;
+  passes: boolean;
+  issues: string[];
+  retryHint?: string;
+  rubricBreakdown: Record<string, number>;
+  costCents: number;
+  modelUsed: string;
+}
+
+/** Build the rubric-instruction block injected into every grader call. */
+function rubricInstructions(criteria: readonly RubricCriterion[]): string {
+  const lines = criteria.map((c) => `- ${c.key} (weight ${c.weight}/10): ${c.description}`);
+  return [
+    'Score each criterion below from 0 (worst) to 10 (best).',
+    'Output JSON with one number per criterion key plus `issues` (specific complaints) and `retryHint` (a single short directive to inject into the next prompt attempt — at most 30 words, only set when issues warrant a retry).',
+    '',
+    'Rubric:',
+    ...lines,
+  ].join('\n');
+}
+
+/** Weighted-sum scoring from the per-criterion sub-scores. */
+function weightedScore(subs: Record<string, number>, criteria: readonly RubricCriterion[]): number {
+  let acc = 0;
+  let totalWeight = 0;
+  for (const c of criteria) {
+    const sub = subs[c.key];
+    if (typeof sub !== 'number') continue;
+    acc += Math.max(0, Math.min(10, sub)) * c.weight;
+    totalWeight += c.weight;
+  }
+  if (totalWeight === 0) return 0;
+  return Number((acc / totalWeight).toFixed(2));
+}
+
+function buildJsonSchema(criteria: readonly RubricCriterion[]): Record<string, unknown> {
+  const subProps: Record<string, unknown> = {};
+  for (const c of criteria) {
+    subProps[c.key] = { type: 'number', minimum: 0, maximum: 10 };
+  }
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: [...criteria.map((c) => c.key), 'issues', 'retryHint'],
+    properties: {
+      ...subProps,
+      issues: {
+        type: 'array',
+        minItems: 0,
+        maxItems: 8,
+        items: { type: 'string', minLength: 1, maxLength: 240 },
+      },
+      retryHint: {
+        // Empty string when nothing to fix.
+        type: 'string',
+        minLength: 0,
+        maxLength: 240,
+      },
+    },
+  };
+}
+
+function estimateGradeCostCents(promptTokens: number, completionTokens: number): number {
+  // gpt-4o-mini pricing: $0.15/M in, $0.60/M out.
+  const cents = ((promptTokens * 0.15 + completionTokens * 0.6) / 1_000_000) * 100;
+  return Math.max(1, Math.round(cents));
+}
+
+/** Per-criterion sub-score map returned by the grader LLM. */
+interface GraderResponse {
+  issues: string[];
+  retryHint: string;
+  [criterionKey: string]: number | string | string[];
+}
+
+async function runGrader(args: {
+  kind: AssetCriticKind;
+  systemLines: readonly string[];
+  userContent: Array<
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } }
+  >;
+}): Promise<AssetCriticResult> {
+  const criteria = rubricFor(args.kind);
+  const openai = getOpenAI();
+  const completion = await openai.chat.completions.create({
+    model: GRADE_MODEL,
+    messages: [
+      { role: 'system', content: args.systemLines.join('\n') },
+      { role: 'user', content: args.userContent },
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: `critic_grade_${args.kind.toLowerCase()}`,
+        schema: buildJsonSchema(criteria),
+        strict: true,
+      },
+    },
+    temperature: 0.2,
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  if (!content) throw new Error('critic.grade: empty response');
+  let parsed: GraderResponse;
+  try {
+    parsed = JSON.parse(content) as GraderResponse;
+  } catch (err) {
+    throw new Error(
+      `critic.grade: invalid JSON — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const breakdown: Record<string, number> = {};
+  for (const c of criteria) {
+    const v = parsed[c.key];
+    if (typeof v === 'number') breakdown[c.key] = v;
+  }
+  const score = weightedScore(breakdown, criteria);
+  const passes = score >= CRITIC_PASS_THRESHOLD;
+  const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
+  const retryHintRaw = typeof parsed.retryHint === 'string' ? parsed.retryHint.trim() : '';
+  const usage = completion.usage ?? { prompt_tokens: 0, completion_tokens: 0 };
+  const costCents = estimateGradeCostCents(usage.prompt_tokens, usage.completion_tokens);
+
+  return {
+    score,
+    passes,
+    issues,
+    retryHint: retryHintRaw.length > 0 ? retryHintRaw : undefined,
+    rubricBreakdown: breakdown,
+    costCents,
+    modelUsed: GRADE_MODEL,
+  };
+}
+
+// ─── Image grader ──────────────────────────────────────────────────
+
+export interface GradeImageArgs {
+  /** Raw image bytes (fetched from R2 by the caller, or supplied
+   *  directly for a unit test). */
+  buffer: Buffer;
+  /** The PlannedAsset.brief that produced this image. */
+  brief: string;
+  /** Layout the planner picked — used so the rubric understands what
+   *  composition was being aimed at. */
+  layoutLabel: string;
+  /** Brand kit for palette + tone + allowsHumans context. */
+  brandKit: BrandKit | null;
+  language: 'en' | 'es';
+}
+
+export async function gradeImage(args: GradeImageArgs): Promise<AssetCriticResult> {
+  const criteria = rubricFor('IMAGE');
+  const systemLines = [
+    'You are the autopilot critic grading a generated marketing image.',
+    'Be strict — Reachy users rely on you to surface duds.',
+    rubricInstructions(criteria),
+  ];
+
+  const brandLines = [
+    `Asset brief: ${args.brief.slice(0, 600)}`,
+    `Layout: ${args.layoutLabel}`,
+    `Language: ${args.language}`,
+  ];
+  if (args.brandKit) {
+    const palette = [args.brandKit.primaryColor, args.brandKit.bgColor, args.brandKit.accentColor]
+      .filter(Boolean)
+      .join(' / ');
+    if (palette) brandLines.push(`Brand palette (ink / paper / accent): ${palette}`);
+    if (args.brandKit.voice?.tone) brandLines.push(`Brand voice tone: ${args.brandKit.voice.tone}`);
+    brandLines.push(`Humans allowed in output: ${args.brandKit.allowsHumans ? 'yes' : 'no'}`);
+  }
+
+  return runGrader({
+    kind: 'IMAGE',
+    systemLines,
+    userContent: [
+      { type: 'text', text: brandLines.join('\n') },
+      {
+        type: 'image_url',
+        image_url: { url: bufferToDataUrl(args.buffer), detail: 'low' },
+      },
+    ],
+  });
+}
+
+// ─── Copy grader ───────────────────────────────────────────────────
+
+export interface GradeCopyArgs {
+  text: string;
+  channel: ChannelKey;
+  /** The PlannedAsset.brief that produced this copy. */
+  brief: string;
+  brandKit: BrandKit | null;
+  language: 'en' | 'es';
+}
+
+export async function gradeCopy(args: GradeCopyArgs): Promise<AssetCriticResult> {
+  const criteria = rubricFor('COPY');
+  const channelSpec = CHANNEL_TEMPLATES[args.channel];
+  const cliches = clichesFor(args.language);
+
+  const systemLines = [
+    'You are the autopilot critic grading a piece of generated marketing copy.',
+    'Be strict — Reachy users rely on you to surface duds. Generic SaaS-speak fails.',
+    rubricInstructions(criteria),
+  ];
+
+  // Cheap inline cliché scan — surfaces literal matches as a head start
+  // for the LLM (it still re-evaluates near-paraphrases).
+  const lower = args.text.toLowerCase();
+  const hitCliches = cliches.filter((c) => lower.includes(c.toLowerCase()));
+
+  const userLines = [
+    `Channel: ${channelSpec.label} (target ~${channelSpec.targetWordCount} words; tone hints: ${channelSpec.toneHints.join(', ')})`,
+    `Language: ${args.language}`,
+    `Brand voice tone: ${args.brandKit?.voice?.tone ?? '(not set)'}`,
+    `Asset brief: ${args.brief.slice(0, 600)}`,
+    '',
+    `Cliché blacklist for ${args.language} (literal + paraphrases must be penalized):`,
+    cliches.map((c) => `- ${c}`).join('\n'),
+    '',
+    hitCliches.length > 0
+      ? `Literal cliché matches detected by upstream scan: ${hitCliches.join(', ')}`
+      : 'No literal cliché matches (still check for paraphrases).',
+    '',
+    `Copy being graded:\n"""${args.text}"""`,
+  ];
+
+  return runGrader({
+    kind: 'COPY',
+    systemLines,
+    userContent: [{ type: 'text', text: userLines.join('\n') }],
+  });
+}
+
+// ─── Reel grader ───────────────────────────────────────────────────
+
+export interface GradeReelArgs {
+  /** R2 key OR public URL OR fs path for the reel mp4 — we fetch
+   *  bytes locally to run ffmpeg. */
+  videoR2Key?: string;
+  videoPublicUrl?: string;
+  videoPath?: string;
+  brief: string;
+  brandKit: BrandKit | null;
+  language: 'en' | 'es';
+}
+
+/** Extract N keyframes from an mp4 to JPEG buffers via ffmpeg. */
+async function extractKeyframes(
+  videoPath: string,
+  durationSec: number,
+  count: number,
+): Promise<Buffer[]> {
+  const tmp = await mkdtemp(path.join(tmpdir(), 'reachy-critic-frames-'));
+  try {
+    const interval = durationSec > 0 ? durationSec / (count + 1) : 1;
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(
+        'ffmpeg',
+        [
+          '-y',
+          '-i',
+          videoPath,
+          '-vf',
+          `fps=1/${interval.toFixed(3)},scale=720:-2`,
+          '-frames:v',
+          String(count),
+          '-q:v',
+          '4',
+          path.join(tmp, 'kf-%03d.jpg'),
+        ],
+        { stdio: 'ignore' },
+      );
+      child.on('close', (code) =>
+        code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)),
+      );
+      child.on('error', reject);
+    });
+    const out: Buffer[] = [];
+    for (let i = 1; i <= count; i++) {
+      try {
+        const buf = await readFile(path.join(tmp, `kf-${String(i).padStart(3, '0')}.jpg`));
+        out.push(buf);
+      } catch {
+        break;
+      }
+    }
+    return out;
+  } finally {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Probe the video container for duration only — keeps deps light
+ *  vs importing the full ffprobe helper. */
+async function probeDurationSec(videoPath: string): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn('ffprobe', [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'default=noprint_wrappers=1:nokey=1',
+      videoPath,
+    ]);
+    let out = '';
+    child.stdout.on('data', (d) => {
+      out += d.toString();
+    });
+    child.on('close', () => resolve(Number.parseFloat(out.trim()) || 0));
+    child.on('error', () => resolve(0));
+  });
+}
+
+export async function gradeReel(args: GradeReelArgs): Promise<AssetCriticResult> {
+  // Resolve to a local fs path: prefer a direct videoPath (unit test
+  // shortcut), otherwise fetch from R2.
+  let videoPath: string | null = args.videoPath ?? null;
+  let cleanup: (() => Promise<void>) | null = null;
+  if (!videoPath && args.videoR2Key) {
+    const buf = await getR2Object(args.videoR2Key);
+    const tmp = await mkdtemp(path.join(tmpdir(), 'reachy-critic-reel-'));
+    videoPath = path.join(tmp, 'reel.mp4');
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(videoPath, buf);
+    cleanup = () => rm(tmp, { recursive: true, force: true });
+  }
+  if (!videoPath) {
+    throw new Error('gradeReel: requires videoPath or videoR2Key');
+  }
+
+  try {
+    const durationSec = await probeDurationSec(videoPath);
+    const [keyframes, audio] = await Promise.all([
+      extractKeyframes(videoPath, durationSec, 3),
+      audioStats(videoPath),
+    ]);
+
+    const criteria = rubricFor('REEL');
+    const systemLines = [
+      'You are the autopilot critic grading a generated marketing reel.',
+      'Be strict — Reachy users rely on you to surface duds. A frozen-frame Sora glitch fails motion_presence.',
+      rubricInstructions(criteria),
+    ];
+
+    const audioLine = formatAudioStatsForPrompt(audio);
+    const brandPalette = args.brandKit
+      ? [args.brandKit.primaryColor, args.brandKit.bgColor, args.brandKit.accentColor]
+          .filter(Boolean)
+          .join(' / ')
+      : '';
+    const userLines = [
+      `Asset brief: ${args.brief.slice(0, 600)}`,
+      `Language: ${args.language}`,
+      brandPalette ? `Brand palette (ink / paper / accent): ${brandPalette}` : '',
+      `Total duration probed: ${durationSec.toFixed(2)}s`,
+      `Audio mix stats: ${audioLine}`,
+      '',
+      `${keyframes.length} keyframes attached, equally spaced across the reel.`,
+    ].filter(Boolean);
+
+    return runGrader({
+      kind: 'REEL',
+      systemLines,
+      userContent: [
+        { type: 'text', text: userLines.join('\n') },
+        ...keyframes.map((buf) => ({
+          type: 'image_url' as const,
+          image_url: { url: bufferToDataUrl(buf, 'image/jpeg'), detail: 'low' as const },
+        })),
+      ],
+    });
+  } finally {
+    if (cleanup) await cleanup();
+  }
+}
+
+function formatAudioStatsForPrompt(s: AudioStats): string {
+  const peak = Number.isFinite(s.peakDb) ? `${s.peakDb.toFixed(1)} dBFS` : 'silent';
+  const rms = Number.isFinite(s.rmsDb) ? `${s.rmsDb.toFixed(1)} dBFS` : 'silent';
+  const clip = `${(s.clipFraction * 100).toFixed(3)}%`;
+  return `peak ${peak} · rms ${rms} · clipped ${clip}`;
+}
