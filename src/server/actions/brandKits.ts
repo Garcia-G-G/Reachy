@@ -36,10 +36,31 @@ const upsertBrandKitInput = z.object({
     .optional(),
   /**
    * Drives reel/image aesthetic. See src/server/ai/visualStyles.ts.
-   * DB has a default of 'editorial' so existing rows stay valid after migration.
+   * 2026-05-15 catalog: 7 new keys + 6 legacy keys still accepted at
+   * the action boundary (existing brand_kit rows). Legacy keys coerce
+   * at consumer time via canonicalizeVisualStyleKey. New writes from
+   * the form should always use the new keys (the picker only offers
+   * those).
    */
   visualStyle: z
-    .enum(['editorial', 'paper-cutout', 'flat-2d', 'infographic', 'isometric', 'abstract'])
+    .enum([
+      // New catalog (2026-05-15)
+      'editorial-photo',
+      'typographic-poster',
+      'collage-zine',
+      'brutalist-grid',
+      'illustrated-vector',
+      'memphis-pattern',
+      'editorial-collage',
+      // Legacy — accepted for round-trip compatibility on form save
+      // when an existing row still carries the old value.
+      'editorial',
+      'paper-cutout',
+      'flat-2d',
+      'infographic',
+      'isometric',
+      'abstract',
+    ])
     .optional(),
 });
 

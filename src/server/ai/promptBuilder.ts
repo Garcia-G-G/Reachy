@@ -49,10 +49,52 @@ interface BuildArgs {
   effort?: EffortLevel;
   /** Optional axis-rotation hint for multi-strategy exploration. */
   strategyHint?: string;
+  /** Optional per-variant boldness modifier — a creative direction that
+   *  pushes the AI to make a different compositional bet on this
+   *  variant. Picked via `pickBoldnessModifier(varIdx, generationId)`
+   *  by the worker so n=4 produces 4 different creative bets per
+   *  generation. */
+  boldness?: string;
   /** Sequence-mode metadata. When set, the layout's sequenceDirective
    *  is appended after LAYOUT DIRECTIVE to drive frame-to-frame
    *  continuity (visual + typographic). */
   sequence?: { frameIndex: number; totalFrames: number };
+}
+
+/** Per-variant boldness modifiers. When the worker generates n variants
+ *  in exploration mode, each gets a different modifier so the AI takes
+ *  different creative directions instead of N attempts at the same
+ *  recipe. The first slot is intentionally empty — variant 1 is the
+ *  baseline "respect the layout directive as-written" pass. */
+export const BOLDNESS_MODIFIERS: readonly string[] = [
+  '',
+  'Be bold with typography scale — let one element dominate at roughly 2x normal size while the others stay restrained.',
+  'Use strong color blocking — divide the frame into 2-3 distinct color zones, each carrying compositional weight.',
+  'Embrace asymmetry — break any implied grid, let elements bleed off edges, refuse to balance the composition.',
+  'Add a single unexpected element — a torn paper edge, a halftone overlay, a hand-drawn mark, a stamp.',
+  'Push the palette — use the accent color at ~50% of the frame, not as a small detail.',
+  'Treat typography as the focal subject — image elements support it, not the other way around.',
+] as const;
+
+/** Pick a boldness modifier for a given variant slot, seeded by the
+ *  generationId so two regenerations of the same brief land on
+ *  different creative bets. Variant 0 always returns the baseline
+ *  (empty string) so the first attempt respects the layout as-written. */
+export function pickBoldnessModifier(
+  variantIndex: number,
+  seed: string,
+): { index: number; modifier: string } {
+  if (variantIndex === 0) return { index: 0, modifier: BOLDNESS_MODIFIERS[0]! };
+  // Hash the seed to a deterministic offset; rotate through the
+  // non-baseline modifiers (indices 1..N-1) for the remaining slots so
+  // n=4 gets 4 distinct flavors.
+  const hash = hashString(seed);
+  const choices = BOLDNESS_MODIFIERS.length - 1; // skip baseline
+  // Stagger by variantIndex - 1 so n=2,3,4 across a single generation
+  // pick distinct slots from the wheel.
+  const offset = (hash + variantIndex - 1) % choices;
+  const idx = 1 + offset;
+  return { index: idx, modifier: BOLDNESS_MODIFIERS[idx]! };
 }
 
 /** Derive a character descriptor for the brand font. gpt-image-2 doesn't
@@ -93,6 +135,7 @@ export function buildImagePrompt({
   copy,
   effort = 'balanced',
   strategyHint,
+  boldness,
   sequence,
 }: BuildArgs): string {
   const fm = getFormat(format);
@@ -150,6 +193,13 @@ export function buildImagePrompt({
   // 5c. Strategy hint (multi-strategy variants).
   if (strategyHint) {
     sections.push(`[STRATEGY]\n${strategyHint}`);
+  }
+
+  // 5d. Boldness modifier — per-variant creative direction. Tells the
+  // AI to take a specific bet on this variant so n=4 produces 4
+  // different compositions instead of 4 attempts at the same recipe.
+  if (boldness && boldness.trim().length > 0) {
+    sections.push(`[BOLDNESS]\n${boldness.trim()}`);
   }
 
   // 6. Layout directive — the typographic placement contract.
@@ -210,13 +260,17 @@ export interface VariantAxis {
   strategyHint: string | null;
 }
 
+// Cross-axis pairings — alternates pulled from a different aesthetic
+// family so two variants visibly diverge (photographic ↔ typographic,
+// vector ↔ collage, etc.). Updated 2026-05-15 for the diversity rewrite.
 const ALT_STYLES_FOR: Record<VisualStyleKey, VisualStyleKey> = {
-  editorial: 'paper-cutout',
-  'paper-cutout': 'editorial',
-  'flat-2d': 'isometric',
-  infographic: 'abstract',
-  isometric: 'flat-2d',
-  abstract: 'editorial',
+  'editorial-photo': 'typographic-poster',
+  'typographic-poster': 'editorial-photo',
+  'collage-zine': 'brutalist-grid',
+  'brutalist-grid': 'collage-zine',
+  'illustrated-vector': 'memphis-pattern',
+  'memphis-pattern': 'illustrated-vector',
+  'editorial-collage': 'typographic-poster',
 };
 
 const ALT_LAYOUTS_FOR: Record<LayoutId, LayoutId> = {
@@ -247,13 +301,18 @@ const LAYOUT_FAMILY_PAIRS: Record<LayoutId, readonly LayoutId[]> = {
   'announcement-banner': ['editorial-margin', 'feature-stack', 'card-soft'],
 };
 
+// Three-deep alternation pool per style. Multi-strategy variants pick
+// from this pool offset by the generation seed so two regenerations of
+// the same brief land on different alternates. Each pool deliberately
+// crosses aesthetic families so variants diverge visibly.
 const STYLE_FAMILY_PAIRS: Record<VisualStyleKey, readonly VisualStyleKey[]> = {
-  editorial: ['paper-cutout', 'abstract', 'infographic'],
-  'paper-cutout': ['editorial', 'flat-2d', 'isometric'],
-  'flat-2d': ['isometric', 'paper-cutout', 'abstract'],
-  infographic: ['abstract', 'editorial', 'isometric'],
-  isometric: ['flat-2d', 'abstract', 'paper-cutout'],
-  abstract: ['editorial', 'isometric', 'infographic'],
+  'editorial-photo': ['typographic-poster', 'editorial-collage', 'collage-zine'],
+  'typographic-poster': ['editorial-photo', 'brutalist-grid', 'memphis-pattern'],
+  'collage-zine': ['brutalist-grid', 'memphis-pattern', 'editorial-collage'],
+  'brutalist-grid': ['collage-zine', 'typographic-poster', 'illustrated-vector'],
+  'illustrated-vector': ['memphis-pattern', 'editorial-collage', 'collage-zine'],
+  'memphis-pattern': ['illustrated-vector', 'typographic-poster', 'collage-zine'],
+  'editorial-collage': ['editorial-photo', 'typographic-poster', 'collage-zine'],
 };
 
 /** Fast deterministic hash (cyrb53-style) of a string → 32-bit unsigned int. */

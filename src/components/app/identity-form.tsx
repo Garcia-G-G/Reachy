@@ -4,6 +4,11 @@ import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BODY_FONTS, HEADING_FONTS } from '@/lib/google-fonts';
+import {
+  VISUAL_STYLE_KEYS,
+  VISUAL_STYLE_META,
+  type VisualStyleKey,
+} from '@/lib/visual-styles-meta';
 import { upsertBrandKit } from '@/server/actions/brandKits';
 import type { BrandLanguage, BrandVisualStyle, BrandVoice } from '@/server/db/schema/brandKits';
 import { BrandPreview } from './brand-preview';
@@ -25,30 +30,20 @@ interface IdentityFormProps {
   };
 }
 
+// Visual-style options derived from the canonical meta — May 2026
+// diversity rewrite replaced the 6 legacy keys with 7 distinct styles.
+// Labels here come from the meta (English-only); when we add full ES
+// translations for these the indirection through `t(labelKey)` can
+// come back. Until then, the meta labels render in both locales.
 const VISUAL_STYLE_OPTIONS: ReadonlyArray<{
-  value: BrandVisualStyle;
-  labelKey:
-    | 'styleEditorial'
-    | 'stylePaperCutout'
-    | 'styleFlat2d'
-    | 'styleInfographic'
-    | 'styleIsometric'
-    | 'styleAbstract';
-  taglineKey:
-    | 'styleEditorialTagline'
-    | 'stylePaperCutoutTagline'
-    | 'styleFlat2dTagline'
-    | 'styleInfographicTagline'
-    | 'styleIsometricTagline'
-    | 'styleAbstractTagline';
-}> = [
-  { value: 'editorial', labelKey: 'styleEditorial', taglineKey: 'styleEditorialTagline' },
-  { value: 'paper-cutout', labelKey: 'stylePaperCutout', taglineKey: 'stylePaperCutoutTagline' },
-  { value: 'flat-2d', labelKey: 'styleFlat2d', taglineKey: 'styleFlat2dTagline' },
-  { value: 'infographic', labelKey: 'styleInfographic', taglineKey: 'styleInfographicTagline' },
-  { value: 'isometric', labelKey: 'styleIsometric', taglineKey: 'styleIsometricTagline' },
-  { value: 'abstract', labelKey: 'styleAbstract', taglineKey: 'styleAbstractTagline' },
-];
+  value: VisualStyleKey;
+  label: string;
+  tagline: string;
+}> = VISUAL_STYLE_KEYS.map((key) => ({
+  value: key,
+  label: VISUAL_STYLE_META[key].label,
+  tagline: VISUAL_STYLE_META[key].tagline,
+}));
 
 type SaveState =
   | { kind: 'idle' }
@@ -334,9 +329,9 @@ export function IdentityForm({ projectId, projectName, initial }: IdentityFormPr
                       className="block"
                       style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 18 }}
                     >
-                      {t(opt.labelKey)}
+                      {opt.label}
                     </span>
-                    <span className="mono-eyebrow mt-1 block text-ink-3">{t(opt.taglineKey)}</span>
+                    <span className="mono-eyebrow mt-1 block text-ink-3">{opt.tagline}</span>
                   </span>
                 </label>
               );

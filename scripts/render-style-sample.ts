@@ -26,12 +26,13 @@ async function main() {
   const styleArg = process.argv[2];
   const slug = process.argv[3] ?? 'reachy';
   const validStyles = [
-    'editorial',
-    'paper-cutout',
-    'flat-2d',
-    'infographic',
-    'isometric',
-    'abstract',
+    'editorial-photo',
+    'typographic-poster',
+    'collage-zine',
+    'brutalist-grid',
+    'illustrated-vector',
+    'memphis-pattern',
+    'editorial-collage',
   ] as const;
   if (!styleArg || !(validStyles as readonly string[]).includes(styleArg)) {
     console.error(

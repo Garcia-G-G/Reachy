@@ -11,11 +11,26 @@ export type BrandVoice = {
 export type BrandLanguage = 'en' | 'es';
 
 /**
- * Visual style keys must match VISUAL_STYLE_KEYS in src/server/ai/visualStyles.ts.
- * We don't use a Drizzle pgEnum here so the enum can be extended without a
- * migration that touches every brand_kit row.
+ * Visual style keys must match VISUAL_STYLE_KEYS in
+ * src/lib/visual-styles-meta.ts. We don't use a Drizzle pgEnum here so
+ * the catalog can be re-versioned without a migration touching every
+ * brand_kit row.
+ *
+ * The 2026-05-15 diversity rewrite replaced 6 legacy keys with 7 new
+ * ones; existing rows with legacy values continue to read via the
+ * coerce path in `resolveVisualStyle`. We accept a plain string here
+ * (not a strict union) so the DB layer doesn't trip on legacy values.
  */
 export type BrandVisualStyle =
+  | 'editorial-photo'
+  | 'typographic-poster'
+  | 'collage-zine'
+  | 'brutalist-grid'
+  | 'illustrated-vector'
+  | 'memphis-pattern'
+  | 'editorial-collage'
+  // Legacy keys (pre-2026-05-15) — coerced on read; allowed at the
+  // type level so existing rows + ORM reads typecheck.
   | 'editorial'
   | 'paper-cutout'
   | 'flat-2d'
@@ -45,7 +60,10 @@ export const brandKit = pgTable(
      * (matches the Reachy landing). See src/server/ai/visualStyles.ts for the
      * prompt fragment each value injects.
      */
-    visualStyle: text('visual_style').$type<BrandVisualStyle>().default('editorial').notNull(),
+    visualStyle: text('visual_style')
+      .$type<BrandVisualStyle>()
+      .default('editorial-collage')
+      .notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()

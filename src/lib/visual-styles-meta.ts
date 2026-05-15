@@ -8,61 +8,71 @@
  * form / brand-kit UI needs: the key + label + tagline + a `soraFriendly`
  * boolean that flags which styles produce visibly animated Sora output.
  *
- * Source of truth: `VISUAL_STYLE_META[<key>].soraFriendly` is the one set
- * derived empirically from the 2026-05-14 render comparison (see
- * `planning/SORA-STYLE-RESULTS.md`). The server file imports + re-uses
- * this so the worker and the UI agree on what `soraFriendly` means.
+ * 2026-05-15 rewrite: replaced the 6 legacy keys (editorial, paper-cutout,
+ * flat-2d, infographic, isometric, abstract) with 7 distinctive image-
+ * gen styles. The legacy keys still coerce on read via
+ * `resolveVisualStyle` so existing brand_kit rows keep working.
  */
 
 export const VISUAL_STYLE_KEYS = [
-  'editorial',
-  'paper-cutout',
-  'flat-2d',
-  'infographic',
-  'isometric',
-  'abstract',
+  'editorial-photo',
+  'typographic-poster',
+  'collage-zine',
+  'brutalist-grid',
+  'illustrated-vector',
+  'memphis-pattern',
+  'editorial-collage',
 ] as const;
 
 export type VisualStyleKey = (typeof VISUAL_STYLE_KEYS)[number];
 
-export const DEFAULT_VISUAL_STYLE: VisualStyleKey = 'abstract';
+/** Most balanced + broadly useful default for marketing images: a magazine
+ *  spread combining photo with strong type without being either-or. */
+export const DEFAULT_VISUAL_STYLE: VisualStyleKey = 'editorial-collage';
 
 export interface VisualStyleMeta {
   label: string;
   tagline: string;
-  /** Empirically derived — see planning/SORA-STYLE-RESULTS.md. */
+  /** True when Sora 2 produces visibly animated output for this style in
+   *  practice. Print-leaning styles read as static and stay flat in
+   *  motion regardless of prompt. */
   soraFriendly: boolean;
 }
 
 export const VISUAL_STYLE_META: Record<VisualStyleKey, VisualStyleMeta> = {
-  editorial: {
-    label: 'Editorial motion',
-    tagline: 'Warm paper layout with multiple geometric marks; type added by overlay.',
+  'editorial-photo': {
+    label: 'Editorial photo',
+    tagline: 'Moody product photography with integrated typography.',
     soraFriendly: false,
   },
-  'paper-cutout': {
-    label: 'Paper cutout',
-    tagline: 'Layered colored paper shapes with hard drop shadows.',
+  'typographic-poster': {
+    label: 'Typographic poster',
+    tagline: 'Typography IS the composition — Swiss style, big sans, color blocks.',
     soraFriendly: false,
   },
-  'flat-2d': {
-    label: 'Flat 2D explainer',
-    tagline: 'Bold cartoon scene with one focal icon and supporting elements.',
-    soraFriendly: true,
-  },
-  infographic: {
-    label: 'Animated infographic',
-    tagline: 'Multiple chart elements arranged like a mini editorial dashboard.',
+  'collage-zine': {
+    label: 'Collage zine',
+    tagline: 'Torn paper, halftone dots, photo cutouts — 90s riso print feel.',
     soraFriendly: false,
   },
-  isometric: {
-    label: 'Isometric mini',
-    tagline: 'Floating 3D blocks and tiny figures in soft pastel.',
+  'brutalist-grid': {
+    label: 'Brutalist grid',
+    tagline: 'Raw geometric forms, exposed grid, mono type, single accent.',
+    soraFriendly: false,
+  },
+  'illustrated-vector': {
+    label: 'Illustrated vector',
+    tagline: 'Clean character vectors, flat color, no photographic elements.',
     soraFriendly: true,
   },
-  abstract: {
-    label: 'Abstract shapes',
-    tagline: 'Multiple soft color blobs morphing premium-style.',
+  'memphis-pattern': {
+    label: 'Memphis pattern',
+    tagline: 'Playful 80s shapes, squiggles, dots, bright contrasting colors.',
     soraFriendly: true,
+  },
+  'editorial-collage': {
+    label: 'Editorial collage',
+    tagline: 'Magazine spread: photo + typographic overlays + color blocks.',
+    soraFriendly: false,
   },
 };

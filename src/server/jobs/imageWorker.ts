@@ -12,7 +12,7 @@ import {
   type LayoutId,
   type PlannedCopy,
 } from '@/server/ai/layoutTemplates';
-import { buildImagePrompt, pickVariantAxis } from '@/server/ai/promptBuilder';
+import { buildImagePrompt, pickBoldnessModifier, pickVariantAxis } from '@/server/ai/promptBuilder';
 import { enhancePrompt } from '@/server/ai/promptEnhancer';
 import type { VisualStyleKey } from '@/server/ai/visualStyles';
 import { db } from '@/server/db/client';
@@ -170,7 +170,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         let sequenceCopies: PlannedCopy[] | null = null;
         let imageCostCents = 0;
         let copyCostCents = 0;
-        let composeCostCents = 0;
+        const composeCostCents = 0;
         let contentType: 'image/png' | 'image/jpeg' = 'image/png';
         // Multi-strategy bookkeeping — populated by the exploration
         // branch when n > 1 + layout is set. Persisted into
@@ -220,6 +220,10 @@ export function startImageWorker(): Worker<ImageGenJobData> {
 
           for (let frameIdx = 0; frameIdx < n; frameIdx++) {
             const frameCopy = sequenceCopies[frameIdx] ?? {};
+            // Sequence frames don't get boldness modifiers — we want
+            // typographic + visual continuity across the sequence, not
+            // four different creative bets. The layout's sequence
+            // directive carries the per-frame action.
             const framePrompt = buildImagePrompt({
               idea: idea ?? '',
               format,
@@ -233,6 +237,9 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               effort: effortTier,
               sequence: { frameIndex: frameIdx, totalFrames: n },
             });
+            console.log(
+              `[reachy:image] gen ${generationId} sequence frame ${frameIdx + 1}/${n} style=${kit?.visualStyle ?? 'editorial-collage'} layout=${layout.id} prompt="${framePrompt.replace(/\s+/g, ' ').slice(0, 200)}…"`,
+            );
 
             const result = await generateImage({
               prompt: framePrompt,
@@ -341,6 +348,13 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               variantCopy = planForVariant.copy;
             }
 
+            // Pick a per-variant boldness modifier — pushes the AI to
+            // take a different creative bet on each variant slot so n=4
+            // produces 4 distinct compositions instead of 4 attempts at
+            // the same recipe. Deterministic-by-generationId so two
+            // regenerations of the same brief get different wheels.
+            const boldness = pickBoldnessModifier(varIdx, generationId);
+
             // Build the per-variant prompt with the resolved copy.
             // Variation mode (sourceRawUrl) keeps the action-built
             // editPrompt because the user wants composition rooted in
@@ -362,10 +376,22 @@ export function startImageWorker(): Worker<ImageGenJobData> {
                 copy: variantCopy,
                 effort: effortTier,
                 strategyHint: strategyHint ?? undefined,
+                boldness: boldness.modifier || undefined,
               });
             } else {
               perVariantPrompt = editPrompt;
             }
+
+            // Style-aware audit log — Garcia can `tail -f` worker.log
+            // and verify the resolved style + modifier + first 200
+            // chars of the prompt. If outputs look similar, this
+            // surfaces whether the prompts diverged (model issue) or
+            // converged (style/modifier didn't change).
+            const resolvedStyleForLog = activeStyle ?? kit?.visualStyle ?? 'editorial-collage';
+            const promptPreview = perVariantPrompt.replace(/\s+/g, ' ').slice(0, 200);
+            console.log(
+              `[reachy:image] gen ${generationId} variant ${varIdx + 1}/${n} style=${resolvedStyleForLog} layout=${activeLayout?.id ?? 'none'} boldness#${boldness.index}="${boldness.modifier.slice(0, 60)}${boldness.modifier.length > 60 ? '…' : ''}" prompt="${promptPreview}…"`,
+            );
 
             // Effort=high gets a CHAIN-OF-THOUGHT art-director plan
             // BEFORE the enhancer. The plan names focal subject /

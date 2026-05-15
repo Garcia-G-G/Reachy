@@ -115,7 +115,7 @@ async function main() {
   };
 
   const engine = 'sora-pro-1024p' as const;
-  const visualStyle = 'abstract' as const;
+  const visualStyle = 'editorial-collage' as const;
 
   const [gen] = await db
     .insert(generation)

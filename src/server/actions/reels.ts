@@ -14,6 +14,7 @@ import {
   type SceneSlot,
 } from '@/lib/reel-templates';
 import { MAX_IMAGE_PROMPT_CHARS, planReel } from '@/server/ai/reelPlanner';
+import { canonicalizeVisualStyleKey } from '@/server/ai/visualStyles';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { brandKit } from '@/server/db/schema/brandKits';
@@ -99,13 +100,17 @@ const httpsUrl = z
     message: 'sceneImageUrl must be http(s)',
   });
 
+// Mirrors VISUAL_STYLE_KEYS in @/lib/visual-styles-meta — the new
+// 2026-05-15 catalog. Legacy keys are coerced at the boundary via
+// canonicalizeVisualStyleKey so this enum stays clean.
 const VISUAL_STYLE_VALUES = [
-  'editorial',
-  'paper-cutout',
-  'flat-2d',
-  'infographic',
-  'isometric',
-  'abstract',
+  'editorial-photo',
+  'typographic-poster',
+  'collage-zine',
+  'brutalist-grid',
+  'illustrated-vector',
+  'memphis-pattern',
+  'editorial-collage',
 ] as const;
 
 const composeInput = z.object({
@@ -271,10 +276,14 @@ export async function composeReelAction(input: ComposeReelInput): Promise<Action
         plan: parsed.data.plan,
         brandColorHex,
         brandTextHex,
-        // Per-reel override > brand-kit > 'editorial' (legacy default). The
-        // worker uses this to look up promptMotion / promptStatic and to
+        // Per-reel override > brand-kit > default. Legacy brand-kit keys
+        // (pre-2026-05-15: 'editorial', 'paper-cutout', etc.) coerce to
+        // the new catalog via canonicalizeVisualStyleKey. The worker
+        // uses this to look up promptMotion / promptStatic and to
         // resolve the background-music track.
-        visualStyle: parsed.data.visualStyle ?? kit?.visualStyle ?? 'editorial',
+        visualStyle: canonicalizeVisualStyleKey(
+          parsed.data.visualStyle ?? kit?.visualStyle ?? null,
+        ),
         sceneImageUrls: parsed.data.sceneImageUrls,
       },
       { jobId: gen.id },

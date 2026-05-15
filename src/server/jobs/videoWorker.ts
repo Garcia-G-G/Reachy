@@ -22,7 +22,7 @@ import {
   soraCostCents,
   submitSora,
 } from '@/server/ai/openaiVideo';
-import { resolveVisualStyle } from '@/server/ai/visualStyles';
+import { canonicalizeVisualStyleKey, resolveVisualStyle } from '@/server/ai/visualStyles';
 import { isElevenLabsConfigured, synthesizeElevenLabs } from '@/server/audio/elevenlabs';
 import { generateMusic } from '@/server/audio/elevenlabsMusic';
 import { generateSfx } from '@/server/audio/elevenlabsSfx';
@@ -918,7 +918,7 @@ async function runSoraOneShot(
       renderSceneTts(data, tmp),
       useElevenAudio
         ? generateMusic({
-            visualStyle: data.visualStyle ?? 'editorial',
+            visualStyle: canonicalizeVisualStyleKey(data.visualStyle),
             durationSec: totalDur,
           }).catch((err) => {
             console.warn(

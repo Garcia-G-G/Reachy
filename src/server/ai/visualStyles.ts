@@ -1,19 +1,19 @@
 /**
- * Catalog of visual styles for reels and image generation.
+ * Catalog of visual styles for image generation and reels.
  *
- * Picked per project on the brand kit (`brandKit.visualStyle`) and optionally
- * overridden per reel in the generator UI. The string in `prompt` is appended
- * to every Veo / image prompt — it is the difference between a Veo output
- * with a real human at a desk and an animated explainer with motion graphics.
+ * As of the May-2026 image pivot, each style's `promptStatic` is the
+ * IMAGE prompt fragment sent to gpt-image-2 (no more "NO text" guards —
+ * the AI renders typography now). `promptMotion` is the reel-side
+ * variant fed to Sora.
  *
- * Why this lives in its own module rather than in reelPlanner.ts:
- *  • image generation in src/server/ai/imageGen.ts will reuse it in Phase 04
- *  • the editorial direction is a brand decision, not a planner decision
+ * 2026-05-15 diversity rewrite: the 6 legacy keys (editorial,
+ * paper-cutout, flat-2d, infographic, isometric, abstract) all produced
+ * variants of the same moody-photo aesthetic because they shared most
+ * of the prompt language. Replaced with 7 dramatically-distinct styles.
+ * Legacy keys coerce-on-read via `resolveVisualStyle` so existing
+ * brand_kit rows continue to render.
  */
 
-// Keys + metadata live in the client-safe mirror at src/lib/visual-styles-meta.ts
-// — the form needs them without dragging the prompt bodies into client JS.
-// This file owns just the prompts.
 export {
   DEFAULT_VISUAL_STYLE,
   VISUAL_STYLE_KEYS,
@@ -32,192 +32,173 @@ export interface VisualStyleEntry {
   label: string;
   /** One-line summary shown under the label. */
   tagline: string;
-  /**
-   * True when Sora 2 produces visibly animated output for this style in
-   * practice. Empirically determined from a 3-style render comparison on
-   * 2026-05-14 (see planning/SORA-STYLE-RESULTS.md): bitrate ratios at
-   * Sora 2 Pro 720p showed `abstract` (+57%), `flat-2d` (+49%) and
-   * `isometric` (+31%) all generated meaningfully more motion than
-   * `editorial` (baseline). The print-aesthetic styles ('editorial',
-   * 'paper-cutout') produced near-static output regardless of
-   * `promptMotion` because Sora reads "magazine spread" as "static print"
-   * from its training data. `infographic` is conservatively marked false
-   * until tested.
-   *
-   * The reel form greys out styles with `soraFriendly === false` when a
-   * sora-* engine is selected and surfaces a tooltip; the user can still
-   * override.
-   */
+  /** Reels-side flag — Sora 2 motion potential. */
   soraFriendly: boolean;
-  /**
-   * For FFmpeg image generation (Flux Pro inline). Static composition —
-   * the Ken Burns zoompan in compose.ts adds subtle motion later. Must:
-   *  • forbid real people (model defaults to photorealism otherwise)
-   *  • forbid text/letters/numbers in the image — every reel rendered
-   *    before this rule landed had gibberish typography ("NNST INGBIL"),
-   *    because the overlay system handles all text and the image model
-   *    can't render type cleanly anyway
-   *  • describe 3-4 visual elements with hierarchy (not a busy collage,
-   *    but not empty either)
-   *  • lock the camera fully static
-   */
+  /** IMAGE-gen prompt fragment. Sent to gpt-image-2 verbatim (after
+   *  palette interpolation). Distinctive language per style — the
+   *  whole point of the May 2026 rewrite is that two styles produce
+   *  visibly different images of the same brief. No "NO text"
+   *  constraint — the pivot wants AI typography. */
   promptStatic: string;
-  /**
-   * For Sora 2 video generation. Same composition language as promptStatic
-   * but the camera-static line is replaced with explicit motion direction
-   * so Sora generates animated frames over the clip's duration. Without
-   * this, Sora obediently produces a frozen frame.
-   */
+  /** REELS-side prompt fragment for Sora video. Same composition
+   *  language as promptStatic but with motion direction added. */
   promptMotion: string;
 }
 
-// DEFAULT_VISUAL_STYLE is re-exported from @/lib/visual-styles-meta above —
-// it lives there so the client can use it without bundling these prompts.
-// Empirical (2026-05-14): `abstract` was promoted from `editorial` because
-// it produced the most Sora motion in the 3-style comparison (+57% bitrate
-// vs editorial), is the lowest moderation risk (no people / no objects /
-// no text), and aligns stylistically with the safe-prompt fallback Sora
-// retry uses on moderation blocks. See planning/SORA-STYLE-RESULTS.md.
-
-// ─────────────────────────────────────────────────────────────────────────
-// Palette interpolation — visualStyles use {ink}, {paper}, {accent}
-// placeholders. promptBuilder substitutes them with the brand kit's
-// actual hex values at runtime. Previously the styles embedded literal
-// hexes (#f1ebdf / #14110d / #b6481a) which SILENTLY OVERRODE the
-// brand kit's palette in the AI prompt — bug found 2026-05-15. The
-// brand kit is now the single source of truth for colour.
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+// Palette interpolation
+// {ink} / {paper} / {accent} placeholders → brand kit hex values.
+// promptBuilder substitutes at runtime. Brand kit is the single
+// source of truth for color (bug fixed 2026-05-15: prior catalog
+// embedded literal hexes that shadowed the brand palette).
+// ─────────────────────────────────────────────────────────────────────
 
 export const VISUAL_STYLES: Record<VisualStyleKey, VisualStyleEntry> = {
-  editorial: {
-    label: 'Editorial motion',
-    tagline: 'Warm paper layout with multiple geometric marks; type added by overlay.',
+  'editorial-photo': {
+    label: 'Editorial photo',
+    tagline: 'Moody product photography with integrated typography.',
     soraFriendly: false,
     promptStatic: [
-      'STYLE: warm paper-toned background with visible grain and slight aging at the edges, like a high-quality editorial print magazine spread.',
-      'Composition: 3-4 geometric marks arranged with editorial layout balance — a thin horizontal rule across the upper third, an oversized ink-colored shape (rectangle, half-circle, or punctuation) as the focal point in the central zone, a small accent-colored block in a quadrant for visual weight, and a thin vertical line at one edge.',
-      'Treat the frame as a magazine page mock with intentional negative space. Mid-century print design sensibility (Massimo Vignelli / Dieter Rams).',
-      'Palette: {paper} as the background, {ink} for primary marks, {accent} for one highlight only.',
-      'Camera: completely static. NO zoom, NO pan, NO parallax.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography of any kind in the image. NO real people, NO faces, NO photographs, NO UI screens, NO logos. Type is added by the renderer in a separate layer.',
+      'STYLE: editorial product photography. Shallow depth of field, soft directional natural light (window-side or golden-hour), real-world materials and surfaces (paper, wood, ceramic, fabric, metal patina). Cinematic shadows.',
+      'Mood: quiet confidence — a still life by a New Yorker photo editor, not a stock catalogue. ONE focal subject occupies ~60% of the frame; the rest is breathing room with intentional negative space.',
+      'Palette: {paper} dominates the lighting / surfaces; {ink} appears in deep shadows and the focal subject; {accent} shows up in a single small detail (a sticker, a stem, an edge of an object).',
+      'Inspiration: Kinfolk magazine, Cereal magazine, Apartamento — premium print editorial.',
     ].join(' '),
     promptMotion: [
-      'STYLE: warm paper-toned background with visible grain and slight aging at the edges, like a high-quality editorial print magazine spread being assembled in front of you.',
-      'Composition: 3-4 geometric marks arranged with editorial layout balance — a thin horizontal rule across the upper third, an oversized ink-colored shape as the focal point, a small accent-colored block for visual weight, and a thin vertical line at one edge.',
-      'MOTION: shapes drift in slowly from off-frame in the first 2 seconds with subtle easing, then settle. The horizontal rule extends like a pen stroke. The accent block pulses once gently near the midpoint. Camera holds completely still — only the elements move. Slow, deliberate, premium editorial pace.',
-      'Mid-century print design sensibility (Massimo Vignelli / Dieter Rams), but in motion.',
-      'Palette: {paper} as the background, {ink} for primary marks, {accent} for one highlight only.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography of any kind. NO real people, NO faces, NO photographs, NO UI screens, NO logos.',
+      'STYLE: cinematic editorial product photography in motion. Shallow depth of field, soft natural light shifting subtly over the clip.',
+      'MOTION: slow, deliberate. A 3-5% camera push-in over the full duration; tiny shadow drift as light angle moves; a single subtle element shift near the midpoint (a leaf settles, a particle drifts).',
+      'Palette: {paper} dominates the lighting / surfaces; {ink} for shadows and focal subject; {accent} for one small detail.',
+      'Inspiration: Kinfolk / Cereal / Apartamento — premium print editorial in slow motion.',
     ].join(' '),
   },
-  'paper-cutout': {
-    label: 'Paper cutout',
-    tagline: 'Layered colored paper shapes with hard drop shadows.',
+
+  'typographic-poster': {
+    label: 'Typographic poster',
+    tagline: 'Typography IS the composition — Swiss style, big sans, color blocks.',
     soraFriendly: false,
     promptStatic: [
-      'STYLE: flat paper cutout collage on a warm paper-toned background, with visible paper grain across all layers and hard drop shadows at a 30-degree angle.',
-      'Composition: 3-4 layered geometric paper shapes (one circle, one rectangle, one half-moon or quarter-arc, one thin strip) in solid brand colors, overlapping with intentional hierarchy.',
-      'Style of Headway / Fable summaries — tactile, hand-cut feel, slight imperfection at the edges.',
-      'Palette: {paper} background, {ink} for the dominant shape, {accent} for the highlight shape. Use the brand palette exactly — no extra colours.',
-      'Camera: completely static.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO typography. NO real people, NO faces. Just clean cutout shapes.',
+      'STYLE: typographic poster — typography IS the composition. NO photography. Dramatic scale shifts: one word HUGE, others tiny. Hard-edged solid color blocks dividing the frame into 2-3 zones. Asymmetric grid.',
+      'Inspiration: Swiss Style (Wim Crouwel, Massimo Vignelli, Josef Müller-Brockmann). Late-modernist conference posters. Bauhaus poster archive.',
+      'Type treatment: condensed geometric sans-serif (Akzidenz-Grotesk / Helvetica / Founders Grotesk character) for the dominant word; mono UPPERCASE for metadata. Set tight, no soft edges, no decorative serifs.',
+      'Palette: {paper} as one color block, {ink} as another, {accent} as a third — solid flats, no gradients, no texture. Sharp edges where colors meet.',
     ].join(' '),
     promptMotion: [
-      'STYLE: flat paper cutout collage on a warm paper-toned background, with visible paper grain and hard drop shadows that lengthen and shorten as shapes move.',
-      'Composition: 3-4 layered geometric paper shapes in solid brand colors.',
-      'MOTION: each shape slides into frame from a different edge with a soft easing curve over the first 2 seconds — the largest first, then the rest in cascading rhythm. Once settled, the shapes breathe with a tiny up-and-down float and their drop shadows shift accordingly. Near the midpoint, the smallest shape rotates 15 degrees and snaps back. Camera holds completely still — only the paper moves.',
-      'Style of Headway / Fable summaries — tactile, hand-cut, slight imperfection at the edges.',
-      'Palette: {paper} background, {ink} for the dominant shape, {accent} for the highlight shape.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people. Just clean cutout shapes.',
+      'STYLE: typographic poster in motion. Color blocks slide in from edges with hard easing; type lands with a snap.',
+      'MOTION: color zones wipe in first (0-1s), then type slams into place with a 0.2s overshoot, then holds. Optional subtle vibration on the dominant word every few seconds.',
+      'Palette: {paper}, {ink}, {accent} as solid color blocks.',
+      'Inspiration: Wim Crouwel posters animated; Bauhaus motion graphics.',
     ].join(' '),
   },
-  'flat-2d': {
-    label: 'Flat 2D explainer',
-    tagline: 'Bold cartoon scene with one focal icon and supporting elements.',
-    soraFriendly: true,
-    promptStatic: [
-      'STYLE: flat 2D vector illustration scene, Lottie/Rive aesthetic, like a Duolingo or Mailchimp marketing illustration.',
-      'Composition: ONE central cartoon icon (a heart, a star, a check mark, a speech bubble — pick the one most relevant) with thick {ink} outlines and a solid {paper} or {accent} fill, surrounded by 2-3 small supporting decorative shapes.',
-      'Palette: {accent} as the solid background field, {paper} for the icon fill, {ink} for outlines. Use exactly these brand hex values, no other colours.',
-      'Camera: completely static.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO faces, NO realistic photographs. Cartoon icons only.',
-    ].join(' '),
-    promptMotion: [
-      'STYLE: bold, energetic flat 2D vector animation, Lottie/Rive feel — Duolingo or Mailchimp marketing animation cranked up.',
-      'Composition: ONE central cartoon icon with thick {ink} outlines and a solid {paper} or {accent} fill, plus 4-6 supporting decorative shapes orbiting from off-frame.',
-      'MOTION (continuous, full clip): the central icon SLAMS in from 0.3x scale with an overshoot bounce in the first 0.5s, then pulses confidently (scale 0.92x ↔ 1.10x every 1.5s). Supporting shapes constantly enter and exit — confetti bursts, sparkles rotate, small shapes whip across diagonals. A slow camera push-in (5% zoom over the full duration) adds depth. Lively, kinetic, joyful — never static.',
-      'Palette: {accent} as the solid background field, {paper} for the icon fill, {ink} for outlines.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. Cartoon icons only.',
-    ].join(' '),
-  },
-  infographic: {
-    label: 'Animated infographic',
-    tagline: 'Multiple chart elements arranged like a mini editorial dashboard.',
+
+  'collage-zine': {
+    label: 'Collage zine',
+    tagline: 'Torn paper, halftone dots, photo cutouts — 90s riso print feel.',
     soraFriendly: false,
     promptStatic: [
-      'STYLE: minimalist data visualization composition on a clean {paper}-toned background, like a New York Times infographic or The Pudding article.',
-      'Composition: 2-3 chart elements in editorial hierarchy — a primary bar chart (3-5 solid color bars of varying heights) as the focal point, a small donut chart in a corner, and a thin trend line connecting two abstract markers. NO numbers or labels rendered as text.',
-      'Palette: {paper} background, {ink} for primary data marks, {accent} for the ONE highlighted data point. Use only these brand colours.',
-      'Camera: completely static.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers in the image. NO axis labels, NO chart titles. Pure shape, color, and abstract data form.',
+      'STYLE: cut-and-paste collage zine. Overlapping torn-paper edges with visible white tear lines, halftone dot patterns ghosted over color fields, photo cutouts (rough scissor edges, not crisp masks) sitting on flat color backgrounds, photocopy/Xerox texture grain.',
+      'Inspiration: 90s riso prints, Sister Corita Kent, early Raygun magazine, perzine layouts, Tom Tomorrow strips, the actual physical assembly of a zine page.',
+      'Type treatment: mixed — typewriter mono for some lines, marker handwriting for others, big condensed display for headlines. Slightly misaligned. Some letters can be hand-cut and pasted.',
+      'Palette: {paper} as the base zine paper (visible grain), {ink} for the dominant cutouts, {accent} as the riso-print overprint color that ghosts over edges and creates registration imperfections.',
     ].join(' '),
     promptMotion: [
-      'STYLE: minimalist data visualization in motion, on a clean {paper}-toned background.',
-      'Composition: 2-3 chart elements — bars, a donut, a trend line.',
-      'MOTION: bars grow from the baseline upward with spring physics over the first 2 seconds, the tallest arriving last. The trend line draws itself stroke-by-stroke. The donut fills clockwise. Near the midpoint, the {accent}-highlighted element pulses once gently. Camera static.',
-      'Palette: {paper} background, {ink} for primary data, {accent} for the highlighted point.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO axis labels.',
+      'STYLE: collage zine page being assembled — paper shapes drift in, halftone patterns ghost over color fields, photocopy texture flickers subtly.',
+      'MOTION: torn paper layers stack one by one with offset timing; halftone ghosts pulse on a 2s loop; the registration of the accent color drifts a few pixels each second.',
+      'Palette: {paper} (riso paper), {ink} (cutout dominant), {accent} (riso overprint).',
+      'Inspiration: 90s zine assembly stop-motion.',
     ].join(' '),
   },
-  isometric: {
-    label: 'Isometric mini',
-    tagline: 'Floating 3D blocks and tiny figures in soft pastel.',
+
+  'brutalist-grid': {
+    label: 'Brutalist grid',
+    tagline: 'Raw geometric forms, exposed grid, mono type, single accent.',
+    soraFriendly: false,
+    promptStatic: [
+      'STYLE: brutalist web/print design. Exposed grid lines visible across the frame (thin 1px {ink} hairlines). Hard-edged geometric forms, no rounded corners, no shadows, no decoration. Industrial monospace typography (JetBrains Mono / IBM Plex Mono character) UPPERCASE.',
+      'Inspiration: Bloomberg Businessweek 2010s redesign, Drudge Report aesthetic at premium quality, Are.na boards, modern brutalist sites (Pangram Pangram, Off-White lookbooks).',
+      'Composition: visible compositional grid, hard text wrap, dense information feel, intentional ugliness made beautiful through restraint. Negative space carries weight.',
+      'Palette: STRICT black-and-white-and-one-accent. {paper} as off-white base, {ink} as near-black, {accent} as the ONE pop of color (sparingly — on one element only). NO gradients, NO mid-tones, NO secondary colors.',
+    ].join(' '),
+    promptMotion: [
+      'STYLE: brutalist grid in motion. Grid lines draw in line-by-line; type appears letter-by-letter (terminal feel).',
+      'MOTION: grid hairlines draw across the frame in the first 1-2s; text content appears with monospace typewriter timing; subtle 1px shake on the accent element every few seconds.',
+      'Palette: {paper} (off-white base), {ink} (near-black), {accent} (single pop).',
+      'Inspiration: terminal interfaces; brutalist sites being assembled live.',
+    ].join(' '),
+  },
+
+  'illustrated-vector': {
+    label: 'Illustrated vector',
+    tagline: 'Clean character vectors, flat color, no photographic elements.',
     soraFriendly: true,
     promptStatic: [
-      'STYLE: isometric 3D illustration scene, soft and clean, like Notion or Linear marketing illustrations.',
-      'Composition: 2-3 floating isometric elements in 3D perspective with subtle drop shadows — a primary card as the focal point, a smaller secondary block at a different elevation, optionally one tiny abstract figure (silhouette, no facial features).',
-      'Palette: {paper} background; element surfaces in {ink} and {accent} gradients with crisp outlines. Use the brand hex values exactly.',
-      'Camera: static isometric perspective at 30 degrees.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers, NO readable UI. NO real people. The cards are intentionally blank.',
+      'STYLE: clean vector illustration scene. ONE strong character shape (a figure, an animal, a personified object — pick the one that fits the brief) with confident geometric construction, thick {ink} outlines, flat solid color fills, no gradients, no photographic textures.',
+      'Inspiration: Duolingo brand illustrations, Mailchimp Freddie, Notion empty states, Spotify Wrapped character work, Lottie animation libraries (LottieFiles).',
+      'Composition: the character is the focal subject, occupying ~50% of the frame; supporting decorative shapes (geometric, abstract — sparkles, circles, triangles) orbit at the edges. Negative space lets the character breathe.',
+      'Palette: {paper} as the solid background field (NO photo, NO gradient), {ink} for character outlines and details, {accent} for character clothing or one fill area. Use exactly these three hex values.',
     ].join(' '),
     promptMotion: [
-      'STYLE: kinetic isometric 3D illustration in motion, soft and clean.',
-      'Composition: 3-4 floating isometric elements at 30-degree perspective with crisp drop shadows.',
-      'MOTION (continuous): the primary card floats up and down on a 2s loop, drop shadow stretching in sync. Secondary blocks orbit slowly at staggered elevations. A tiny figure walks confidently between the blocks. Cards wobble 10° around their vertical axis. Soft particles drift upward. Slow controlled orbital camera nudge (3° azimuth shift). Alive, dimensional.',
-      'Palette: {paper} background; surfaces in {ink} and {accent} gradients.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. The cards are intentionally blank.',
+      'STYLE: kinetic vector illustration — Duolingo / Mailchimp marketing animation feel.',
+      'MOTION: character slams in from off-frame with overshoot bounce (0-0.5s), then pulses (scale 0.95 ↔ 1.05 every 1.5s). Supporting shapes orbit, sparkle, drift confidently throughout. Slow 5% camera push-in over full duration. Lively, joyful, never static.',
+      'Palette: {paper} (background field), {ink} (outlines), {accent} (fill highlights).',
+      'Inspiration: Lottie animations cranked up.',
     ].join(' '),
   },
-  abstract: {
-    label: 'Abstract shapes',
-    tagline: 'Multiple soft color blobs morphing premium-style.',
+
+  'memphis-pattern': {
+    label: 'Memphis pattern',
+    tagline: 'Playful 80s shapes, squiggles, dots, bright contrasting colors.',
     soraFriendly: true,
     promptStatic: [
-      'STYLE: premium abstract motion graphics composition, like Apple/Stripe/Vercel marketing visuals.',
-      'Composition: 2-3 large soft color blobs with smooth gradients, intentional overlap and negative space.',
-      'Palette: rich {ink}↔{accent} gradients on a {paper} or near-black background. Use the brand hex values as the dominant hues — accent for highlights only.',
-      'Camera: completely static.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. NO real people, NO UI, NO icons. Pure form and color.',
+      'STYLE: 80s Memphis Group design. Playful asymmetric composition with overlapping geometric shapes — squiggle lines, dot patterns, triangles, half-circles, zigzags, checker patches. Hard-edged, hand-drawn-looking but precise. Confetti-energy without being childish.',
+      "Inspiration: Ettore Sottsass and the Memphis Milano collective, Saved By The Bell title cards, Nathalie Du Pasquier patterns, contemporary brands using Memphis revivals (Glossier early branding, Tony's Chocolonely).",
+      "Composition: shapes scattered across the frame in an organized chaos — clear focal area in the center for the brief's subject, decorative shapes orbiting at the edges and bleeding off the frame. Asymmetric, off-balance, unbalanced-on-purpose.",
+      'Palette: bright contrasting. {paper} as the base, {ink} as one of the shape colors, {accent} as the dominant pop — used liberally (not just as detail) since Memphis is bright. Add 1-2 supporting brand-adjacent hues if it serves the composition.',
     ].join(' '),
     promptMotion: [
-      'STYLE: cinematic premium abstract motion graphics — Apple keynote intro, Stripe product reveal, Linear launch trailer.',
-      'Composition: 3-4 large soft color blobs with smooth gradients, volumetric light beams, drifting particles, and a soft chromatic glow at the edges.',
-      'MOTION (continuous, lush): blobs morph aggressively, breathing between 0.7x and 1.4x scale. Gradient hues drift slowly through the palette every 4-5 seconds. Volumetric light beams sweep from off-screen. Particles drift upward. Two blobs collide at the midpoint and separate. Subtle slow camera push-in (8% zoom). The frame is alive: every pixel moving.',
-      'Palette: rich {ink}↔{accent} gradients on a {paper} or near-black background.',
-      'CRITICAL CONSTRAINTS: NO text, NO letters, NO words, NO numbers. Pure form, color, and light in continuous motion.',
+      'STYLE: Memphis pattern in motion — shapes bounce, squiggles wiggle, dots pulse.',
+      'MOTION: each Memphis element animates on its own loop (rotate, bounce, pulse) at staggered timing. The accent color shapes pop with attitude (slight scale-up overshoot). Maximum playfulness without being chaotic.',
+      'Palette: bright contrasting — {paper} base, {ink} shape, {accent} dominant pop.',
+      'Inspiration: 80s MTV bumpers; Saved By The Bell intro animation.',
     ].join(' '),
   },
+
+  'editorial-collage': {
+    label: 'Editorial collage',
+    tagline: 'Magazine spread: photo + typographic overlays + color blocks.',
+    soraFriendly: false,
+    promptStatic: [
+      'STYLE: high-end editorial magazine spread. Combines photographic elements WITH strong typographic overlays AND flat color blocks — not pure photography, not pure typography, but a designed composition where all three coexist with intent.',
+      'Inspiration: The New York Times Magazine spreads, Apartamento, The Gentlewoman, T Magazine, modern fashion editorials (SSENSE, Vestoj), book-cover design (Penguin Modern Classics).',
+      'Composition: a photographic element occupies ~55% of the frame (often the right or upper portion), with a flat color block ({paper} or {accent}) anchoring the remainder. Typography lives on the color block AND bleeds onto the photo where it adds tension. Asymmetric, intentional, art-directed.',
+      'Palette: {paper} as one major zone, {ink} for type and dark photographic areas, {accent} as a color block OR a small editorial detail (a stripe, a corner badge, a stamp).',
+    ].join(' '),
+    promptMotion: [
+      'STYLE: editorial magazine spread in slow motion. Photo elements barely move; color blocks slide in; typography lands with editorial gravity.',
+      'MOTION: color block wipes in first; photo element fades in next; typography settles with print-press feel. Maintain stillness — this is editorial, not advertising.',
+      'Palette: {paper} (color zone), {ink} (type + dark photo areas), {accent} (color block or detail).',
+      'Inspiration: NYT Magazine spreads.',
+    ].join(' '),
+  },
+};
+
+/** Legacy → new key mapping. Pre-2026-05-15 brand kits had keys like
+ *  `abstract` / `paper-cutout`; rather than force a migration, we
+ *  coerce on read inside resolveVisualStyle. Each old key maps to the
+ *  closest new aesthetic so existing brand kits render coherent output
+ *  without user action. */
+const LEGACY_STYLE_ALIASES: Record<string, VisualStyleKey> = {
+  editorial: 'editorial-photo',
+  'paper-cutout': 'collage-zine',
+  'flat-2d': 'illustrated-vector',
+  infographic: 'typographic-poster',
+  isometric: 'illustrated-vector',
+  abstract: 'editorial-collage',
 };
 
 /**
  * Substitute the {ink} / {paper} / {accent} placeholders in a style's
  * prompt body with the given brand hex values. Called by promptBuilder
  * before the style line lands in the AI prompt.
- *
- * Garcia's bug from 2026-05-15: the style entries embedded literal
- * hex values for the editorial palette (#f1ebdf / #14110d / #b6481a)
- * which silently shadowed the brand kit's actual palette inside the
- * AI prompt. This function is the canonical substitution path.
  */
 export function interpolatePalette(
   template: string,
@@ -229,10 +210,26 @@ export function interpolatePalette(
     .replaceAll('{accent}', palette.accent);
 }
 
-/** Resolve a brand kit's `visualStyle` field (nullable) to a usable entry. */
+/** Resolve a brand kit's `visualStyle` field (nullable, possibly legacy)
+ *  to a usable entry. Legacy keys are coerced to their post-2026-05-15
+ *  equivalents so existing rows render without DB migration. */
 export function resolveVisualStyle(key: string | null | undefined): VisualStyleEntry {
-  if (key && (VISUAL_STYLE_KEYS as readonly string[]).includes(key)) {
+  if (!key) return VISUAL_STYLES[DEFAULT_VISUAL_STYLE];
+  if ((VISUAL_STYLE_KEYS as readonly string[]).includes(key)) {
     return VISUAL_STYLES[key as VisualStyleKey];
   }
+  const aliased = LEGACY_STYLE_ALIASES[key];
+  if (aliased) return VISUAL_STYLES[aliased];
   return VISUAL_STYLES[DEFAULT_VISUAL_STYLE];
+}
+
+/** Public helper: canonical key for a (possibly legacy) input. Used by
+ *  the form picker to highlight the right entry when a brand kit still
+ *  carries a legacy key. */
+export function canonicalizeVisualStyleKey(key: string | null | undefined): VisualStyleKey {
+  if (!key) return DEFAULT_VISUAL_STYLE;
+  if ((VISUAL_STYLE_KEYS as readonly string[]).includes(key)) {
+    return key as VisualStyleKey;
+  }
+  return LEGACY_STYLE_ALIASES[key] ?? DEFAULT_VISUAL_STYLE;
 }

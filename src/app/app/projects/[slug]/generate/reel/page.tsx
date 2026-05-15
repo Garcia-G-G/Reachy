@@ -8,7 +8,7 @@ import { getBrandKitForProject } from '@/server/actions/brandKits';
 import { getProjectBySlug } from '@/server/actions/projects';
 import { isFalConfigured } from '@/server/ai/fal';
 import { isOpenAIConfigured } from '@/server/ai/openai';
-import { DEFAULT_VISUAL_STYLE, type VisualStyleKey } from '@/server/ai/visualStyles';
+import { canonicalizeVisualStyleKey, type VisualStyleKey } from '@/server/ai/visualStyles';
 import { isR2Configured } from '@/server/storage/r2';
 
 interface ReelPageProps {
@@ -28,8 +28,11 @@ export default async function GenerateReelPage({ params }: ReelPageProps) {
   if (!project) notFound();
 
   const bundle = await getBrandKitForProject(project.id);
-  const initialVisualStyle: VisualStyleKey =
-    (bundle?.brandKit?.visualStyle as VisualStyleKey | undefined) ?? DEFAULT_VISUAL_STYLE;
+  // Coerce legacy brand-kit keys (pre-2026-05-15 catalog) to the new
+  // VisualStyleKey union so the form picker highlights the right option.
+  const initialVisualStyle: VisualStyleKey = canonicalizeVisualStyleKey(
+    bundle?.brandKit?.visualStyle ?? null,
+  );
 
   return (
     <Content

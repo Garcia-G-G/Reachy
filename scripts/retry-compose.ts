@@ -17,6 +17,7 @@ async function main() {
   const { generation } = await import('../src/server/db/schema/generations');
   const { project } = await import('../src/server/db/schema/projects');
   const { getVideoQueue } = await import('../src/server/jobs/videoQueue');
+  const { canonicalizeVisualStyleKey } = await import('../src/server/ai/visualStyles');
   type ReelEngine = import('../src/lib/reel-templates').ReelEngine;
   type ReelPlan = import('../src/lib/reel-templates').ReelPlan;
 
@@ -65,7 +66,7 @@ async function main() {
       plan: params.plan,
       brandColorHex,
       brandTextHex,
-      visualStyle: kit?.visualStyle ?? 'editorial',
+      visualStyle: canonicalizeVisualStyleKey(kit?.visualStyle ?? null),
     },
     { jobId: gen.id },
   );

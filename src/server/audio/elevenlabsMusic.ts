@@ -25,18 +25,20 @@ import type { VisualStyleKey } from '@/lib/visual-styles-meta';
  */
 
 const STYLE_TO_MUSIC_PROMPT: Record<VisualStyleKey, string> = {
-  editorial:
-    'Modern editorial documentary score with a clear pulse — felted piano with warm string pad, light brushed percussion at around 88 BPM, premium magazine feel that gently propels the narration forward. No vocals. Should be audible and characterful under speech, not a whisper.',
-  'paper-cutout':
-    'Warm acoustic indie folk with momentum — plucked nylon guitar with hand claps, soft shaker, brushed snare on the backbeat at ~100 BPM, cozy hand-made feel that breathes alongside the narrator. No vocals. Present but supportive under speech.',
-  'flat-2d':
-    'Upbeat playful explainer pop — ukulele, claps, kick on every beat, bright synth ostinato and twinkly bells at ~118 BPM. Friendly, curious, energetic. No vocals. Sits under the narrator but is unmistakably there.',
-  infographic:
-    'Confident modern minimal electronic — four-on-the-floor at ~108 BPM with crisp claps, plucked synth ostinato, warm sub-bass, light arpeggio over a brand-tech mood. No vocals. Data-driven and present, not ambient wallpaper.',
-  isometric:
-    'Bright modern indie-tech — soft arpeggios, warm pads, gentle four-on-the-floor at ~104 BPM, light bell accents, dreamy yet propulsive. No vocals. Audible and lively under the narrator.',
-  abstract:
-    'Cinematic premium tech-keynote score — evolving warm pads, slow build with a pulsing sub-bass at ~84 BPM, occasional brushed cinematic hit, crisp sense of forward motion. No vocals. Should feel rich and present, not background noise.',
+  'editorial-photo':
+    'Modern editorial documentary score with a clear pulse — felted piano with warm string pad, light brushed percussion at around 88 BPM, premium magazine feel that gently propels the narration forward. No vocals.',
+  'typographic-poster':
+    'Confident modern minimal electronic — four-on-the-floor at ~108 BPM with crisp claps, plucked synth ostinato, warm sub-bass, brand-tech mood with poster-bold attitude. No vocals.',
+  'collage-zine':
+    'Warm DIY indie folk-electronic with momentum — plucked nylon guitar with hand claps, soft shaker, lo-fi tape texture, brushed snare on the backbeat at ~100 BPM, cozy hand-made feel. No vocals.',
+  'brutalist-grid':
+    'Industrial minimal electronic — sparse 909 kick at ~96 BPM, metallic percussion, hard-edged synth stab, restrained and architectural. No vocals.',
+  'illustrated-vector':
+    'Upbeat playful explainer pop — ukulele, claps, kick on every beat, bright synth ostinato and twinkly bells at ~118 BPM. Friendly, curious, energetic. No vocals.',
+  'memphis-pattern':
+    'Bright 80s-inflected playful pop — analog synth bass, rim shots, bell ostinato, hand claps and shaker at ~112 BPM, irreverent and joyful. No vocals.',
+  'editorial-collage':
+    'Cinematic premium editorial score — evolving warm pads, slow build with a pulsing sub-bass at ~88 BPM, occasional brushed cinematic hit, magazine-grade gravity. No vocals.',
 };
 
 let cached: ElevenLabsClient | null = null;
