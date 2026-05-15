@@ -3,9 +3,14 @@ import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { type BrandColors, composeImage, type PlannedCopy } from '@/server/ai/composeImage';
 import { planCopy, planCopySequence } from '@/server/ai/copyPlanner';
+import { pickBest } from '@/server/ai/critic';
 import { getFormat } from '@/server/ai/formats';
 import { generateImage } from '@/server/ai/imageGen';
-import { getLayout, resolveSequenceHint } from '@/server/ai/layoutTemplates';
+import { getLayout, type LayoutId, resolveSequenceHint } from '@/server/ai/layoutTemplates';
+import { buildImagePrompt, pickVariantAxis } from '@/server/ai/promptBuilder';
+import { enhancePrompt } from '@/server/ai/promptEnhancer';
+import type { VisualStyleKey } from '@/server/ai/visualStyles';
+import { getBrandReferenceImages } from '@/server/lib/brandReferences';
 import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { brandKit } from '@/server/db/schema/brandKits';
@@ -60,13 +65,20 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         sourceRawUrl,
         tweakPrompt,
         mode,
+        effort,
       } = job.data;
+      const effortTier: 'fast' | 'balanced' | 'high' = effort ?? 'balanced';
       const fm = getFormat(format);
       // Sequence mode is gated on (a) explicit mode='sequence', (b) a
       // layout (sequence without typography overlay has nothing to
       // progress), and (c) n ≥ 2 (a one-frame sequence is just a
       // generation). Anything else falls through to exploration.
       const sequenceMode = mode === 'sequence' && Boolean(layoutId) && n >= 2;
+      // Best-of-K critic mode. Only valid for OpenAI provider (we need
+      // the vision critic to judge), exploration only, layout-gated
+      // (the critic uses layout.negativeSpaceHint to judge composition).
+      const criticMode =
+        effortTier === 'high' && !sequenceMode && provider === 'openai' && Boolean(layoutId);
 
       await db
         .update(generation)
@@ -79,7 +91,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
       // DB — tail the worker log and you can see exactly what each
       // generation row was running with.
       console.log(
-        `[reachy:image] gen ${generationId} provider=${provider} model=${model} quality=${quality ?? 'medium'} n=${n} layout=${layoutId ?? 'none'} variation=${sourceRawUrl ? 'yes' : 'no'} mode=${sequenceMode ? 'sequence' : 'exploration'}`,
+        `[reachy:image] gen ${generationId} provider=${provider} model=${model} quality=${quality ?? 'medium'} n=${n} layout=${layoutId ?? 'none'} variation=${sourceRawUrl ? 'yes' : 'no'} mode=${sequenceMode ? 'sequence' : 'exploration'} effort=${effortTier} critic=${criticMode ? 'yes' : 'no'}`,
       );
 
       // Idempotency: wipe any rows from a prior failed attempt so we never
@@ -156,6 +168,13 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         let copyCostCents = 0;
         let composeCostCents = 0;
         let contentType: 'image/png' | 'image/jpeg' = 'image/png';
+        // Multi-strategy bookkeeping — populated by the exploration
+        // branch when n > 1 + layout is set. Persisted into
+        // composeState.variantAxes so the UI can show per-variant
+        // labels ("Variant 2 — paper-cutout style").
+        let multiStrategyVariantLayouts: LayoutId[] = [];
+        let multiStrategyVariantLabels: string[] = [];
+        let isMultiStrategy = false;
 
         if (sequenceMode && layout) {
           // ── SEQUENCE MODE ────────────────────────────────────────────────
@@ -229,57 +248,198 @@ export function startImageWorker(): Worker<ImageGenJobData> {
             );
           }
         } else {
-          // ── EXPLORATION MODE (existing path) ─────────────────────────────
-          const result = await generateImage({
-            prompt: editPrompt,
-            format,
-            provider,
-            model,
-            n,
-            quality,
-            sourceImage,
-          });
-          imageCostCents = result.costCents;
-          contentType = result.contentType;
+          // ── EXPLORATION MODE ─────────────────────────────────────────────
+          // Multi-strategy: when n > 1 and we have a layout, each variant
+          // rotates one or two axes (layout / style) per pickVariantAxis()
+          // so the user gets genuinely different attempts instead of N
+          // near-duplicates. Per-variant prompt + per-variant copy plan.
+          // Sequence mode + variation mode (sourceRawUrl) skip this and
+          // use the single shared prompt.
+          //
+          // effort = high triggers best-of-K critic per variant. The
+          // worker generates K=4 candidates from gpt-image-* in a single
+          // .generate(n=4) call, ships them to the vision critic, and
+          // keeps the winner.
+          const sharpMod = (await import('sharp')).default;
+          const multiStrategyOn = Boolean(layout) && n > 1 && !sourceRawUrl;
+          // Brand refs anchor outputs to the project's prior visual
+          // vocabulary. Only loaded when we actually need them (avoids
+          // a wasted R2 fetch on the variation path which uses its own
+          // sourceImage).
+          const brandRefsP = !sourceRawUrl
+            ? getBrandReferenceImages(projectId)
+            : Promise.resolve([]);
+          const brandRefs = await brandRefsP;
 
-          if (layout) {
-            const plan = await planCopy({
-              idea: idea ?? '',
-              layout,
-              language: language ?? 'en',
-              project: proj
-                ? { name: proj.name, audience: proj.audience, tone: proj.tone }
-                : { name: 'Project', audience: null, tone: null },
-              brandKit: kit ?? null,
+          // Track per-variant compose state for the params write below.
+          const variantLayoutIds: Array<LayoutId | 'none'> = [];
+          const variantCopies: PlannedCopy[] = [];
+          const variantLabels: string[] = [];
+
+          for (let varIdx = 0; varIdx < n; varIdx++) {
+            // Resolve per-variant layout + style.
+            let activeLayout = layout;
+            let activeStyle: VisualStyleKey | null = null;
+            let strategyLabel = 'requested';
+            let strategyHint: string | null = null;
+            if (multiStrategyOn && layout) {
+              const baseStyleKey = (kit?.visualStyle ?? 'abstract') as VisualStyleKey;
+              const axis = pickVariantAxis(varIdx, layout.id, baseStyleKey);
+              if (axis.layoutOverride) {
+                activeLayout = getLayout({ layoutId: axis.layoutOverride });
+              }
+              if (axis.styleOverride) activeStyle = axis.styleOverride;
+              strategyLabel = axis.label;
+              strategyHint = axis.strategyHint;
+            }
+
+            // Per-variant prompt. For the FIRST variant in single-shot
+            // mode we keep using the worker's already-built editPrompt
+            // (covers the variation flow's prefix). For multi-strategy
+            // variants we rebuild via buildImagePrompt with the
+            // perturbed axes — the action's enqueued prompt was built
+            // for the requested axes, so it'd be stale for variant 2..N.
+            let perVariantPrompt: string;
+            if (multiStrategyOn && layout) {
+              perVariantPrompt = buildImagePrompt({
+                idea: idea ?? '',
+                format,
+                project: proj
+                  ? { name: proj.name, audience: proj.audience, tone: proj.tone }
+                  : { name: 'Project', audience: null, tone: null },
+                brandKit: kit ?? null,
+                language: language ?? 'en',
+                visualStyleOverride: activeStyle ?? undefined,
+                layout: activeLayout ?? layout,
+                effort: effortTier,
+                strategyHint: strategyHint ?? undefined,
+              });
+            } else {
+              perVariantPrompt = editPrompt;
+            }
+
+            // Optional pre-render prompt enhancer for balanced + high.
+            // Adds ~0.1¢ per call but produces noticeably better image
+            // prompts than the raw template.
+            if (
+              (effortTier === 'balanced' || effortTier === 'high') &&
+              provider === 'openai' &&
+              !sourceRawUrl
+            ) {
+              try {
+                const enhanced = await enhancePrompt({
+                  basePrompt: perVariantPrompt,
+                  effort: effortTier,
+                });
+                perVariantPrompt = enhanced.prompt;
+                copyCostCents += enhanced.costCents;
+              } catch (err) {
+                console.warn(
+                  `[reachy:image] gen ${generationId} variant ${varIdx + 1}/${n} enhancer failed — using raw prompt: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+            }
+
+            // Generate. effort=high uses K=4 internal candidates per
+            // variant; otherwise a single shot.
+            const kCandidates = criticMode ? 4 : 1;
+            const candidateBatch = await generateImage({
+              prompt: perVariantPrompt,
+              format,
+              provider,
+              model,
+              n: kCandidates as 1 | 2 | 4,
+              quality,
+              sourceImage,
+              brandReferenceImages: brandRefs,
             });
-            copy = plan.copy;
-            copyCostCents = plan.costCents;
-            composeCostCents = 1;
-          }
+            imageCostCents += candidateBatch.costCents;
+            contentType = candidateBatch.contentType;
 
-          if (layout) {
-            const sharpMod = (await import('sharp')).default;
-            for (const [i, raw] of result.buffers.entries()) {
-              const sized = await sharpMod(raw, { failOn: 'none' })
+            // Pick the winning candidate.
+            let winnerBuf: Buffer;
+            const firstCandidate = candidateBatch.buffers[0];
+            if (!firstCandidate) {
+              throw new Error(`variant ${varIdx + 1}/${n}: model returned no image`);
+            }
+            if (criticMode && candidateBatch.buffers.length > 1) {
+              try {
+                const verdict = await pickBest({
+                  // criticMode requires layoutId at the top of the
+                  // worker, so `layout` is guaranteed non-null here.
+                  // activeLayout falls back to layout when multi-
+                  // strategy hasn't perturbed the axis.
+                  layout: activeLayout ?? (layout as NonNullable<typeof layout>),
+                  brief: idea ?? perVariantPrompt.slice(0, 240),
+                  candidates: candidateBatch.buffers.map((buf, i) => ({
+                    index: i,
+                    buffer: buf,
+                  })),
+                });
+                copyCostCents += verdict.costCents;
+                winnerBuf = candidateBatch.buffers[verdict.winnerIndex] ?? firstCandidate;
+                console.log(
+                  `[reachy:image] gen ${generationId} variant ${varIdx + 1}/${n} critic picked candidate ${verdict.winnerIndex + 1}/${candidateBatch.buffers.length}: ${verdict.reasoning}`,
+                );
+              } catch (err) {
+                console.warn(
+                  `[reachy:image] gen ${generationId} critic failed — keeping candidate 1: ${err instanceof Error ? err.message : String(err)}`,
+                );
+                winnerBuf = firstCandidate;
+              }
+            } else {
+              winnerBuf = firstCandidate;
+            }
+
+            // Resize + upload raw + compose.
+            if (activeLayout) {
+              const sized = await sharpMod(winnerBuf, { failOn: 'none' })
                 .resize(fm.w, fm.h, { fit: 'cover', position: 'centre' })
                 .png({ compressionLevel: 6 })
                 .toBuffer();
-              const rawKey = `${projectId}/${generationId}/${i + 1}-raw.png`;
+              const rawKey = `${projectId}/${generationId}/${varIdx + 1}-raw.png`;
               const rawUpload = await putR2(rawKey, sized, 'image/png');
               rawUploads.push({ key: rawUpload.key, publicUrl: rawUpload.publicUrl });
+
+              // Per-variant copy plan against THIS variant's layout.
+              const planForVariant = await planCopy({
+                idea: idea ?? '',
+                layout: activeLayout,
+                language: language ?? 'en',
+                project: proj
+                  ? { name: proj.name, audience: proj.audience, tone: proj.tone }
+                  : { name: 'Project', audience: null, tone: null },
+                brandKit: kit ?? null,
+              });
+              copyCostCents += planForVariant.costCents;
+              composeCostCents += 1;
+              if (varIdx === 0) copy = planForVariant.copy; // legacy single-copy carrier
+              variantCopies.push(planForVariant.copy);
+              variantLayoutIds.push(activeLayout.id);
+              variantLabels.push(strategyLabel);
 
               const composed = await composeImage({
                 background: sized,
                 width: fm.w,
                 height: fm.h,
-                layout,
-                copy,
+                layout: activeLayout,
+                copy: planForVariant.copy,
                 colors,
               });
               composedBuffers.push(composed);
+            } else {
+              composedBuffers.push(winnerBuf);
             }
-          } else {
-            composedBuffers.push(...result.buffers);
+          }
+
+          // Surface multi-strategy bookkeeping to the params writer.
+          if (multiStrategyOn) {
+            isMultiStrategy = true;
+            sequenceCopies = variantCopies;
+            multiStrategyVariantLayouts = variantLayoutIds.filter(
+              (id): id is LayoutId => id !== 'none',
+            );
+            multiStrategyVariantLabels = variantLabels;
           }
         }
 
@@ -321,26 +481,41 @@ export function startImageWorker(): Worker<ImageGenJobData> {
             ? {
                 composeState: {
                   layoutId: layout.id,
-                  // Exploration: single shared PlannedCopy.
-                  // Sequence: PlannedCopy[] parallel to assets[] / rawAssets.
-                  // The `mode` field discriminates so the form / re-render
-                  // action can read the right shape.
-                  mode: sequenceMode ? ('sequence' as const) : ('exploration' as const),
-                  copy: sequenceMode ? (sequenceCopies ?? []) : copy,
+                  // composeState.mode discriminates downstream:
+                  //   exploration    — single shared PlannedCopy (n=1
+                  //                    or multi-strategy disabled).
+                  //   multi-strategy — PlannedCopy[] + variant labels +
+                  //                    per-variant layoutIds (n > 1).
+                  //   sequence       — PlannedCopy[] for serial frames.
+                  mode: sequenceMode
+                    ? ('sequence' as const)
+                    : isMultiStrategy
+                      ? ('multi-strategy' as const)
+                      : ('exploration' as const),
+                  copy: sequenceMode || isMultiStrategy ? (sequenceCopies ?? []) : copy,
                   colors,
                   // Parallel arrays to assets[] order — index i of rawUploads
                   // is the raw background for asset i. rerenderOverlay uses
                   // this to recompose without stacking text on text.
                   rawAssets: rawUploads,
-                  // Sequence-specific metadata for the UI (so it can render
-                  // the [1]→[2]→[3] strip and pre-populate per-frame edit
-                  // copy from frameTexts[K]).
+                  // Sequence-specific metadata.
                   ...(sequenceMode
                     ? {
                         sequenceMeta: {
                           totalFrames: n,
                           frameTexts: sequenceCopies ?? [],
                         },
+                      }
+                    : {}),
+                  // Multi-strategy bookkeeping — per-variant layouts +
+                  // human labels for the UI's "Variant 2 — alt style"
+                  // chip and for the per-variant edit-copy / swap path.
+                  ...(isMultiStrategy
+                    ? {
+                        variantAxes: multiStrategyVariantLayouts.map((id, i) => ({
+                          layoutId: id,
+                          label: multiStrategyVariantLabels[i] ?? `variant ${i + 1}`,
+                        })),
                       }
                     : {}),
                 },

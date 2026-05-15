@@ -45,6 +45,8 @@ import {
 
 interface GenerateImageFormProps {
   projectId: string;
+  /** Project slug — needed to router.push to the editor page on submit. */
+  slug: string;
   providerAvailability: { openai: boolean; fal: boolean };
   r2Configured: boolean;
   /** Brand kit visual style — used as the default in the override picker
@@ -180,6 +182,7 @@ async function downloadAsCarousel(
 
 export function GenerateImageForm({
   projectId,
+  slug,
   providerAvailability,
   r2Configured,
   brandVisualStyle,
@@ -361,14 +364,13 @@ export function GenerateImageForm({
         return;
       }
 
-      setSelectedAssetIdx(0);
-      setRun({
-        kind: 'running',
-        generationId: result.data.generationId,
-        status: 'queued',
-        assets: [],
-      });
-      startPolling(result.data.generationId);
+      // Push to the dedicated editor page — Garcia's spec for the
+      // transformation pass. The editor server-loads + polls on its
+      // own; the form just enqueues and gets out of the way. We use
+      // window.location.href instead of router.push so the editor
+      // re-renders cleanly with its server-loaded composeState rather
+      // than inheriting stale client state from the form.
+      window.location.href = `/app/projects/${slug}/generate/image/${result.data.generationId}`;
     });
   }
 

@@ -44,6 +44,12 @@ export interface ImageGenJobData {
    *                  K-1 as the images.edit source. The worker drives
    *                  the serial loop + per-frame copy planning. */
   mode?: 'exploration' | 'sequence';
+  /** AI effort tier:
+   *    fast      → single-shot images.generate, no extras.
+   *    balanced  → reasoning_effort='medium' when the model supports it.
+   *    high      → reasoning_effort='high' + best-of-K critic (4
+   *                internal candidates → gpt-5.4-mini vision pick). */
+  effort?: 'fast' | 'balanced' | 'high';
 }
 
 let cached: Queue<ImageGenJobData> | null = null;

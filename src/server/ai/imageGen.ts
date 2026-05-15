@@ -62,6 +62,14 @@ export interface GenerateImageInput {
    *  buffer instead of `images.generate`. The fal path ignores this.
    *  Used by the "More like this" variation flow. */
   sourceImage?: Buffer;
+  /** Optional brand-reference image buffers. Combined with sourceImage
+   *  (or the sequence's previousFrameBuffer) into the `image: [array]`
+   *  passed to images.edit. The first element is always the primary
+   *  composition source; refs are appended for style anchoring. Caps
+   *  at 16 per OpenAI's documented limit; we keep it to 4 in practice
+   *  (the prompting guide notes quality drops past ~4). The fal path
+   *  ignores this. */
+  brandReferenceImages?: Buffer[];
   /** Sequence-mode signaling. When set, the dispatch appends a
    *  per-frame continuity cue to the prompt and (frame > 0) routes
    *  through images.edit using `previousFrameBuffer` as the reference.
@@ -184,10 +192,35 @@ async function openaiImage(input: GenerateImageInput): Promise<GenerateImageResu
   // because OpenAI bills per output image regardless of endpoint.
   // The toFile helper wraps the Buffer with a filename so the SDK can
   // serialize it as multipart/form-data.
-  const result = editSource
+  //
+  // Brand reference images (logo + prior best generation) are appended
+  // AFTER the primary edit source. Per OpenAI's prompting guide for
+  // gpt-image-2, multi-image is "compose elements" semantics — image[0]
+  // is the primary, image[1..] are references. We cap at 4 refs total
+  // (5 images including source) — quality degrades past that per the
+  // cookbook §5.9 guidance. Mask, when supported, applies only to
+  // image[0] so the refs don't get clobbered.
+  const refs = (input.brandReferenceImages ?? []).slice(0, 4);
+  const editImages = editSource
+    ? await Promise.all(
+        [editSource, ...refs].map((buf, i) =>
+          toFile(buf, i === 0 ? 'source.png' : `ref-${i}.png`, {
+            type: 'image/png',
+          }),
+        ),
+      )
+    : null;
+  const result = editImages
     ? await openai.images.edit({
         model: input.model,
-        image: await toFile(editSource, 'source.png', { type: 'image/png' }),
+        // Single-ref path passes the bare File; multi-ref passes the array.
+        // The non-null assertion on editImages[0] is safe because the
+        // outer branch guarantees editImages.length >= 1.
+        image:
+          editImages.length === 1
+            ? // biome-ignore lint/style/noNonNullAssertion: branch guarantees non-empty
+              editImages[0]!
+            : editImages,
         prompt: dispatchPrompt,
         n: input.n,
         size,

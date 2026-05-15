@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
@@ -6,6 +7,7 @@ import { GenerateImageForm } from '@/components/app/generate-image-form';
 import { MonoEyebrow } from '@/components/editorial';
 import type { VisualStyleKey } from '@/lib/visual-styles-meta';
 import { getBrandKitForProject } from '@/server/actions/brandKits';
+import { getRecentGenerations } from '@/server/actions/images';
 import { getProjectBySlug } from '@/server/actions/projects';
 import { isFalConfigured } from '@/server/ai/fal';
 import { isOpenAIConfigured } from '@/server/ai/openai';
@@ -28,38 +30,68 @@ export default async function GenerateImagePage({ params }: GeneratePageProps) {
   if (!project) notFound();
 
   const bundle = await getBrandKitForProject(project.id);
+  const recents = await getRecentGenerations({ projectId: project.id, limit: 12 });
+
+  // First language in the brand kit drives the default for copy planner.
+  // Falls back to 'es' (Reachy's primary market) if no brand kit is set.
+  const brandLanguages = (bundle?.brandKit?.languages ?? ['es']) as Array<'en' | 'es'>;
 
   return (
     <GenerateImagePageContent
+      slug={slug}
       projectId={project.id}
       hasBrandKit={Boolean(bundle?.brandKit)}
       brandVisualStyle={(bundle?.brandKit?.visualStyle ?? null) as VisualStyleKey | null}
+      brandLanguages={brandLanguages}
       providerAvailability={{
         openai: isOpenAIConfigured(),
         fal: isFalConfigured(),
       }}
       r2Configured={isR2Configured()}
+      recents={recents.map((r) => ({
+        generationId: r.generationId,
+        format: r.format,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+        firstAssetUrl: r.firstAssetUrl,
+        costCents: r.costCents,
+      }))}
     />
   );
 }
 
+interface RecentRow {
+  generationId: string;
+  format: string;
+  status: string;
+  createdAt: string;
+  firstAssetUrl: string | null;
+  costCents: number | null;
+}
+
 function GenerateImagePageContent({
+  slug,
   projectId,
   hasBrandKit,
   brandVisualStyle,
+  brandLanguages,
   providerAvailability,
   r2Configured,
+  recents,
 }: {
+  slug: string;
   projectId: string;
   hasBrandKit: boolean;
   brandVisualStyle: VisualStyleKey | null;
+  brandLanguages: Array<'en' | 'es'>;
   providerAvailability: { openai: boolean; fal: boolean };
   r2Configured: boolean;
+  recents: RecentRow[];
 }) {
   const t = useTranslations('Generate');
 
   return (
-    <div className="space-y-12">
+    <div className="mx-auto max-w-[860px] space-y-12">
       <div>
         <MonoEyebrow as="div">{t('eyebrow')}</MonoEyebrow>
         <h2
@@ -83,11 +115,45 @@ function GenerateImagePageContent({
       </div>
 
       <GenerateImageForm
+        slug={slug}
         projectId={projectId}
         providerAvailability={providerAvailability}
         r2Configured={r2Configured}
         brandVisualStyle={brandVisualStyle}
+        brandLanguages={brandLanguages}
       />
+
+      {recents.length > 0 && (
+        <section className="space-y-4 border-ink-3/30 border-t pt-12">
+          <h3 className="mono-eyebrow">Recent generations</h3>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {recents.map((r) => (
+              <Link
+                key={r.generationId}
+                href={`/app/projects/${slug}/generate/image/${r.generationId}`}
+                className="block space-y-1"
+              >
+                <div
+                  className="relative overflow-hidden border border-ink-3/20 bg-paper-2 transition hover:border-ink"
+                  style={{ aspectRatio: '1 / 1' }}
+                >
+                  {r.firstAssetUrl ? (
+                    // biome-ignore lint/performance/noImgElement: small thumb
+                    <img src={r.firstAssetUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="mono-eyebrow flex h-full w-full items-center justify-center text-ink-3">
+                      {r.status}
+                    </span>
+                  )}
+                </div>
+                <div className="mono-eyebrow text-[10px] text-ink-3 truncate">
+                  {r.format} · {r.costCents != null ? `${r.costCents}¢` : '—'}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

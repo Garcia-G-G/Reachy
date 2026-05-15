@@ -61,9 +61,22 @@ const enqueueInput = z.object({
    *                          frame gets its own PlannedCopy entry so
    *                          typography progresses too. */
   mode: z.enum(['exploration', 'sequence']).default('exploration'),
+  /** AI effort tier — drives reasoning + best-of-K pipelines.
+   *   fast      — single-shot images.generate, no extras.
+   *   balanced  — gpt-image-2 reasoning_effort='medium' when supported;
+   *               otherwise an in-prompt contemplation cue.
+   *   high      — reasoning='high' + best-of-K critic: generate 4
+   *               candidates, send to gpt-5.4-mini vision critic to
+   *               pick the winner. Cost ~5× per delivered variant. */
+  effort: z.enum(['fast', 'balanced', 'high']).default('balanced'),
 });
 
-export type EnqueueImageGenerationInput = z.infer<typeof enqueueInput>;
+// Use z.input (not z.infer / z.output) so callers see fields with
+// `.default(...)` as OPTIONAL. The server still gets the populated value
+// after parsing; only the client-facing input type relaxes. This lets
+// the form omit fields (mode, effort, quality, language, …) and still
+// type-check; the server fills them in from the zod default.
+export type EnqueueImageGenerationInput = z.input<typeof enqueueInput>;
 
 type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -139,6 +152,7 @@ export async function enqueueImageGeneration(
         visualStyleOverride: parsed.data.visualStyleOverride ?? null,
         layoutId: resolvedLayoutId,
         mode: parsed.data.mode,
+        effort: parsed.data.effort,
       },
     })
     .returning();
@@ -163,6 +177,7 @@ export async function enqueueImageGeneration(
         idea: parsed.data.idea,
         language: parsed.data.language,
         mode: parsed.data.mode,
+        effort: parsed.data.effort,
       },
       { jobId: gen.id },
     );
@@ -615,6 +630,474 @@ export async function rerenderOverlay(
     ok: true,
     data: { generationId: newGen.id, assetId: newAsset.id, publicUrl: upload.publicUrl },
   };
+}
+
+/**
+ * Swap the layout overlay on an existing asset. Re-composes typography
+ * from the asset's stored raw AI background with a NEW layout — same
+ * brand colors, same copy slots (mapped where compatible). Costs $0:
+ * no AI call, only CPU + R2.
+ *
+ * Caller passes the new layoutId and (optionally) overridden copy.
+ * If copy is omitted we use the source's composeState.copy, mapping
+ * by slot key — slots the new layout doesn't have are dropped; slots
+ * the new layout introduces that have no prior value stay empty until
+ * the user fills them via Edit Copy.
+ */
+const swapLayoutInput = z.object({
+  generationId: z.string().uuid(),
+  assetId: z.string().uuid(),
+  layoutId: z.enum(LAYOUT_IDS as unknown as [LayoutId, ...LayoutId[]]),
+  copy: z
+    .object({
+      eyebrow: z.string().trim().max(120).optional(),
+      headline: z.string().trim().max(240).optional(),
+      subheadline: z.string().trim().max(320).optional(),
+      cta: z.string().trim().max(80).optional(),
+      wordmark: z.string().trim().max(80).optional(),
+    })
+    .optional(),
+});
+
+export type SwapLayoutInput = z.input<typeof swapLayoutInput>;
+
+export async function swapLayout(
+  input: SwapLayoutInput,
+): Promise<ActionResult<{ generationId: string; assetId: string; publicUrl: string | null }>> {
+  const session = await getSession();
+  if (!session) return { ok: false, error: 'unauthenticated' };
+  const parsed = swapLayoutInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
+  }
+
+  // Ownership check + load.
+  const [srcGen] = await db
+    .select()
+    .from(generation)
+    .where(eq(generation.id, parsed.data.generationId))
+    .limit(1);
+  if (!srcGen) return { ok: false, error: 'not-found' };
+  const [proj] = await db
+    .select()
+    .from(project)
+    .where(
+      and(
+        eq(project.id, srcGen.projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!proj) return { ok: false, error: 'not-found' };
+
+  const srcParams = (srcGen.params ?? {}) as {
+    composeState?: {
+      colors?: BrandColors;
+      copy?: PlannedCopy | PlannedCopy[];
+      rawAssets?: Array<{ key: string; publicUrl: string | null }>;
+      mode?: 'exploration' | 'sequence';
+    };
+  };
+  if (!srcParams.composeState?.rawAssets) {
+    return { ok: false, error: 'source asset has no raw background to recompose from' };
+  }
+
+  // Locate the asset row + raw bg pointer.
+  const siblings = await db
+    .select()
+    .from(asset)
+    .where(eq(asset.generationId, srcGen.id))
+    .orderBy(asset.createdAt);
+  const idx = siblings.findIndex((a) => a.id === parsed.data.assetId);
+  if (idx < 0) return { ok: false, error: 'asset not part of generation' };
+  const sourceAsset = siblings[idx];
+  if (!sourceAsset) return { ok: false, error: 'asset not found' };
+  const rawPointer = srcParams.composeState.rawAssets[idx];
+  if (!rawPointer?.publicUrl) {
+    return { ok: false, error: 'raw bg pointer missing — generation predates raw storage' };
+  }
+
+  // Fetch raw bg.
+  let bgBuf: Buffer;
+  try {
+    const res = await fetch(rawPointer.publicUrl);
+    if (!res.ok) throw new Error(`fetch ${res.status}`);
+    bgBuf = Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `failed to fetch raw bg: ${msg}` };
+  }
+
+  // Resolve copy: caller's override > source's existing copy (per-frame
+  // for sequence). Slots the new layout doesn't request are silently
+  // dropped; new slots stay empty until the user fills them.
+  const newLayout = getLayout({ layoutId: parsed.data.layoutId });
+  const priorCopy: PlannedCopy = (() => {
+    const c = srcParams.composeState?.copy;
+    if (Array.isArray(c)) return c[idx] ?? {};
+    return c ?? {};
+  })();
+  const incoming = parsed.data.copy ?? {};
+  const nextCopy: PlannedCopy = {};
+  for (const slot of newLayout.slots) {
+    const fromIncoming = incoming[slot];
+    if (fromIncoming && fromIncoming.length > 0) nextCopy[slot] = fromIncoming;
+    else if (priorCopy[slot]) nextCopy[slot] = priorCopy[slot];
+  }
+
+  const colors: BrandColors = srcParams.composeState?.colors ?? {
+    ink: '#14110D',
+    paper: '#F1EBDF',
+    accent: '#B6481A',
+  };
+
+  let composed: Buffer;
+  try {
+    composed = await composeImage({
+      background: bgBuf,
+      width: sourceAsset.width ?? 1080,
+      height: sourceAsset.height ?? 1080,
+      layout: newLayout,
+      copy: nextCopy,
+      colors,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `compose failed: ${msg}` };
+  }
+
+  // Persist as a new generation + asset row (matches rerenderOverlay's
+  // pattern — keeps the source row immutable so undo is implicit).
+  const [newGen] = await db
+    .insert(generation)
+    .values({
+      projectId: proj.id,
+      type: 'image',
+      format: srcGen.format,
+      status: 'done',
+      provider: srcGen.provider,
+      model: srcGen.model,
+      prompt: `Swap layout (→ ${parsed.data.layoutId}) of generation ${srcGen.id}`,
+      params: {
+        ...srcParams,
+        composeState: {
+          layoutId: parsed.data.layoutId,
+          mode: 'exploration' as const,
+          copy: nextCopy,
+          colors,
+        },
+        layoutSwapOf: srcGen.id,
+      },
+      costCents: 0,
+      finishedAt: new Date(),
+    })
+    .returning();
+  if (!newGen) return { ok: false, error: 'failed to create generation row' };
+
+  const key = `${proj.id}/${newGen.id}/1.png`;
+  const upload = await putR2(key, composed, 'image/png');
+  const [newAsset] = await db
+    .insert(asset)
+    .values({
+      generationId: newGen.id,
+      projectId: proj.id,
+      kind: 'image',
+      format: srcGen.format,
+      width: sourceAsset.width,
+      height: sourceAsset.height,
+      storageKey: upload.key,
+      publicUrl: upload.publicUrl,
+      bytes: upload.bytes,
+    })
+    .returning();
+  if (!newAsset) return { ok: false, error: 'failed to create asset row' };
+
+  revalidatePath(`/app/projects/${proj.slug}/library`, 'layout');
+  revalidatePath(`/app/projects/${proj.slug}/generate/image`, 'layout');
+  return {
+    ok: true,
+    data: { generationId: newGen.id, assetId: newAsset.id, publicUrl: upload.publicUrl },
+  };
+}
+
+/**
+ * Override brand colors on a single asset's overlay. Same flow as
+ * swapLayout but with the colors swapped instead of the layout.
+ */
+const swapColorsInput = z.object({
+  generationId: z.string().uuid(),
+  assetId: z.string().uuid(),
+  colors: z.object({
+    ink: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    paper: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    accent: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  }),
+});
+
+export type SwapColorsInput = z.input<typeof swapColorsInput>;
+
+export async function swapColors(
+  input: SwapColorsInput,
+): Promise<ActionResult<{ generationId: string; assetId: string; publicUrl: string | null }>> {
+  const session = await getSession();
+  if (!session) return { ok: false, error: 'unauthenticated' };
+  const parsed = swapColorsInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'invalid input' };
+  }
+
+  const [srcGen] = await db
+    .select()
+    .from(generation)
+    .where(eq(generation.id, parsed.data.generationId))
+    .limit(1);
+  if (!srcGen) return { ok: false, error: 'not-found' };
+  const [proj] = await db
+    .select()
+    .from(project)
+    .where(
+      and(
+        eq(project.id, srcGen.projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!proj) return { ok: false, error: 'not-found' };
+
+  const srcParams = (srcGen.params ?? {}) as {
+    composeState?: {
+      layoutId?: LayoutId;
+      copy?: PlannedCopy | PlannedCopy[];
+      rawAssets?: Array<{ key: string; publicUrl: string | null }>;
+    };
+  };
+  if (!srcParams.composeState?.layoutId || !srcParams.composeState?.rawAssets) {
+    return { ok: false, error: 'source generation has no overlay state' };
+  }
+
+  const siblings = await db
+    .select()
+    .from(asset)
+    .where(eq(asset.generationId, srcGen.id))
+    .orderBy(asset.createdAt);
+  const idx = siblings.findIndex((a) => a.id === parsed.data.assetId);
+  if (idx < 0) return { ok: false, error: 'asset not part of generation' };
+  const sourceAsset = siblings[idx];
+  if (!sourceAsset) return { ok: false, error: 'asset not found' };
+  const rawPointer = srcParams.composeState.rawAssets[idx];
+  if (!rawPointer?.publicUrl) {
+    return { ok: false, error: 'raw bg pointer missing' };
+  }
+
+  let bgBuf: Buffer;
+  try {
+    const res = await fetch(rawPointer.publicUrl);
+    if (!res.ok) throw new Error(`fetch ${res.status}`);
+    bgBuf = Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    return {
+      ok: false,
+      error: `failed to fetch raw bg: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const layout = getLayout({ layoutId: srcParams.composeState.layoutId });
+  const priorCopy: PlannedCopy = (() => {
+    const c = srcParams.composeState?.copy;
+    if (Array.isArray(c)) return c[idx] ?? {};
+    return c ?? {};
+  })();
+
+  let composed: Buffer;
+  try {
+    composed = await composeImage({
+      background: bgBuf,
+      width: sourceAsset.width ?? 1080,
+      height: sourceAsset.height ?? 1080,
+      layout,
+      copy: priorCopy,
+      colors: parsed.data.colors,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: `compose failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const [newGen] = await db
+    .insert(generation)
+    .values({
+      projectId: proj.id,
+      type: 'image',
+      format: srcGen.format,
+      status: 'done',
+      provider: srcGen.provider,
+      model: srcGen.model,
+      prompt: `Swap colors on generation ${srcGen.id}`,
+      params: {
+        ...srcParams,
+        composeState: {
+          layoutId: srcParams.composeState.layoutId,
+          mode: 'exploration' as const,
+          copy: priorCopy,
+          colors: parsed.data.colors,
+        },
+        colorSwapOf: srcGen.id,
+      },
+      costCents: 0,
+      finishedAt: new Date(),
+    })
+    .returning();
+  if (!newGen) return { ok: false, error: 'failed to create generation row' };
+
+  const key = `${proj.id}/${newGen.id}/1.png`;
+  const upload = await putR2(key, composed, 'image/png');
+  const [newAsset] = await db
+    .insert(asset)
+    .values({
+      generationId: newGen.id,
+      projectId: proj.id,
+      kind: 'image',
+      format: srcGen.format,
+      width: sourceAsset.width,
+      height: sourceAsset.height,
+      storageKey: upload.key,
+      publicUrl: upload.publicUrl,
+      bytes: upload.bytes,
+    })
+    .returning();
+  if (!newAsset) return { ok: false, error: 'failed to create asset row' };
+
+  revalidatePath(`/app/projects/${proj.slug}/library`, 'layout');
+  revalidatePath(`/app/projects/${proj.slug}/generate/image`, 'layout');
+  return {
+    ok: true,
+    data: { generationId: newGen.id, assetId: newAsset.id, publicUrl: upload.publicUrl },
+  };
+}
+
+/**
+ * Recent image generations for a project — server-loaded data for the
+ * form page's "Recent generations" gallery. Returns at most N rows
+ * with the first asset's publicUrl + status + format + cost so the
+ * gallery can render thumbnails without a second round-trip.
+ */
+export async function getRecentGenerations({
+  projectId,
+  limit = 12,
+}: {
+  projectId: string;
+  limit?: number;
+}): Promise<
+  Array<{
+    generationId: string;
+    format: string;
+    status: string;
+    costCents: number | null;
+    createdAt: Date;
+    firstAssetUrl: string | null;
+  }>
+> {
+  const session = await getSession();
+  if (!session) return [];
+  const [proj] = await db
+    .select({ id: project.id })
+    .from(project)
+    .where(
+      and(
+        eq(project.id, projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!proj) return [];
+
+  const rows = await db
+    .select({
+      generationId: generation.id,
+      format: generation.format,
+      status: generation.status,
+      costCents: generation.costCents,
+      createdAt: generation.createdAt,
+    })
+    .from(generation)
+    .where(and(eq(generation.projectId, proj.id), eq(generation.type, 'image')))
+    .orderBy(desc(generation.createdAt))
+    .limit(limit);
+
+  if (rows.length === 0) return [];
+
+  // Pull first asset per generation in one query.
+  const allAssets = await db
+    .select({
+      generationId: asset.generationId,
+      publicUrl: asset.publicUrl,
+      createdAt: asset.createdAt,
+    })
+    .from(asset)
+    .where(eq(asset.projectId, proj.id))
+    .orderBy(asset.createdAt);
+  const firstByGen = new Map<string, string | null>();
+  for (const a of allAssets) {
+    if (!a.generationId) continue;
+    if (!firstByGen.has(a.generationId)) {
+      firstByGen.set(a.generationId, a.publicUrl);
+    }
+  }
+
+  return rows.map((r) => ({
+    generationId: r.generationId,
+    format: r.format,
+    status: r.status,
+    costCents: r.costCents,
+    createdAt: r.createdAt,
+    firstAssetUrl: firstByGen.get(r.generationId) ?? null,
+  }));
+}
+
+/**
+ * Brand reference images for `images.edit` calls — anchors the model
+ * to the user's visual vocabulary across generations. Returns up to 4
+ * buffers (the practical sweet spot per OpenAI's prompting guide:
+ * gpt-image-2 supports 16 but quality drops past ~4).
+ *
+ * Sources, in priority order:
+ *   1. brandKit.logoUrl (when set).
+ *   2. The most recent SUCCESSFUL image generation's first asset for
+ *      this project (anchors the model to "what this brand looks like
+ *      now"). Skipped when the source is itself a re-render-overlay
+ *      row (those don't represent a fresh visual direction).
+ *
+ * Returns empty array when nothing usable is available. The worker
+ * tolerates the empty case — no refs = falls back to images.generate.
+ */
+export async function getBrandReferenceImages(projectId: string): Promise<Buffer[]> {
+  // Thin user-facing wrapper around the worker-safe util in
+  // src/server/lib/brandReferences.ts. The worker imports the lib
+  // directly (this file's 'use server' directive transitively pulls in
+  // next/navigation which breaks worker startup). Session ownership
+  // check stays here so external callers can't read arbitrary
+  // projects' references.
+  const session = await getSession();
+  if (!session) return [];
+  const [proj] = await db
+    .select({ id: project.id })
+    .from(project)
+    .where(
+      and(
+        eq(project.id, projectId),
+        eq(project.userId, session.user.id),
+        isNull(project.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!proj) return [];
+  const { getBrandReferenceImages: load } = await import('@/server/lib/brandReferences');
+  return load(proj.id);
 }
 
 export async function listGenerationsForProject(
