@@ -48,8 +48,11 @@ export default async function ChatPage({ params }: { params: Promise<{ slug: str
     language,
   });
 
-  const userDisplayName = session.user.name ?? session.user.email?.split('@')[0] ?? 'there';
-  const firstName = userDisplayName.split(' ')[0] ?? userDisplayName;
+  // Phase 07c — `||` not `??` so an empty `session.user.name`
+  // string falls through to the email-prefix → 'amigo' fallback.
+  const userDisplayName =
+    session.user.name?.trim() || session.user.email?.split('@')[0]?.trim() || 'amigo';
+  const firstName = userDisplayName.split(' ')[0] || userDisplayName;
 
   return (
     <EmmaChat

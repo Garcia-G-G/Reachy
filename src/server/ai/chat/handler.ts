@@ -1,16 +1,23 @@
 import 'server-only';
-import { anthropic } from '@ai-sdk/anthropic';
+import { openai } from '@ai-sdk/openai';
 import { type ModelMessage, stepCountIs, streamText } from 'ai';
 import { and, desc, eq } from 'drizzle-orm';
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
 import {
   CHAT_HISTORY_DEPTH,
-  CHAT_MAX_OUTPUT_TOKENS,
   CHAT_MAX_TOOL_CALLS_PER_TURN,
   CHAT_RECENT_ASSETS_IN_CONTEXT,
 } from '@/server/config/chatLimits';
 import { buildEmmaSystemPrompt } from '@/server/config/chatSystemPrompts';
+import {
+  EMMA_MAX_OUTPUT_TOKENS,
+  EMMA_MODEL,
+  EMMA_PRICING,
+  EMMA_REASONING_DEFAULT,
+  EMMA_REASONING_HEAVY,
+  isHeavyRequest,
+} from '@/server/config/emmaModel';
 import { db } from '@/server/db/client';
 import { brandKit } from '@/server/db/schema/brandKits';
 import {
@@ -22,11 +29,12 @@ import { chatThread } from '@/server/db/schema/chatThreads';
 import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
 import type { ProductBrief } from '@/server/ingest/extractBrief';
+import { signedDownloadUrl } from '@/server/storage/r2';
 import type { EmmaToolContext } from './context';
 import { buildEmmaTools } from './tools';
 
 /**
- * Emma — the orchestrator. Phase 07.
+ * Emma — the orchestrator. Phase 07 + 07c (GPT pivot).
  *
  * Per turn:
  *   1. Load thread + project + brand kit + brief + recent assets.
@@ -34,8 +42,10 @@ import { buildEmmaTools } from './tools';
  *      anti-hardcode compliant).
  *   3. Map persisted chat_message rows + the new user message into
  *      AI SDK ModelMessage[] (history limit honors CHAT_HISTORY_DEPTH).
- *   4. Call streamText with the bound tools, Anthropic Sonnet 4.6,
- *      stopWhen = stepCountIs(maxTurns).
+ *   4. Call streamText against OpenAI gpt-5.5 (Vercel AI SDK v6
+ *      provider) with the bound tools and providerOptions.openai.
+ *      reasoningEffort set per emmaModel heuristic. stopWhen =
+ *      stepCountIs(CHAT_MAX_TOOL_CALLS_PER_TURN).
  *   5. The stream's onStepFinish fires after each model step — we
  *      persist the assistant message(s) + tool calls + tool results
  *      to chat_message so reconnects can replay.
@@ -54,14 +64,11 @@ export interface RunEmmaTurnInput {
     text: string;
     attachments: ChatAttachment[];
   };
+  /** Display name resolved by the API route from session.user.name
+   *  → email-prefix → fallback. Empty strings get caught downstream
+   *  in chatSystemPrompts (EMMA_FALLBACK_GREETING_NAME). */
+  userDisplayName: string;
 }
-
-const MODEL_ID = 'claude-sonnet-4-6';
-const ANTHROPIC_PRICING = {
-  inputPerMillion: 3, // USD
-  outputPerMillion: 15, // USD
-  cachedInputPerMillion: 0.3,
-};
 
 function estimateCostCents(usage: {
   inputTokens?: number;
@@ -72,9 +79,9 @@ function estimateCostCents(usage: {
   const outT = usage.outputTokens ?? 0;
   const cachedT = usage.cachedInputTokens ?? 0;
   const usd =
-    ((inT - cachedT) * ANTHROPIC_PRICING.inputPerMillion +
-      cachedT * ANTHROPIC_PRICING.cachedInputPerMillion +
-      outT * ANTHROPIC_PRICING.outputPerMillion) /
+    ((inT - cachedT) * EMMA_PRICING.inputPerMillion +
+      cachedT * EMMA_PRICING.cachedInputPerMillion +
+      outT * EMMA_PRICING.outputPerMillion) /
     1_000_000;
   return Math.max(1, Math.round(usd * 100));
 }
@@ -162,14 +169,13 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
   const language = (brandKit_.languages?.[0] ?? 'en') as 'en' | 'es';
 
   // ── 2. Build the system prompt ──
-  const userDisplayName = 'there'; // The API route can override via input later.
   const systemPrompt = buildEmmaSystemPrompt({
     project: project_,
     brandKit: brandKit_,
     productBrief,
     recentAssets,
     language,
-    userDisplayName,
+    userDisplayName: input.userDisplayName,
   });
 
   // ── 3. Load history + persist the new user message ──
@@ -181,37 +187,38 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     .limit(CHAT_HISTORY_DEPTH);
   const history = historyRows.reverse();
 
-  // Build the new user message content. If attachments are present we
-  // include them inline as image blocks; doc attachments are
-  // referenced by R2 key and Emma is expected to call
-  // ingestUploadedFile to read them.
+  // Build the new user message content. If image attachments are
+  // present we resolve their R2 keys to signed download URLs so
+  // OpenAI's vision endpoint can fetch them without our bucket being
+  // public. Doc attachments are referenced by R2 key in a text marker
+  // — Emma calls ingestUploadedFile with that key to read them.
   const userContent: Array<
-    | { type: 'text'; text: string }
-    | {
-        type: 'image';
-        image: string;
-        mediaType: string;
-      }
+    { type: 'text'; text: string } | { type: 'image'; image: string; mediaType: string }
   > = [];
   if (input.userMessage.text && input.userMessage.text.trim().length > 0) {
     userContent.push({ type: 'text', text: input.userMessage.text });
   }
   for (const att of input.userMessage.attachments) {
     if (att.mime.startsWith('image/')) {
-      // Anthropic accepts URLs for images. We store R2 public URLs in
-      // the storage layer's putR2 result; if the upload route returned
-      // a key only, the client builds the public URL before sending.
-      // For now, pass the R2 key as a marker and resolve at runtime.
-      userContent.push({
-        type: 'image',
-        image: att.r2Key,
-        mediaType: att.mime,
-      });
-    }
-    // Non-image attachments are not added to the content blocks — Emma
-    // calls ingestUploadedFile with the r2Key, mime, originalName. We
-    // append a text marker so she knows the upload is available.
-    if (!att.mime.startsWith('image/')) {
+      // Sign a 1-hour download URL so the model fetch can pull the
+      // bytes from R2 without our bucket needing public access. The
+      // AI SDK's ImagePart accepts a URL string verbatim and routes
+      // it to OpenAI's vision input format as { type: 'image_url' }.
+      const signed = await signedDownloadUrl(att.r2Key, 60 * 60).catch(() => null);
+      if (signed) {
+        userContent.push({ type: 'image', image: signed, mediaType: att.mime });
+      } else {
+        // Signing failed — surface as a text marker so Emma still
+        // knows the user attached something, even if she can't see it.
+        userContent.push({
+          type: 'text',
+          text: `[attached image we could not sign] r2Key=${att.r2Key} originalName=${att.originalName}`,
+        });
+      }
+    } else {
+      // Non-image attachments — Emma calls ingestUploadedFile with the
+      // r2Key, mime, originalName. The text marker tells her the
+      // upload exists so she knows to make the tool call.
       userContent.push({
         type: 'text',
         text: `[attached file] r2Key=${att.r2Key} originalName=${att.originalName} mime=${att.mime} sizeBytes=${att.sizeBytes}`,
@@ -259,18 +266,33 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     { role: 'user', content: userContent },
   ];
 
+  // Heavy-request detection — bump reasoning to 'high' when the
+  // user's text contains orchestration cues (campaign, audit, all
+  // my channels…). Sourced from EMMA_HEAVY_KEYWORDS so the catalog
+  // tightens in one place.
+  const reasoningEffort = isHeavyRequest(input.userMessage.text)
+    ? EMMA_REASONING_HEAVY
+    : EMMA_REASONING_DEFAULT;
+
   // ── 6. Stream the response ──
   const result = streamText({
-    model: anthropic(MODEL_ID),
+    model: openai(EMMA_MODEL),
     system: systemPrompt,
     messages: modelMessages,
     tools,
-    maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: EMMA_MAX_OUTPUT_TOKENS,
     stopWhen: stepCountIs(CHAT_MAX_TOOL_CALLS_PER_TURN),
+    providerOptions: {
+      // OpenAI reasoning models accept reasoning_effort via the
+      // Vercel AI SDK's providerOptions.openai surface. 'medium' for
+      // typical conversational turns, 'high' for heavy orchestration.
+      openai: { reasoningEffort },
+    },
     onStepFinish: async (step) => {
       // Persist the assistant message + any tool calls + tool results
       // produced by this step. `step.content` is the AI SDK
-      // ContentPart[] which closely mirrors Anthropic's content blocks.
+      // ContentPart[] — provider-agnostic, the jsonb persistence is
+      // the same shape regardless of which model produced it.
       const cost = estimateCostCents({
         inputTokens: step.usage?.inputTokens,
         outputTokens: step.usage?.outputTokens,
@@ -282,7 +304,7 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
         content: step.content,
         attachments: [],
         costCents: cost,
-        model: MODEL_ID,
+        model: EMMA_MODEL,
       });
       await db
         .update(chatThread)

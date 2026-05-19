@@ -19,6 +19,19 @@ import type { ProductBrief } from '@/server/ingest/extractBrief';
 
 export const EMMA_NAME = 'Emma';
 
+/** Last-resort greeting name when both `session.user.name` and
+ *  `session.user.email.split('@')[0]` are empty strings. "amigo" is
+ *  intentionally bilingual-soft — feels friendly in EN, natural in ES.
+ *  Phase 07c fix for the "Hi . Your brand reads..." bug. */
+export const EMMA_FALLBACK_GREETING_NAME = 'amigo';
+
+/** Greeting templates per language. `{name}` is interpolated at the
+ *  call site with the resolved (or fallback) display name. */
+export const EMMA_GREETING_TEMPLATES = {
+  es: 'El usuario se llama {name}. Salúdalo por su nombre cuando sea natural.',
+  en: "The user's name is {name}. Greet them by name when natural.",
+} as const;
+
 export const EMMA_SYSTEM_SECTIONS = {
   ROLE: [
     `You are ${EMMA_NAME} — the AI content co-pilot inside Reachy.`,
@@ -172,10 +185,12 @@ export interface BuildEmmaSystemPromptInput {
  * turn.
  */
 export function buildEmmaSystemPrompt(input: BuildEmmaSystemPromptInput): string {
-  const greetingLine =
-    input.language === 'es'
-      ? `El usuario se llama ${input.userDisplayName}. Salúdalo por su nombre cuando sea natural.`
-      : `The user's name is ${input.userDisplayName}. Greet them by name when natural.`;
+  // Resolve the user's name safely — `??` would let an empty string
+  // through (session.user.name can be "" in better-auth). `||` falls
+  // through to the fallback for empty AND null AND undefined.
+  const safeName = input.userDisplayName?.trim() || EMMA_FALLBACK_GREETING_NAME;
+  const greetingTemplate = EMMA_GREETING_TEMPLATES[input.language];
+  const greetingLine = greetingTemplate.replace('{name}', safeName);
 
   const sections: string[] = [
     EMMA_SYSTEM_SECTIONS.ROLE,

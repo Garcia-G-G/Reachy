@@ -79,6 +79,13 @@ export async function POST(
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 
+  // Resolve the display name safely — `||` not `??` so empty
+  // strings fall through to the next fallback. better-auth allows
+  // empty `user.name`, which would otherwise produce "Hi ." in the
+  // greeting (Phase 07c bug fix).
+  const userDisplayName =
+    session.user.name?.trim() || session.user.email?.split('@')[0]?.trim() || 'amigo';
+
   try {
     const result = await runEmmaTurn({
       threadId,
@@ -87,6 +94,7 @@ export async function POST(
         text: parsed.data.text,
         attachments: parsed.data.attachments,
       },
+      userDisplayName,
     });
     // The AI SDK's stream result exposes toUIMessageStreamResponse which
     // returns a Web Response carrying the SSE event stream that useChat

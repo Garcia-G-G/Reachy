@@ -181,15 +181,21 @@ export function EmmaChat(props: EmmaChatProps) {
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      // Capture + clear UI BEFORE await sendMessage. The AI SDK v6
+      // sendMessage promise resolves when the stream finishes — if we
+      // wait, the input stays populated for the entire reply.
+      // Phase 07c bug fix: clear synchronously so the textarea is
+      // empty by the time the next paint runs.
+      const text = inputDraft;
       const atts = attachments.map<ChatAttachment>((a) => ({
         r2Key: a.r2Key,
         mime: a.mime,
         originalName: a.originalName,
         sizeBytes: a.sizeBytes,
       }));
-      await sendText(inputDraft, atts);
       setInputDraft('');
       setAttachments([]);
+      await sendText(text, atts);
     },
     [attachments, inputDraft, sendText],
   );
@@ -209,8 +215,14 @@ export function EmmaChat(props: EmmaChatProps) {
   const subline =
     props.language === 'es' ? `para ${props.projectName}` : `for ${props.projectName}`;
 
+  // Phase 07c — `||` not `??` so empty strings fall through to the
+  // next fallback. Last resort 'amigo' matches the server-side fallback
+  // so the persona stays consistent in the prompt and the UI.
   const greetingName =
-    props.firstName ?? props.userDisplayName.split(' ')[0] ?? props.userDisplayName;
+    props.firstName?.trim() ||
+    props.userDisplayName?.split(' ')[0]?.trim() ||
+    props.userDisplayName?.trim() ||
+    'amigo';
   // Greeting uses the brand voice tone (italic amber) as a small flourish
   // inside an otherwise plain body sentence — sells the persona without
   // a full eyebrow label.
