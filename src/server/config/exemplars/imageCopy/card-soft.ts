@@ -38,7 +38,8 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Pico v0.4 launches schema branching — branched migrations for Postgres, modeled on git.',
-      brandHint: 'Pico. Tone: dev-tool, infrastructure-leaning. Palette: white + electric blue + black.',
+      brandHint:
+        'Pico. Tone: dev-tool, infrastructure-leaning. Palette: white + electric blue + black.',
       goodCopy: {
         eyebrow: 'Pico · v0.4',
         headline: 'PostgreSQL, but you forget about it',

@@ -21,7 +21,8 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Mercury launches a new business banking card targeted at founders who keep their expense category clean.',
-      brandHint: 'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
+      brandHint:
+        'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
       goodCopy: {
         eyebrow: 'New from Mercury',
         headline: 'Banking that compounds',

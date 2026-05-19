@@ -15,10 +15,11 @@
  */
 
 import { config as loadEnv } from 'dotenv';
+
 loadEnv({ path: '.env.local' });
 loadEnv({ path: '.env' });
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 async function main() {
@@ -65,7 +66,9 @@ async function main() {
   }
 
   const bundle = aggregate({ ingestionId, parsedFiles: parsed });
-  console.log(`\nParsed bundle: ${bundle.textBlocks.length} blocks · ${bundle.images.length} images · ${bundle.codeContext.length} code-files`);
+  console.log(
+    `\nParsed bundle: ${bundle.textBlocks.length} blocks · ${bundle.images.length} images · ${bundle.codeContext.length} code-files`,
+  );
 
   console.log('\n--- Extracting brief (gpt-5.5)... ---');
   const briefResult = await extractBrief({ bundle });
@@ -77,7 +80,9 @@ async function main() {
   if (bundle.images.length > 0) {
     console.log('\n--- Vision pass (gpt-4o)... ---');
     const visionResult = await extractVisualIdentity({ images: bundle.images });
-    console.log(`vision.costCents = ${visionResult.costCents}¢ · model=${visionResult.modelUsed} · images=${visionResult.imagesConsidered}`);
+    console.log(
+      `vision.costCents = ${visionResult.costCents}¢ · model=${visionResult.modelUsed} · images=${visionResult.imagesConsidered}`,
+    );
     console.log('VisualIdentity:');
     console.log(JSON.stringify(visionResult.identity, null, 2));
   } else {
@@ -93,7 +98,10 @@ function inferMime(name: string): string | null {
   return null;
 }
 
-async function flatRepoFiles(root: string, prefix = ''): Promise<{ fullPath: string; relPath: string }[]> {
+async function flatRepoFiles(
+  root: string,
+  prefix = '',
+): Promise<{ fullPath: string; relPath: string }[]> {
   const out: { fullPath: string; relPath: string }[] = [];
   const entries = await readdir(root, { withFileTypes: true });
   for (const e of entries) {

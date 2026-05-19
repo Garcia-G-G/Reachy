@@ -12,8 +12,7 @@ const EXEMPLARS: ImageCopyExemplarFile = {
       brandHint: 'Linear. Tone: confident, technical, calm. Palette: graphite + electric purple.',
       goodCopy: {
         headline: 'FOCUS',
-        subheadline:
-          'Linear\'s new Cycle view, opened only on the work that still needs you.',
+        subheadline: "Linear's new Cycle view, opened only on the work that still needs you.",
         wordmark: 'Linear',
       },
       whyItWorks:
@@ -25,8 +24,7 @@ const EXEMPLARS: ImageCopyExemplarFile = {
       brandHint: 'Vercel. Tone: infra-grade, builder-warm. Palette: white + black + neon green.',
       goodCopy: {
         headline: 'SHIP',
-        subheadline:
-          'From PR to production in twelve minutes, on the new Vercel build pipeline.',
+        subheadline: 'From PR to production in twelve minutes, on the new Vercel build pipeline.',
         wordmark: 'Vercel',
       },
       whyItWorks:
@@ -35,11 +33,11 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Mercury runs a noun-cutout campaign around the invisible parts of running a company, with letterforms revealing a hand-drawn ledger background.',
-      brandHint: 'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
+      brandHint:
+        'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
       goodCopy: {
         headline: 'MONEY',
-        subheadline:
-          'Mercury, but for the part of running a company nobody sees on the dashboard.',
+        subheadline: 'Mercury, but for the part of running a company nobody sees on the dashboard.',
         wordmark: 'Mercury',
       },
       whyItWorks:

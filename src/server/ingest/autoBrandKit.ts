@@ -8,6 +8,11 @@ import { brandKit } from '@/server/db/schema/brandKits';
 import { project } from '@/server/db/schema/projects';
 import type { ProductBrief } from './extractBrief';
 import type { VisualIdentity } from './extractVisualIdentity';
+import {
+  briefPaletteIsSentinel,
+  inferPaletteFromText,
+  UNKNOWN_PALETTE_SENTINEL,
+} from './inferPaletteFromText';
 
 /**
  * Create a project + brand_kit row from a ProductBrief (Step 2's
@@ -36,6 +41,10 @@ export interface AutoCreateProjectResult {
 /** Coarse slug helper — lowercase, dash-separated, no diacritics. The
  *  zod validator in actions/projects.ts mirrors this; keep both
  *  formats compatible. */
+function isValidHex(s: string | null | undefined): s is string {
+  return typeof s === 'string' && /^#[0-9a-fA-F]{6}$/.test(s);
+}
+
 function slugify(input: string): string {
   return (
     input
@@ -70,14 +79,50 @@ export async function autoCreateProjectFromBrief(
 ): Promise<AutoCreateProjectResult> {
   const { brief, visualIdentity, userId, ingestionId } = args;
 
-  // Palette resolution: vision overrides brief text, brief overrides
-  // fallback. Each slot is independently picked so a partial vision
-  // result still tightens what it can.
-  const ink = visualIdentity?.paletteHex.ink ?? brief.paletteHex.ink ?? FALLBACK_PALETTE.ink;
-  const paper =
-    visualIdentity?.paletteHex.paper ?? brief.paletteHex.paper ?? FALLBACK_PALETTE.paper;
-  const accent =
-    visualIdentity?.paletteHex.accent ?? brief.paletteHex.accent ?? FALLBACK_PALETTE.accent;
+  // Phase 06 palette fallback chain — fixes monochrome-output bug for
+  // text-only uploads. Resolution order (per slot):
+  //   1. vision (when present and slot filled)
+  //   2. text-inferred (when vision absent OR slot empty)
+  //   3. brief.paletteHex (when not the "#000000" sentinel)
+  //   4. FALLBACK_PALETTE (final safety net)
+  //
+  // Text-inference runs once when vision didn't fire OR when the brief
+  // came back with the sentinel ("model couldn't confidently infer").
+  // Cost ~1¢ — worth it to avoid shipping warmed-over editorial defaults
+  // on every text-only upload.
+  const briefSentinel = briefPaletteIsSentinel(brief.paletteHex);
+  const needsTextInference =
+    !visualIdentity || briefSentinel || !isValidHex(visualIdentity.paletteHex.ink);
+
+  let textInferred: { ink: string; paper: string; accent: string } | null = null;
+  if (needsTextInference) {
+    const result = await inferPaletteFromText({
+      brief: {
+        name: brief.name,
+        oneLiner: brief.oneLiner,
+        problem: brief.problem,
+        tone: brief.tone,
+        audience: brief.audience,
+      },
+    });
+    textInferred = { ink: result.ink, paper: result.paper, accent: result.accent };
+    console.log(
+      `[reachy:autopilot] palette inferred from text: ${result.ink} / ${result.paper} / ${result.accent} — ${result.reasoning.slice(0, 120)}`,
+    );
+  }
+
+  const resolveSlot = (slot: 'ink' | 'paper' | 'accent'): string => {
+    const v = visualIdentity?.paletteHex[slot];
+    if (isValidHex(v)) return v;
+    if (textInferred) return textInferred[slot];
+    const fromBrief = brief.paletteHex[slot];
+    if (isValidHex(fromBrief) && fromBrief !== UNKNOWN_PALETTE_SENTINEL) return fromBrief;
+    return FALLBACK_PALETTE[slot];
+  };
+
+  const ink = resolveSlot('ink');
+  const paper = resolveSlot('paper');
+  const accent = resolveSlot('accent');
 
   // Reference images: logo first (when vision found one), then the
   // brief's curated set, dedup.

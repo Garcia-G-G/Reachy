@@ -211,7 +211,15 @@ import { CRITIC_PASS_THRESHOLD } from '@/server/config/criticThreshold';
 import { getR2Object } from '@/server/storage/r2';
 import { type AudioStats, audioStats } from '@/server/video/audioStats';
 
-const GRADE_MODEL = 'gpt-4o-mini';
+/**
+ * Phase 06 quality pivot — upgrade the grader to gpt-5.5 with
+ * reasoning_effort='high'. The critic IS a senior art director; the
+ * better the judgment, the sharper the retryHint, the better the
+ * revision quality. Cost ~10¢ per critic call (vs ~3¢ for gpt-4o-mini),
+ * but the next planCopy attempt benefits from a non-generic hint.
+ */
+const GRADE_MODEL = 'gpt-5.5';
+const GRADE_REASONING_EFFORT = 'high' as const;
 
 export interface AssetCriticResult {
   score: number;
@@ -223,12 +231,34 @@ export interface AssetCriticResult {
   modelUsed: string;
 }
 
-/** Build the rubric-instruction block injected into every grader call. */
+/** Build the rubric-instruction block injected into every grader call.
+ *  Phase 06 — anchored the scoring ceiling (7 = passable, 9 = ship-grade)
+ *  and gave the model worked examples of what a SURGICAL retryHint
+ *  looks like. The May 19 baseline plateaued because the judge had
+ *  no concept of what 9+ looked like; without an anchor every "good"
+ *  asset landed at 7.0-7.6. */
 function rubricInstructions(criteria: readonly RubricCriterion[]): string {
   const lines = criteria.map((c) => `- ${c.key} (weight ${c.weight}/10): ${c.description}`);
   return [
-    'Score each criterion below from 0 (worst) to 10 (best).',
-    'Output JSON with one number per criterion key plus `issues` (specific complaints) and `retryHint` (a single short directive to inject into the next prompt attempt — at most 30 words, only set when issues warrant a retry).',
+    'Score each criterion below from 0 (worst) to 10 (best). ANCHOR your scoring to this ceiling:',
+    '  - 4-5 = broken, off-brief, or visibly AI-generic.',
+    '  - 6-7 = acceptable but unremarkable — the kind of asset that ships when nobody pushes back.',
+    '  - 8   = clearly above the SaaS-template median — concrete, on-brand, one strong choice.',
+    '  - 9   = the kind of asset a senior designer / editor at a top brand would ship.',
+    '  - 10  = reserved for assets that would survive a portfolio review.',
+    'Do NOT default to 7. If the asset is mid, write 6.',
+    '',
+    'Output JSON with one number per criterion key plus `issues` (specific complaints, each ≤ 200 chars) and `retryHint`. The `retryHint` is a SURGICAL CHANGE RECOMMENDATION for the next attempt — NOT "make it better". Name the EXACT element to change and a concrete replacement direction grounded in the brief.',
+    '',
+    'Two worked examples of GOOD retryHints (read these as the bar):',
+    '  ✓ "Replace headline \\"Streamline customer feedback\\" with a specific outcome that names one of the feedback sources from the brief (Slack, Jira, surveys). Try: \\"Stop reading Slack threads on Monday morning.\\""',
+    '  ✓ "The palette is bleeding into a stock-photo blue. Constrain to the brand\'s ink (#2A1810) + paper (#F1EBDF) + a single 8% accent. Drop the background gradient — switch to a flat color block."',
+    '',
+    'Two BAD retryHints (avoid these patterns):',
+    '  ✗ "Make the headline more specific."        ← no element name, no direction',
+    '  ✗ "Improve the composition."                ← no element, no concrete change',
+    '',
+    'If the asset already scores ≥ 8 across all criteria, set `retryHint` to "" (empty string).',
     '',
     'Rubric:',
     ...lines,
@@ -277,8 +307,16 @@ function buildJsonSchema(criteria: readonly RubricCriterion[]): Record<string, u
 }
 
 function estimateGradeCostCents(promptTokens: number, completionTokens: number): number {
-  // gpt-4o-mini pricing: $0.15/M in, $0.60/M out.
-  const cents = ((promptTokens * 0.15 + completionTokens * 0.6) / 1_000_000) * 100;
+  // Phase 06 — grader runs on gpt-5.5 ($5/M in, $30/M out). Keep the
+  // mini/nano fallback rate for parity in case the grader is overridden
+  // for smoke scripts.
+  let inRate = 0.15;
+  let outRate = 0.6;
+  if (/^gpt-5/i.test(GRADE_MODEL)) {
+    inRate = /mini|nano/i.test(GRADE_MODEL) ? 0.75 : 5;
+    outRate = /mini|nano/i.test(GRADE_MODEL) ? 4.5 : 30;
+  }
+  const cents = ((promptTokens * inRate + completionTokens * outRate) / 1_000_000) * 100;
   return Math.max(1, Math.round(cents));
 }
 
@@ -299,6 +337,7 @@ async function runGrader(args: {
 }): Promise<AssetCriticResult> {
   const criteria = rubricFor(args.kind);
   const openai = getOpenAI();
+  const isGpt5 = /^gpt-5/i.test(GRADE_MODEL);
   const completion = await openai.chat.completions.create({
     model: GRADE_MODEL,
     messages: [
@@ -313,7 +352,9 @@ async function runGrader(args: {
         strict: true,
       },
     },
-    temperature: 0.2,
+    // gpt-5.x reasoning models reject temperature; non-reasoning fall
+    // back to a conservative 0.2 (the May 2026 baseline).
+    ...(isGpt5 ? { reasoning_effort: GRADE_REASONING_EFFORT } : { temperature: 0.2 }),
   });
 
   const content = completion.choices[0]?.message?.content;

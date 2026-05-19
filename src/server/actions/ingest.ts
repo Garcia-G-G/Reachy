@@ -129,8 +129,8 @@ function safeBasename(name: string): string {
 
 // ─── Step 2 — brief extraction + project autofill ────────────────────
 
-import { runBriefExtractionFor } from '@/server/ingest/runBriefExtraction';
 import type { StoredBrief } from '@/server/ingest/runBriefExtraction';
+import { runBriefExtractionFor } from '@/server/ingest/runBriefExtraction';
 
 const runBriefInput = z.object({ ingestionId: z.string().uuid() });
 

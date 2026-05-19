@@ -157,8 +157,7 @@ export function buildImagePrompt({
 
   // Wordmark falls back to project name (case-preserving). The AI gets
   // this verbatim so it renders the exact characters.
-  const brandWordmark =
-    brandKit?.fontHeading?.match(/wordmark:\s*(.+)/i)?.[1] ?? project.name;
+  const brandWordmark = brandKit?.fontHeading?.match(/wordmark:\s*(.+)/i)?.[1] ?? project.name;
   const brandFontHint = deriveBrandFontHint(brandKit?.fontHeading);
 
   const sections: string[] = [];
@@ -248,6 +247,20 @@ export function buildImagePrompt({
     );
   }
   sections.push(`[QUALITY]\n${qualityLines.join('\n')}`);
+
+  // 9. DO NOT — explicit anti-pattern list at the tail. Image models
+  // weight tail tokens more heavily, so the things the model must NOT
+  // do land here as a final reminder. Phase 06 — typography craft.
+  // Source: OpenAI cookbook on image-gen prompting (May 2026).
+  const doNotLines = [
+    '- DO NOT add additional headlines, taglines, or text fragments beyond the slots listed above. Render ONLY the strict-block text.',
+    '- DO NOT use stock-photo people, generic SaaS gradients, blob shapes, or radial glow behind the typography.',
+    "- DO NOT center-align everything by default — favour deliberate asymmetry and the layout's composition direction.",
+    '- DO NOT round corners or add drop-shadow blur — hard print shadows only when shadows are called for.',
+    '- DO NOT substitute brand color hex values, lighten/darken them, or introduce a fourth color outside the palette.',
+    '- DO NOT mis-spell, abbreviate, or auto-correct any text — every character of every copy slot and the wordmark renders VERBATIM.',
+  ];
+  sections.push(`[DO NOT]\n${doNotLines.join('\n')}`);
 
   return sections.join('\n\n');
 }

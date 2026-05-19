@@ -53,7 +53,9 @@ export default async function CampaignReviewPage({ params }: PageProps) {
 
   const [kit] = await db.select().from(brandKit).where(eq(brandKit.projectId, proj.id)).limit(1);
 
-  const bundle = (ingestionRow.bundle ?? null) as ({ brief?: StoredBrief } & Record<string, unknown>) | null;
+  const bundle = (ingestionRow.bundle ?? null) as
+    | ({ brief?: StoredBrief } & Record<string, unknown>)
+    | null;
   const storedBrief = bundle?.brief ?? null;
 
   return (

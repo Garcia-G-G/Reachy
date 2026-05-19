@@ -23,7 +23,8 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Mercury introduces a solo-founder tier of the IO programmable banking API — no seat math, no annual minimum.',
-      brandHint: 'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
+      brandHint:
+        'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
       goodCopy: {
         eyebrow: 'New plan · indie',
         headline: 'Mercury IO for solo founders',

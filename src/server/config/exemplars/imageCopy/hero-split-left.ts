@@ -23,7 +23,8 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Mercury releases the IO API — a TypeScript SDK that makes business banking programmable for fintech-adjacent builders.',
-      brandHint: 'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
+      brandHint:
+        'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
       goodCopy: {
         eyebrow: 'IO · public beta',
         headline: 'Programmable banking for builders',

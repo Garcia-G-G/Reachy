@@ -14,10 +14,11 @@
  */
 
 import { config as loadEnv } from 'dotenv';
+
 loadEnv({ path: '.env.local' });
 loadEnv({ path: '.env' });
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 async function main() {
@@ -64,7 +65,7 @@ async function main() {
     );
   }
 
-  const realParsed = parsed.filter((p) => p !== null) as NonNullable<typeof parsed[number]>[];
+  const realParsed = parsed.filter((p) => p !== null) as NonNullable<(typeof parsed)[number]>[];
   const bundle = aggregate({ ingestionId, parsedFiles: realParsed });
   console.log(`Bundle: ${bundle.textBlocks.length} blocks · ${bundle.images.length} images`);
 
@@ -77,7 +78,9 @@ async function main() {
   console.log(`planner cost: ${planResult.costCents}¢ · model: ${planResult.modelUsed}`);
   console.log(`plan: ${planResult.plan.assets.length} assets`);
   console.log(`rationale: ${planResult.plan.rationale}`);
-  console.log(`estimated cost: ${planResult.plan.estimatedCostCents}¢ ($${(planResult.plan.estimatedCostCents / 100).toFixed(2)})`);
+  console.log(
+    `estimated cost: ${planResult.plan.estimatedCostCents}¢ ($${(planResult.plan.estimatedCostCents / 100).toFixed(2)})`,
+  );
   console.log(`estimated duration: ${planResult.plan.estimatedDurationMinutes} min`);
 
   console.log('\n--- ASSETS ---');
@@ -85,7 +88,9 @@ async function main() {
     if (a.kind === 'image') {
       console.log(`${i + 1}. [image] ${a.format} · ${a.layoutId} · ${a.visualStyle}`);
     } else if (a.kind === 'copy') {
-      console.log(`${i + 1}. [copy ] ${a.channel}${a.targetWordCount ? ` · ${a.targetWordCount}w` : ''}`);
+      console.log(
+        `${i + 1}. [copy ] ${a.channel}${a.targetWordCount ? ` · ${a.targetWordCount}w` : ''}`,
+      );
     } else {
       console.log(`${i + 1}. [reel ] ${a.durationSec}s · ${a.visualStyle}`);
     }
@@ -108,7 +113,10 @@ function inferMime(name: string): string | null {
   return null;
 }
 
-async function flatRepoFiles(root: string, prefix = ''): Promise<{ fullPath: string; relPath: string }[]> {
+async function flatRepoFiles(
+  root: string,
+  prefix = '',
+): Promise<{ fullPath: string; relPath: string }[]> {
   const out: { fullPath: string; relPath: string }[] = [];
   const entries = await readdir(root, { withFileTypes: true });
   for (const e of entries) {

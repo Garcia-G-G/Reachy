@@ -26,7 +26,7 @@ export const BRIEF_SYSTEM_LINES: readonly string[] = [
   '- features[].verb is a single action verb in present tense.',
   '- audience[].role is a job title or persona, not a generic noun.',
   '- tone: pick exactly one of editorial / playful / technical / enterprise / indie.',
-  '- paletteHex values are real 6-digit hex (#rrggbb). When uncertain, leave them as the upstream fallback.',
+  '- paletteHex values are real 6-digit hex (#rrggbb). When uncertain, return "#000000" for each slot as a sentinel — a downstream text-inference step will fill it. Do NOT return a monochrome guess; the sentinel is preferred over a confident-looking but generic choice.',
   '- languages: only en / es. Pick what the upload is written in.',
   '- confidence: 0..1. Drop it when sources contradict each other or the bundle is thin.',
   '- referenceImages: copy R2 keys from the images section verbatim. Pick the 3 most brand-relevant. Pick zero if none look like brand references.',

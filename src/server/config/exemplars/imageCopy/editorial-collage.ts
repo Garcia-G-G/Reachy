@@ -9,12 +9,13 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Mercury publishes an open letter to founders — campaign cover for a quarterly retrospective.',
-      brandHint: 'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
+      brandHint:
+        'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
       goodCopy: {
         eyebrow: 'DEAR FOUNDERS',
         headline: 'An open letter from the Mercury team',
         subheadline:
-          'Two years ago we promised banking built for the people building. Here\'s what we shipped this quarter, signed by the people who built it.',
+          "Two years ago we promised banking built for the people building. Here's what we shipped this quarter, signed by the people who built it.",
         wordmark: 'Mercury',
       },
       whyItWorks:
@@ -22,13 +23,13 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     },
     {
       scenarioContext:
-        "Cal.com publishes a long-form essay by their CTO on scheduling as next-layer infra.",
+        'Cal.com publishes a long-form essay by their CTO on scheduling as next-layer infra.',
       brandHint: 'Cal.com. Tone: dev-tool, sharp, dry. Palette: ink black + lime green.',
       goodCopy: {
         eyebrow: 'REPORTAJE · ISSUE 04',
         headline: 'The 4 a.m. founder problem',
         subheadline:
-          'Why product-grade scheduling tools are the next infra layer, written by Cal.com\'s CTO over two flights and a layover in Reykjavík.',
+          "Why product-grade scheduling tools are the next infra layer, written by Cal.com's CTO over two flights and a layover in Reykjavík.",
         wordmark: 'Cal.com',
       },
       whyItWorks:
@@ -36,7 +37,7 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     },
     {
       scenarioContext:
-        'Linear runs a roadmap-cut announcement framed as an editor\'s note: doing fewer things, shipping them farther.',
+        "Linear runs a roadmap-cut announcement framed as an editor's note: doing fewer things, shipping them farther.",
       brandHint: 'Linear. Tone: confident, technical, calm. Palette: graphite + electric purple.',
       goodCopy: {
         eyebrow: 'FROM THE EDITORS',

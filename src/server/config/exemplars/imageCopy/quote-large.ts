@@ -9,7 +9,8 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Founder testimonial used as a poster for Mercury — the indie banking choice as a Friday ritual.',
-      brandHint: 'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
+      brandHint:
+        'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
       goodCopy: {
         headline: '"Every Friday I open Mercury before I open Slack."',
         subheadline: '— Tomás, founder at Bunny',
@@ -23,7 +24,7 @@ const EXEMPLARS: ImageCopyExemplarFile = {
       brandHint: 'Linear. Tone: confident, technical, calm. Palette: graphite + electric purple.',
       goodCopy: {
         headline: '"Software should hold the shape of the team using it."',
-        subheadline: '— Notes on Linear\'s next chapter',
+        subheadline: "— Notes on Linear's next chapter",
       },
       whyItWorks:
         'A position statement, not a benefit pitch. Reader is invited to agree or disagree — both reactions deepen the brand relationship. Subhead frames the quote as company writing, not marketing copy.',

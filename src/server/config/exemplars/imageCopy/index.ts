@@ -1,5 +1,6 @@
 import 'server-only';
 import type { LayoutId } from '@/server/ai/layoutTemplates';
+import type { ImageCopyExemplar, ImageCopyExemplarFile } from './_types';
 import announcementBanner from './announcement-banner';
 import badgeStamp from './badge-stamp';
 import cardSoft from './card-soft';
@@ -11,7 +12,6 @@ import heroSplitLeft from './hero-split-left';
 import quoteLarge from './quote-large';
 import quoteSlab from './quote-slab';
 import textMaskCutout from './text-mask-cutout';
-import type { ImageCopyExemplar, ImageCopyExemplarFile } from './_types';
 
 export type { ImageCopyExemplar, ImageCopyExemplarFile };
 

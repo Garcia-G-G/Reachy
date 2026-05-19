@@ -136,14 +136,36 @@ function strictBlock(args: {
     `- paper (background / light tones): ${args.brandColors.paper}`,
     `- accent (one small highlight): ${args.brandColors.accent}`,
   ].join('\n');
+
+  // Phase 06 — letter-spell the wordmark once. The OpenAI image-gen
+  // prompting cookbook (May 2026) confirms that spelling out tricky
+  // brand names letter-by-letter once eliminates ~80% of typos for
+  // <12-char wordmarks. We always include this since wordmark =
+  // project name and project names often contain unusual capitalization
+  // (FeedbackMind, PlanetScale, ProductHunt, etc.).
+  const wordmark = args.brandWordmark.trim();
+  const letterSpell =
+    wordmark.length > 0 && wordmark.length <= 24
+      ? [
+          '',
+          `Wordmark letter-by-letter (render exactly): ${wordmark
+            .split('')
+            .map((c) => (c === ' ' ? '[space]' : c))
+            .join(' - ')}.`,
+        ].join('\n')
+      : '';
+
   return [
     'STRICT — render these EXACTLY (non-negotiable):',
-    'Text content (spelling, case, and characters must match verbatim):',
+    'Text content (spelling, case, and characters must match VERBATIM — no substitutions, no auto-correction, no smart-quotes):',
     lines.length > 0 ? lines.join('\n') : '- (no copy slots for this layout)',
+    letterSpell,
     '',
     'Brand palette (hex values, dominant in the image):',
     colorLines,
-  ].join('\n');
+  ]
+    .filter((l) => l !== '')
+    .join('\n');
 }
 
 const CREATIVE_POSITION =

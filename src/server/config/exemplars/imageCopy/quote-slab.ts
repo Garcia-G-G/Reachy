@@ -34,14 +34,15 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Engineer testimonial for Plain, a customer-support tool built for product-led teams.',
-      brandHint: 'Plain. Tone: dev-tool, dry, infrastructure-leaning. Palette: white + electric blue.',
+      brandHint:
+        'Plain. Tone: dev-tool, dry, infrastructure-leaning. Palette: white + electric blue.',
       goodCopy: {
         headline: '"You can tell when a tool was made by people who actually triage."',
         subheadline: '— Yann F., senior engineer at Hugging Face',
         wordmark: 'Plain',
       },
       whyItWorks:
-        'Names the product\'s differentiator from the user\'s point of view ("made by people who triage") rather than the brand\'s. Quote functions as gatekeeping signal — readers either nod or don\'t.',
+        "Names the product's differentiator from the user's point of view (\"made by people who triage\") rather than the brand's. Quote functions as gatekeeping signal — readers either nod or don't.",
     },
   ],
 };

@@ -9,7 +9,8 @@ const EXEMPLARS: ImageCopyExemplarFile = {
     {
       scenarioContext:
         'Mercury publishes a quarterly report styled as a magazine cover — "How we underwrote the indie wave."',
-      brandHint: 'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
+      brandHint:
+        'Mercury. Tone: confident-finance, precise, dry humour. Palette: charcoal + amber.',
       goodCopy: {
         eyebrow: 'ISSUE №14 · Q2 2026',
         headline: 'How Mercury underwrote the indie wave',
@@ -42,7 +43,7 @@ const EXEMPLARS: ImageCopyExemplarFile = {
         eyebrow: 'POSTING · MAY 2026',
         headline: 'Why our autopilot stops at twenty-four assets',
         subheadline:
-          'Twenty-four covers a launch week. Past that, you\'re not running a campaign — you\'re farming the algorithm.',
+          "Twenty-four covers a launch week. Past that, you're not running a campaign — you're farming the algorithm.",
         wordmark: 'Reachy',
       },
       whyItWorks:

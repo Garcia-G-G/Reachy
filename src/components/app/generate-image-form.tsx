@@ -23,7 +23,12 @@ import {
   QUALITY_TIERS,
   type QualityTier,
 } from '@/lib/image-models';
-import { DEFAULT_LAYOUT_FOR_FORMAT, LAYOUT_IDS, LAYOUT_META, type LayoutId } from '@/lib/layout-meta';
+import {
+  DEFAULT_LAYOUT_FOR_FORMAT,
+  LAYOUT_IDS,
+  LAYOUT_META,
+  type LayoutId,
+} from '@/lib/layout-meta';
 import {
   DEFAULT_VISUAL_STYLE,
   VISUAL_STYLE_KEYS,

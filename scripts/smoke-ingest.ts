@@ -13,10 +13,11 @@
  */
 
 import { config as loadEnv } from 'dotenv';
+
 loadEnv({ path: '.env.local' });
 loadEnv({ path: '.env' });
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 async function main() {
@@ -25,11 +26,7 @@ async function main() {
   const { routeAndParse } = await import('../src/server/ingest/dispatch');
 
   const SAMPLES_DIR = path.resolve(__dirname, '..', 'planning', 'sample-inputs');
-  const FILES = [
-    'FeedbackMind_Portfolio_Garcia.docx',
-    'sample.pptx',
-    'sample.xlsx',
-  ] as const;
+  const FILES = ['FeedbackMind_Portfolio_Garcia.docx', 'sample.pptx', 'sample.xlsx'] as const;
 
   const ingestionId = `smoke-${Date.now()}`;
   const userId = 'smoke';
@@ -40,7 +37,12 @@ async function main() {
     ingestionId,
     extractedPrefix,
     routeAndParse: async (input: { filename: string; mime: string | null; buffer: Buffer }) => {
-      return routeAndParse({ filename: input.filename, mime: input.mime, buffer: input.buffer, ctx });
+      return routeAndParse({
+        filename: input.filename,
+        mime: input.mime,
+        buffer: input.buffer,
+        ctx,
+      });
     },
   };
 
@@ -54,7 +56,9 @@ async function main() {
       continue;
     }
     parsed.push(result);
-    console.log(`${name} → ${result.textBlocks.length} blocks · ${result.images.length} images · ${result.tables?.length ?? 0} tables`);
+    console.log(
+      `${name} → ${result.textBlocks.length} blocks · ${result.images.length} images · ${result.tables?.length ?? 0} tables`,
+    );
   }
 
   // Repo sample — recurse the folder manually since the action flattens
@@ -71,7 +75,9 @@ async function main() {
     });
     if (!result) continue;
     parsed.push(result);
-    console.log(`sample-repo/${entry.relPath} → ${result.textBlocks.length} blocks · ${result.codeContext?.length ?? 0} code-files`);
+    console.log(
+      `sample-repo/${entry.relPath} → ${result.textBlocks.length} blocks · ${result.codeContext?.length ?? 0} code-files`,
+    );
   }
 
   const bundle = aggregate({ ingestionId, parsedFiles: parsed });
@@ -106,8 +112,10 @@ async function main() {
 
 function inferMime(name: string): string | null {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
-  if (ext === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  if (ext === 'pptx') return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  if (ext === 'docx')
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (ext === 'pptx')
+    return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
   if (ext === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   if (ext === 'md') return 'text/markdown';
   if (ext === 'json') return 'application/json';
@@ -115,7 +123,10 @@ function inferMime(name: string): string | null {
   return null;
 }
 
-async function flatRepoFiles(root: string, prefix = ''): Promise<{ fullPath: string; relPath: string }[]> {
+async function flatRepoFiles(
+  root: string,
+  prefix = '',
+): Promise<{ fullPath: string; relPath: string }[]> {
   const out: { fullPath: string; relPath: string }[] = [];
   const entries = await readdir(root, { withFileTypes: true });
   for (const e of entries) {

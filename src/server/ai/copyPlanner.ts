@@ -2,10 +2,7 @@ import 'server-only';
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
 import { clichesFor } from '@/server/config/cliches';
-import {
-  type ImageCopyExemplar,
-  imageCopyExemplarsFor,
-} from '@/server/config/exemplars/imageCopy';
+import { type ImageCopyExemplar, imageCopyExemplarsFor } from '@/server/config/exemplars/imageCopy';
 import type { ProductBrief } from '@/server/ingest/extractBrief';
 import type { LayoutPromptTemplate as Layout, PlannedCopy, TextRole } from './layoutTemplates';
 import { getOpenAI } from './openai';
@@ -289,7 +286,7 @@ function buildExemplarsSection(layout: Layout): string {
     ].join('\n');
   };
   return [
-    '[GOOD EXAMPLES] — read these as the quality bar. NOT to copy verbatim, but to internalise the pattern (specific moments, concrete nouns, branded verbs, no generic SaaS-speak). Each example\'s `whyItWorks` line names a technique that GENERALIZES.',
+    "[GOOD EXAMPLES] — read these as the quality bar. NOT to copy verbatim, but to internalise the pattern (specific moments, concrete nouns, branded verbs, no generic SaaS-speak). Each example's `whyItWorks` line names a technique that GENERALIZES.",
     '',
     exemplars.map(formatExemplar).join('\n\n'),
   ].join('\n');
@@ -305,9 +302,7 @@ function buildProductContextSection(brief: ProductBrief | undefined): string {
     .slice(0, 8)
     .map((f) => `  - ${f.name}: ${f.verb} ${f.value}`)
     .join('\n');
-  const audienceLine = brief.audience
-    .map((a) => `${a.role} (${a.painPoint})`)
-    .join('; ');
+  const audienceLine = brief.audience.map((a) => `${a.role} (${a.painPoint})`).join('; ');
   const lines = [
     '[PRODUCT CONTEXT] — ground every line in THIS product, not a generic SaaS pitch.',
     `Name: ${brief.name}`,
@@ -332,7 +327,9 @@ function buildProductContextSection(brief: ProductBrief | undefined): string {
  *  exists; lets it tilt headlines toward the campaign angle. */
 function buildCampaignStrategySection(rationale: string | undefined): string {
   if (!rationale || rationale.trim().length === 0) return '';
-  return ['[CAMPAIGN STRATEGY] — the why behind this slate of assets:', rationale.trim()].join('\n');
+  return ['[CAMPAIGN STRATEGY] — the why behind this slate of assets:', rationale.trim()].join(
+    '\n',
+  );
 }
 
 function buildUserPrompt(args: PlanCopyArgs): string {
@@ -356,7 +353,9 @@ function buildUserPrompt(args: PlanCopyArgs): string {
     `[PROJECT] ${es ? 'Proyecto' : 'Project'}: ${args.project.name}.`,
   ];
   if (args.project.audience) {
-    projectLines.push(es ? `Audiencia: ${args.project.audience}.` : `Audience: ${args.project.audience}.`);
+    projectLines.push(
+      es ? `Audiencia: ${args.project.audience}.` : `Audience: ${args.project.audience}.`,
+    );
   }
   if (args.project.tone) {
     projectLines.push(
@@ -510,9 +509,7 @@ export async function planCopy(args: PlanCopyArgs): Promise<PlanCopyResult> {
       // gpt-5.x reasoning models reject temperature / top_p; they
       // accept reasoning_effort. On non-gpt-5 paths we keep the 0.7
       // temperature that produced acceptable variance in May 2026.
-      ...(isGpt5
-        ? { reasoning_effort: DEFAULT_COPY_PLANNER_REASONING }
-        : { temperature: 0.7 }),
+      ...(isGpt5 ? { reasoning_effort: DEFAULT_COPY_PLANNER_REASONING } : { temperature: 0.7 }),
     });
     const choice = completion.choices[0];
     if (!choice) throw new Error('copyPlanner: OpenAI returned no choices');
@@ -672,11 +669,7 @@ async function critiqueCopy(copy: PlannedCopy, args: PlanCopyArgs): Promise<Copy
     revisionHint: string;
   };
   const usage = completion.usage ?? { prompt_tokens: 0, completion_tokens: 0 };
-  const costCents = estimateCopyCost(
-    CRITIQUE_MODEL,
-    usage.prompt_tokens,
-    usage.completion_tokens,
-  );
+  const costCents = estimateCopyCost(CRITIQUE_MODEL, usage.prompt_tokens, usage.completion_tokens);
   return { ...parsed, costCents };
 }
 
@@ -858,9 +851,7 @@ export async function planCopySequence(
     // single-shot planCopy — N-frame coherence benefits from deeper
     // planning. Self-critique is NOT applied at this layer (critiquing
     // N-frame narrative coherence is its own problem; ship if needed).
-    ...(isGpt5
-      ? { reasoning_effort: DEFAULT_COPY_PLANNER_REASONING }
-      : { temperature: 0.7 }),
+    ...(isGpt5 ? { reasoning_effort: DEFAULT_COPY_PLANNER_REASONING } : { temperature: 0.7 }),
   });
 
   const choice = completion.choices[0];
