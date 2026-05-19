@@ -27,6 +27,8 @@
     "smoke:reel": "node --conditions=react-server --import tsx ./scripts/smoke-reel.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.78",
+    "@ai-sdk/react": "^3.0.187",
     "@aws-sdk/client-s3": "^3.1044.0",
     "@aws-sdk/s3-request-presigner": "^3.1044.0",
     "@base-ui/react": "^1.4.1",
@@ -36,6 +38,7 @@
     "@fal-ai/client": "^1.10.1",
     "@types/fluent-ffmpeg": "^2.1.28",
     "adm-zip": "^0.5.17",
+    "ai": "^6.0.185",
     "better-auth": "^1.6.9",
     "bullmq": "^5.76.6",
     "cheerio": "^1.2.0",

@@ -425,8 +425,11 @@ async function dispatchImage(args: {
       { jobId: gen.id },
     );
 
-    // Watch up to 5 minutes — image-gen tier-1 routinely lands in <60s.
-    await watchGeneration(gen.id, campaignAssetId, 5 * 60 * 1000);
+    // Watch up to 15 minutes — Phase 06 upgraded image-copy planner uses
+    // gpt-5.5 reasoning='high' + self-critique loop + AI image gen with
+    // reasoning, which routinely lands at 4-8 min per image (not <60s).
+    // 15 min is the safe ceiling.
+    await watchGeneration(gen.id, campaignAssetId, 15 * 60 * 1000);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await db

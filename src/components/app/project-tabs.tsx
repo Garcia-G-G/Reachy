@@ -15,6 +15,9 @@ export function ProjectTabs({ slug }: ProjectTabsProps) {
 
   const tabs = [
     { href: base, label: t('tabOverview'), match: base },
+    // Emma — per-project chat co-pilot (Phase 07). Name "Emma" is the
+    // product brand of the chat experience; never localized.
+    { href: `${base}/chat`, label: 'Emma', match: `${base}/chat` },
     { href: `${base}/generate/image`, label: t('tabGenerate'), match: `${base}/generate` },
     { href: `${base}/library`, label: t('tabLibrary'), match: `${base}/library` },
     { href: `${base}/identity`, label: t('tabIdentity'), match: `${base}/identity` },

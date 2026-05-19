@@ -3,6 +3,8 @@ export * from './auth';
 export * from './brandKits';
 export * from './campaignAssets';
 export * from './campaigns';
+export * from './chatMessages';
+export * from './chatThreads';
 export * from './generations';
 export * from './ingestion';
 export * from './projects';
