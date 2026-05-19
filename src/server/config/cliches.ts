@@ -27,6 +27,15 @@ export const ES_CLICHES: readonly string[] = [
   'todo lo que necesitas',
   'descubre cómo',
   'soluciones que',
+  // 2026-05-19 — Phase 06 quality pivot. Reachy outputs at scale hit
+  // these phrases as "safe" SaaS-speak. Banning them forces the model
+  // to reach for concrete nouns / outcomes / brand-specific verbs.
+  'optimiza tu',
+  'centraliza tu',
+  'todo en uno',
+  'sin esfuerzo',
+  'información accionable',
+  'fuente única de verdad',
 ];
 
 export const EN_CLICHES: readonly string[] = [
@@ -44,6 +53,24 @@ export const EN_CLICHES: readonly string[] = [
   'the secret to',
   'everything you need',
   'discover how',
+  // 2026-05-19 — Phase 06 quality pivot. May 19 test surfaced
+  // "Streamline customer feedback", "Centralize your feedback",
+  // "Analyze feedback efficiently" — the entire blanket of generic
+  // SaaS phrasings that the model defaults to when starved of brand
+  // specificity. Ban them; the planner must work harder.
+  'streamline',
+  'centralize your',
+  'efficiently', // catches the "analyze X efficiently" SaaS-speak hedge
+  'empower your',
+  'boost your',
+  'seamless',
+  'leverage',
+  'in one place',
+  'all in one',
+  'organize without',
+  'actionable insights',
+  'single source of truth',
+  'end-to-end',
 ];
 
 export function clichesFor(language: 'en' | 'es'): readonly string[] {

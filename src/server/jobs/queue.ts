@@ -4,6 +4,7 @@ import type { QualityTier } from '@/lib/image-models';
 import type { ImageFormat } from '@/server/ai/formats';
 import type { ImageProvider } from '@/server/ai/imageGen';
 import type { LayoutId } from '@/server/ai/layoutTemplates';
+import type { ProductBrief } from '@/server/ingest/extractBrief';
 import { createBullConnection, QUEUE_NAMES } from './connection';
 
 export interface ImageGenJobData {
@@ -50,6 +51,16 @@ export interface ImageGenJobData {
    *    high      → reasoning_effort='high' + best-of-K critic (4
    *                internal candidates → gpt-5.4-mini vision pick). */
   effort?: 'fast' | 'balanced' | 'high';
+  /** Full ProductBrief snapshot from autopilot — set when the job was
+   *  enqueued by the campaign worker. The image copy planner uses the
+   *  brief's features, valueProps, problem, solution, and audience to
+   *  ground every headline in concrete product specifics instead of
+   *  the truncated `idea` string alone. */
+  productBrief?: ProductBrief;
+  /** Per-campaign strategy rationale from the planner — gives the copy
+   *  planner the "why" behind the slate. Empty/undefined for one-off
+   *  generations enqueued outside the autopilot flow. */
+  campaignRationale?: string;
 }
 
 let cached: Queue<ImageGenJobData> | null = null;

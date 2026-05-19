@@ -2,7 +2,7 @@ import 'server-only';
 import { UnrecoverableError, Worker } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { formatPlanAsBrief, planArtDirection } from '@/server/ai/artDirector';
-import { planCopy, planCopySequence } from '@/server/ai/copyPlanner';
+import { planCopySequence, planCopyWithRevision } from '@/server/ai/copyPlanner';
 import { pickBest } from '@/server/ai/critic';
 import { getFormat } from '@/server/ai/formats';
 import { generateImage } from '@/server/ai/imageGen';
@@ -71,6 +71,8 @@ export function startImageWorker(): Worker<ImageGenJobData> {
         tweakPrompt,
         mode,
         effort,
+        productBrief,
+        campaignRationale,
       } = job.data;
       const effortTier: 'fast' | 'balanced' | 'high' = effort ?? 'balanced';
       const fm = getFormat(format);
@@ -204,6 +206,8 @@ export function startImageWorker(): Worker<ImageGenJobData> {
               : { name: 'Project', audience: null, tone: null },
             brandKit: kit ?? null,
             frames: n,
+            productBrief,
+            campaignRationale,
           });
           sequenceCopies = seqPlan.copies;
           copyCostCents = seqPlan.costCents;
@@ -335,7 +339,7 @@ export function startImageWorker(): Worker<ImageGenJobData> {
             // of alternate layouts.
             let variantCopy: PlannedCopy = {};
             if (activeLayout) {
-              const planForVariant = await planCopy({
+              const planForVariant = await planCopyWithRevision({
                 idea: idea ?? '',
                 layout: activeLayout,
                 language: language ?? 'en',
@@ -343,6 +347,8 @@ export function startImageWorker(): Worker<ImageGenJobData> {
                   ? { name: proj.name, audience: proj.audience, tone: proj.tone }
                   : { name: 'Project', audience: null, tone: null },
                 brandKit: kit ?? null,
+                productBrief,
+                campaignRationale,
               });
               copyCostCents += planForVariant.costCents;
               variantCopy = planForVariant.copy;

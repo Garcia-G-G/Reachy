@@ -264,6 +264,7 @@ export function startCampaignWorker(): Worker<CampaignJobData> {
               brandKitRow: kit,
               language,
               productBrief: briefSnapshot,
+              campaignRationale: plan.rationale ?? '',
             });
           });
         } else if (asset.kind === 'copy') {
@@ -276,6 +277,7 @@ export function startCampaignWorker(): Worker<CampaignJobData> {
               brandKitRow: kit,
               language,
               productBrief: briefSnapshot,
+              campaignRationale: plan.rationale ?? '',
             });
           });
         } else if (asset.kind === 'reel') {
@@ -288,6 +290,7 @@ export function startCampaignWorker(): Worker<CampaignJobData> {
               brandKitRow: kit,
               language,
               productBrief: briefSnapshot,
+              campaignRationale: plan.rationale ?? '',
             });
           });
         }
@@ -344,8 +347,18 @@ async function dispatchImage(args: {
   project: typeof project.$inferSelect;
   brandKitRow: typeof brandKit.$inferSelect | undefined;
   language: 'en' | 'es';
+  productBrief: import('@/server/ingest/extractBrief').ProductBrief;
+  campaignRationale: string;
 }): Promise<void> {
-  const { asset, campaignAssetId, project: proj, brandKitRow: kit, language } = args;
+  const {
+    asset,
+    campaignAssetId,
+    project: proj,
+    brandKitRow: kit,
+    language,
+    productBrief,
+    campaignRationale,
+  } = args;
   try {
     const layout = getLayout({ layoutId: asset.layoutId as LayoutId });
     const prompt = buildImagePrompt({
@@ -402,6 +415,12 @@ async function dispatchImage(args: {
         language,
         mode: 'exploration',
         effort: 'balanced',
+        // Phase 06 context starvation fix — pass the full brief +
+        // campaign rationale through to the image worker so its
+        // copyPlanner can see features, valueProps, problem/solution
+        // instead of just the truncated asset.brief.
+        productBrief,
+        campaignRationale,
       },
       { jobId: gen.id },
     );
@@ -564,6 +583,7 @@ async function dispatchWithCritic(args: {
   brandKitRow: typeof brandKit.$inferSelect | undefined;
   language: 'en' | 'es';
   productBrief: import('@/server/ingest/extractBrief').ProductBrief;
+  campaignRationale: string;
 }): Promise<void> {
   const { kind, campaignAssetId, brandKitRow: kit, language } = args;
   const qualityGate = kit?.qualityGateEnabled ?? true;
@@ -584,6 +604,8 @@ async function dispatchWithCritic(args: {
         project: args.project,
         brandKitRow: kit,
         language,
+        productBrief: args.productBrief,
+        campaignRationale: args.campaignRationale,
       });
     } else if (kind === 'copy' && asset.kind === 'copy') {
       await dispatchCopy({

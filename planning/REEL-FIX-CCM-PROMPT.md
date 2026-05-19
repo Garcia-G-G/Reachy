@@ -203,7 +203,85 @@ pnpm dev
 6. Type an idea and click "Draft scenes". When the plan returns, **inspect** the generated `imagePrompt` of any scene — it should mention paper / cutout / shapes / shadows and explicitly NOT mention people / faces / portraits.
 7. Optional (costs ~$1.20 on Veo): render the reel. The output should NOT have a real person in it.
 
-### Step 6 — Quality pass (§0.10)
+### Step 6.5 — NEW FEATURE: Custom script mode
+
+Garcia wants the reel form to support a "I'll write the script" mode in addition to the current "AI drafts from an idea" mode. Use case: write the exact narration line by line, AI only generates the visuals.
+
+**Files affected:**
+- `src/components/app/generate-reel-form.tsx` — UI toggle + new textarea
+- `src/server/actions/reels.ts` — accept `customScript: string[]` (one entry per scene)
+- `src/server/ai/reelPlanner.ts` — new code path: when `customScript` provided, skip text generation and only generate `imagePrompt` per scene using the script line as the subject brief
+- `src/lib/reel-templates.ts` — already exports `REEL_TEMPLATES[key].scenes.length` so the form can show N empty rows
+- `messages/en.json` and `messages/es.json` — new keys (see below)
+
+**UX in the form:**
+
+Add a radio toggle just above the `Angle` textarea:
+```tsx
+<fieldset className="space-y-3">
+  <legend className="mono-eyebrow mb-3 block">{t('fieldMode')}</legend>
+  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+    <ModeCard value="ai" checked={mode === 'ai'} onChange={() => setMode('ai')}
+      title={t('modeAi')} body={t('modeAiBody')} />
+    <ModeCard value="script" checked={mode === 'script'} onChange={() => setMode('script')}
+      title={t('modeScript')} body={t('modeScriptBody')} />
+  </div>
+</fieldset>
+```
+
+When `mode === 'script'`:
+- Hide the existing single `Angle` textarea
+- Show N stacked textareas (one per scene in the chosen template), each with a `mono-eyebrow` label like `№ 01 — HOOK · 5s · ≤ 12 words` (slot, duration, soft word cap)
+- Each line is plain text. We'll feed each line to the planner as both the overlay text AND a brief for the imagePrompt.
+
+When user clicks "Draft scenes":
+- AI mode: existing behavior — planner generates `text` + `imagePrompt` per scene from the angle.
+- Script mode: planner ONLY generates `imagePrompt` per scene; `text` is the user's literal line (truncated to ~12 words for overlay if needed).
+
+**Server change (`reelPlanner.ts`):**
+
+```ts
+export interface PlanReelArgs {
+  // ...existing fields
+  /** Optional: when provided, planner skips text generation and uses these literal lines.
+   *  Length must match REEL_TEMPLATES[template].scenes.length. */
+  customScript?: string[];
+}
+```
+
+In `planReel`, when `args.customScript` is provided and length matches:
+- Build a different system prompt that says "The user has provided the exact words for each scene. Generate ONLY imagePrompt for each, in the locked visual style. Do not modify the text."
+- Build a JSON schema where `text` is a `const` (the user's line) — this guarantees the model can't drift.
+- Validate length up front; if mismatch, return a clean error so the form can show "Your script has N lines but this template needs M."
+
+**i18n keys** to add to both `en.json` and `es.json`:
+
+```jsonc
+// in Reels:
+"fieldMode": "Mode",
+"modeAi": "AI drafts the scenes",
+"modeAiBody": "You give an angle; Reachy writes the lines and image prompts.",
+"modeScript": "I write the script",
+"modeScriptBody": "You write the exact lines. Reachy only generates the visuals around them.",
+"scriptScenePrefix": "№ {n} — {slot}",
+"scriptSceneHint": "{seconds}s · max ~12 words for overlay",
+"scriptLengthError": "Your script has {got} lines but this shape needs {need}.",
+"scriptEmpty": "All scene lines must have text."
+```
+
+**Acceptance for this step:**
+- [ ] Toggle works, hides/shows correctly
+- [ ] Switching template re-renders the right number of textareas
+- [ ] Submitting in script mode produces a plan whose `text` exactly matches what the user typed
+- [ ] Submitting in script mode produces `imagePrompt` per scene that follows the locked visual style
+- [ ] Composing the reel works in both modes (FFmpeg path uses `text` as overlay AND TTS line; Veo path uses the joined script as dialogue with `generate_audio: true`)
+- [ ] Empty lines or length mismatch shows a clear error before any cost is incurred
+
+> Note: the FFmpeg compose path may already pipe `scene.text` through TTS — verify in `src/server/video/compose.ts` and adjust if not.
+
+---
+
+### Step 7 — Quality pass (§0.10)
 
 After everything above passes, do the §0.10 re-read on every file you touched:
 - Dead code? Stale comments? Console logs you added for debug?

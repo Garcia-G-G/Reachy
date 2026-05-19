@@ -1,0 +1,5 @@
+{
+  "permissions": {
+    "allow": ["Skill(superpowers:brainstorming)", "Bash(kamal version *)"]
+  }
+}
