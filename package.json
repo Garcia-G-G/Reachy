@@ -18,7 +18,13 @@
     "db:migrate": "node --import tsx ./src/server/db/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "worker": "node --conditions=react-server --import tsx ./src/server/jobs/worker.ts"
+    "worker": "node --conditions=react-server --import tsx ./src/server/jobs/worker.ts",
+    "smoke:ingest": "node --conditions=react-server --import tsx ./scripts/smoke-ingest.ts",
+    "smoke:brief": "node --conditions=react-server --import tsx ./scripts/smoke-brief.ts",
+    "smoke:campaign": "node --conditions=react-server --import tsx ./scripts/smoke-campaign.ts",
+    "smoke:image": "node --conditions=react-server --import tsx ./scripts/smoke-image.ts",
+    "smoke:copy": "node --conditions=react-server --import tsx ./scripts/smoke-copy.ts",
+    "smoke:reel": "node --conditions=react-server --import tsx ./scripts/smoke-reel.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1044.0",

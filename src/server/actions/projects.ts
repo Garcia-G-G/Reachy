@@ -180,6 +180,11 @@ export async function getProjectOverviewStats(
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
+  // postgres-js v3.4.9 rejects raw Date objects bound via drizzle's
+  // sql`…${value}` template — it tries to Buffer.from(date) which
+  // throws ERR_INVALID_ARG_TYPE. Pre-serializing to ISO string lands
+  // in postgres-js's string path and parses cleanly as timestamptz.
+  const monthStartIso = monthStart.toISOString();
 
   // One aggregate query with filtered counts/sum so the page renders in
   // one round-trip. Drizzle's sql helper lets us inline FILTER (WHERE …).
@@ -187,7 +192,7 @@ export async function getProjectOverviewStats(
     .select({
       piecesDone: sql<number>`COUNT(*) FILTER (WHERE ${generation.status} = 'done')`,
       inFlight: sql<number>`COUNT(*) FILTER (WHERE ${generation.status} IN ('queued', 'running'))`,
-      monthSpendCents: sql<number>`COALESCE(SUM(${generation.costCents}) FILTER (WHERE ${generation.status} = 'done' AND ${generation.finishedAt} >= ${monthStart}), 0)`,
+      monthSpendCents: sql<number>`COALESCE(SUM(${generation.costCents}) FILTER (WHERE ${generation.status} = 'done' AND ${generation.finishedAt} >= ${monthStartIso}), 0)`,
     })
     .from(generation)
     .where(eq(generation.projectId, projectId));
