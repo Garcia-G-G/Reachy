@@ -3,32 +3,32 @@
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import type { BrandKit } from '@/server/actions/brandKits';
 import type { ChatAttachment, ChatMessage } from '@/server/db/schema/chatMessages';
-import { ChatMessageView } from './chat-message';
+import { ChatMessageView, PreFirstTokenShimmer } from './chat-message';
+import { EmmaBrandStrip } from './emma-brand-strip';
+import { EmmaCostTicker } from './emma-cost-ticker';
+import { EmmaEmptyState } from './emma-empty-state';
+import { EmmaSizeToggle, useEmmaSize } from './emma-size-toggle';
 
 /**
- * EmmaChat — the per-project chat client. Phase 07.
+ * EmmaChat — Phase 07b v4 minimal markup.
  *
- * Mounts the AI SDK v6 useChat hook against the /api/chat/[threadId]/
- * stream endpoint. Handles:
- *  - Streaming token rendering.
- *  - File attachment uploads (pre-upload to /upload, then include
- *    the returned r2Key in the next /stream POST).
- *  - Drag-drop + Cmd-V paste of images.
- *  - Inline tool-call cards (rendered by chat-message → chat-tool-card).
- *  - Conversation cost ticker.
+ * Single-canvas editorial layout: navy + amber on warm cream paper,
+ * spine rule on the left, `Emma.` headline as the visual anchor,
+ * a short sub-line, a brand strip, a greeting, and the input.
  *
- * Editorial design: paper background, ink text, hard print shadows,
- * no rounded corners, mono uppercase eyebrows.
+ * REMOVED in 07b (do NOT re-introduce):
+ *   - "Vol 01 · No 04" framing
+ *   - Eyebrow labels above blocks (BRAND, etc.)
+ *   - Captions under starter cards
+ *   - Footer with keyboard shortcuts
+ *   - Avatar circle / E sigil
+ *   - Long subtitles
+ *
+ * Size toggle: S/M/L lives top-right. CSS vars on .emma-canvas
+ * crossfade width/padding/font-size. Persisted in localStorage.
  */
-
-interface BrandSummary {
-  ink: string | null;
-  paper: string | null;
-  accent: string | null;
-  voiceTone: string | null;
-  visualStyle: string | null;
-}
 
 interface EmmaChatProps {
   projectName: string;
@@ -37,26 +37,21 @@ interface EmmaChatProps {
   welcomeLine: string;
   initialMessages: ChatMessage[];
   initialCostCents: number;
-  brandSummary: BrandSummary;
+  brandKit: BrandKit;
   language: 'en' | 'es';
   userDisplayName: string;
+  /** Optional first-name for the greeting. Falls back to displayName. */
+  firstName?: string;
 }
 
 interface PendingAttachment extends ChatAttachment {
-  /** Client-side preview URL for images during the brief window between
-   *  selection and upload completion. */
   previewUrl?: string;
 }
 
-/** Convert a persisted ChatMessage row into a useChat UIMessage so the
- *  pre-loaded history renders correctly when the page mounts. */
 function persistedToUIMessage(row: ChatMessage) {
   const parts = Array.isArray(row.content)
     ? (row.content as Array<{ type: string; [k: string]: unknown }>)
     : [];
-  // UI messages need .parts in the AI SDK v6 format. Persisted content
-  // is in ModelMessage format (TextPart / ToolCallPart / etc.). We pass
-  // it through; the UIMessage type accepts text + tool-* part shapes.
   return {
     id: row.id,
     role: row.role as 'user' | 'assistant' | 'system',
@@ -65,19 +60,18 @@ function persistedToUIMessage(row: ChatMessage) {
 }
 
 export function EmmaChat(props: EmmaChatProps) {
+  const [size, setSize] = useEmmaSize();
   const [costCents, setCostCents] = useState(props.initialCostCents);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [inputDraft, setInputDraft] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: `/api/chat/${props.threadId}/stream`,
-        // The default body shape sends { messages: [...], ... } but our
-        // route expects { text, attachments }. We override prepareSendMessagesRequest
-        // to extract just the latest user message + the staged attachments.
         prepareSendMessagesRequest: ({ messages, body }) => {
           const last = messages[messages.length - 1];
           const text =
@@ -99,17 +93,18 @@ export function EmmaChat(props: EmmaChatProps) {
     transport,
     messages: props.initialMessages.map(persistedToUIMessage) as never,
     onFinish: () => {
-      // Re-fetch cost after each assistant turn lands. The handler
-      // persists cost on the chat_message rows; here we just bump a
-      // local counter by a small visible amount so the user sees
-      // movement. (A more precise approach would refetch from a
-      // /cost endpoint, kept simple for now.)
-      setCostCents((c) => c + 5); // approximate — refined when the
-      // assistant message is actually persisted.
+      // Approximate cost bump — see Phase 07's commit notes for the
+      // refinement plan (a /cost endpoint that reads the just-
+      // persisted chat_message.costCents).
+      setCostCents((c) => c + 5);
     },
   });
 
-  const isStreaming = status === 'streaming' || status === 'submitted';
+  const isStreaming = status === 'streaming';
+  const isSubmitted = status === 'submitted';
+  // Pre-first-token shimmer fires when the user message was just sent
+  // and Emma hasn't started streaming yet.
+  const showPreFirstToken = isSubmitted && messages[messages.length - 1]?.role === 'user';
 
   const handleUploadFiles = useCallback(
     async (files: File[]) => {
@@ -166,40 +161,44 @@ export function EmmaChat(props: EmmaChatProps) {
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
+      setIsDragging(false);
       const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) await handleUploadFiles(files);
     },
     [handleUploadFiles],
   );
 
+  const sendText = useCallback(
+    async (text: string, atts: ChatAttachment[]) => {
+      if (isStreaming || isSubmitted) return;
+      const trimmed = text.trim();
+      if (trimmed.length === 0 && atts.length === 0) return;
+      await sendMessage({ text: trimmed }, { body: { text: trimmed, attachments: atts } });
+    },
+    [isStreaming, isSubmitted, sendMessage],
+  );
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (isStreaming) return;
-      const trimmed = inputDraft.trim();
-      if (trimmed.length === 0 && attachments.length === 0) return;
       const atts = attachments.map<ChatAttachment>((a) => ({
         r2Key: a.r2Key,
         mime: a.mime,
         originalName: a.originalName,
         sizeBytes: a.sizeBytes,
       }));
-      // Build the UI message parts so the persisted history matches
-      // what the server will record. Server-side handler.ts also
-      // persists the user message (single source of truth) — the
-      // client copy is just for optimistic rendering.
-      await sendMessage(
-        {
-          text: trimmed,
-        },
-        {
-          body: { text: trimmed, attachments: atts },
-        },
-      );
+      await sendText(inputDraft, atts);
       setInputDraft('');
       setAttachments([]);
     },
-    [attachments, inputDraft, isStreaming, sendMessage],
+    [attachments, inputDraft, sendText],
+  );
+
+  const handleStarterPick = useCallback(
+    (prompt: string) => {
+      void sendText(prompt, []);
+    },
+    [sendText],
   );
 
   const placeholder =
@@ -207,143 +206,227 @@ export function EmmaChat(props: EmmaChatProps) {
       ? `Pregúntale a Emma sobre ${props.projectName}…`
       : `Ask Emma about ${props.projectName}…`;
 
-  return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: drag-drop zone — the textarea inside owns the user-facing interaction
-    <div
-      className="flex h-[calc(100vh-180px)] flex-col"
-      onDrop={handleDrop}
-      onDragOver={(e) => e.preventDefault()}
-    >
-      {/* Header — Emma + project + brand chip + cost ticker */}
-      <header className="border-rule border-b bg-paper">
-        <div className="flex items-start justify-between gap-4 py-4">
-          <div>
-            <h1 className="font-display text-3xl tracking-tight text-ink">
-              Emma · <span className="font-italic text-ink-2">{props.projectName}</span>
-            </h1>
-            <p className="mono-eyebrow mt-2 text-ink-3">
-              brand · {props.brandSummary.visualStyle ?? 'editorial'} ·{' '}
-              <span style={{ color: props.brandSummary.ink ?? '#14110D' }}>
-                ink {props.brandSummary.ink}
-              </span>
-              {props.brandSummary.voiceTone ? ` · voice ${props.brandSummary.voiceTone}` : ''}
-            </p>
-          </div>
-          <div className="mono-eyebrow text-right text-ink-3">
-            <div>${(costCents / 100).toFixed(2)}</div>
-            <div className="text-[10px] tracking-wider">this conversation</div>
-          </div>
-        </div>
-      </header>
+  const subline =
+    props.language === 'es' ? `para ${props.projectName}` : `for ${props.projectName}`;
 
-      {/* Message list */}
-      <div className="flex-1 overflow-y-auto px-1 py-6">
-        {messages.length === 0 && (
-          <div className="mb-6 border-l-2 border-accent bg-paper-2 p-4 text-ink-2">
-            <div className="mono-eyebrow text-ink-3">Emma</div>
-            <div className="mt-1 leading-relaxed">{props.welcomeLine}</div>
-          </div>
-        )}
-        {messages.map((m) => (
-          <ChatMessageView
-            key={m.id}
-            message={m as never}
-            userDisplayName={props.userDisplayName}
-          />
-        ))}
-        {isStreaming && <div className="mono-eyebrow mt-2 text-ink-3">Emma is typing…</div>}
-        {error && (
-          <div className="mt-2 border-l-2 border-red-700 bg-red-50 p-3 text-sm text-red-900">
-            {error.message}
-          </div>
-        )}
+  const greetingName =
+    props.firstName ?? props.userDisplayName.split(' ')[0] ?? props.userDisplayName;
+  // Greeting uses the brand voice tone (italic amber) as a small flourish
+  // inside an otherwise plain body sentence — sells the persona without
+  // a full eyebrow label.
+  const tone = props.brandKit.voice?.tone ?? null;
+  const greetingBody =
+    props.language === 'es' ? (
+      tone ? (
+        <>
+          {`Hola ${greetingName}. Tu marca es `}
+          <em>{tone.toLowerCase()}</em>
+          {`. ¿Por dónde empezamos?`}
+        </>
+      ) : (
+        <>{`Hola ${greetingName}. ¿Por dónde empezamos?`}</>
+      )
+    ) : tone ? (
+      <>
+        {`Hi ${greetingName}. Your brand reads `}
+        <em>{tone.toLowerCase()}</em>
+        {`. Where do you want to start?`}
+      </>
+    ) : (
+      <>{`Hi ${greetingName}. Where do you want to start?`}</>
+    );
+
+  const audience = props.brandKit.keywords?.slice(0, 4).join(' · ') ?? null;
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: drag-drop zone — the textarea inside owns interaction
+    <div
+      className={`emma-canvas size-${size} ${isDragging ? 'is-dragging' : ''}`}
+      style={{ marginInline: 'auto', minHeight: 'calc(100vh - 200px)', position: 'relative' }}
+      onDrop={handleDrop}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!isDragging) setIsDragging(true);
+      }}
+      onDragLeave={(e) => {
+        // Only un-flag when we leave the canvas itself, not internal moves.
+        if (e.currentTarget === e.target) setIsDragging(false);
+      }}
+    >
+      {/* ── Header row: cost ticker + size toggle ─────────── */}
+      <div
+        className="flex items-start justify-end gap-3"
+        style={{ marginBottom: 'var(--emma-gap-block)' }}
+      >
+        <EmmaSizeToggle value={size} onChange={setSize} />
+        <EmmaCostTicker cents={costCents} language={props.language} />
       </div>
 
-      {/* Pending attachments preview */}
-      {attachments.length > 0 && (
-        <div className="border-rule border-t bg-paper-2 px-1 py-3">
-          <div className="mono-eyebrow mb-2 text-ink-3">attached · {attachments.length}</div>
-          <div className="flex flex-wrap gap-2">
-            {attachments.map((a) => (
-              <div
-                key={a.r2Key}
-                className="flex items-center gap-2 border border-ink bg-paper px-2 py-1 text-xs"
-              >
-                {a.previewUrl ? (
-                  // biome-ignore lint/a11y/useAltText: thumbnail preview only
-                  <img src={a.previewUrl} className="h-8 w-8 object-cover" alt="" />
-                ) : (
-                  <span className="mono-eyebrow text-ink-3">{a.mime.split('/')[1] ?? 'file'}</span>
-                )}
-                <span className="max-w-[180px] truncate text-ink">{a.originalName}</span>
-                <button
-                  type="button"
-                  onClick={() => setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))}
-                  className="text-ink-3 hover:text-accent"
-                  aria-label={`Remove ${a.originalName}`}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* ── Emma. headline ─────────────────────────────────── */}
+      <h1 className="emma-name">
+        Emma<span className="emma-name-period">.</span>
+      </h1>
+      <p className="emma-subline" style={{ marginTop: 4 }}>
+        {subline}
+      </p>
 
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="border-rule border-t bg-paper py-4">
-        <div className="flex items-end gap-3">
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="mono-eyebrow border border-ink bg-paper px-3 py-2 text-ink hover:bg-paper-2"
-            disabled={uploading}
-            aria-label="Attach files"
+      {/* ── Brand strip ────────────────────────────────────── */}
+      <div style={{ marginTop: 'var(--emma-gap-block)' }}>
+        <EmmaBrandStrip brandKit={props.brandKit} audience={audience} />
+      </div>
+
+      {/* ── Greeting block ─────────────────────────────────── */}
+      <div className="emma-greeting" style={{ marginTop: 'var(--emma-gap-block)' }}>
+        {greetingBody}
+      </div>
+
+      {/* ── Body: empty state OR message list ─────────────── */}
+      <div style={{ marginTop: 'var(--emma-gap-block)' }}>
+        {messages.length === 0 ? (
+          <EmmaEmptyState language={props.language} onSelect={handleStarterPick} />
+        ) : (
+          <div>
+            {messages.map((m, i) => (
+              <ChatMessageView
+                key={m.id}
+                message={m as never}
+                isStreaming={isStreaming && i === messages.length - 1}
+              />
+            ))}
+            {showPreFirstToken ? <PreFirstTokenShimmer /> : null}
+          </div>
+        )}
+        {error ? (
+          <div
+            style={{
+              marginTop: 12,
+              fontSize: 'var(--emma-body-size)',
+              color: 'var(--emma-amber)',
+              borderLeft: '1.5px solid var(--emma-amber)',
+              paddingLeft: 14,
+            }}
           >
-            {uploading ? '…' : '📎'}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              if (files.length > 0) {
-                void handleUploadFiles(files);
-                e.target.value = '';
-              }
-            }}
-          />
-          <textarea
-            value={inputDraft}
-            onChange={(e) => setInputDraft(e.target.value)}
-            onPaste={handlePaste}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
-                e.preventDefault();
-                void handleSubmit(e);
-              }
-            }}
-            placeholder={placeholder}
-            rows={2}
-            className="field flex-1 resize-none bg-transparent text-ink focus:outline-none"
-            disabled={isStreaming}
-          />
-          {isStreaming ? (
-            <button type="button" onClick={() => stop()} className="btn-ink">
-              {props.language === 'es' ? 'Detener' : 'Stop'}
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="btn-ink"
-              disabled={inputDraft.trim().length === 0 && attachments.length === 0}
+            {error.message}
+          </div>
+        ) : null}
+      </div>
+
+      {/* ── Pending attachments preview ───────────────────── */}
+      {attachments.length > 0 ? (
+        <div
+          style={{ marginTop: 'var(--emma-gap-block)', display: 'flex', gap: 8, flexWrap: 'wrap' }}
+        >
+          {attachments.map((a) => (
+            <div
+              key={a.r2Key}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '4px 8px',
+                border: '0.5px solid var(--emma-ink-12)',
+                background: 'var(--emma-paper-2)',
+                fontFamily: 'var(--emma-font-mono)',
+                fontSize: 10,
+              }}
             >
-              {props.language === 'es' ? 'Enviar ↩' : 'Send ↩'}
-            </button>
-          )}
+              {a.previewUrl ? (
+                /* biome-ignore lint/a11y/useAltText: thumbnail preview */
+                <img
+                  src={a.previewUrl}
+                  alt=""
+                  style={{ width: 24, height: 24, objectFit: 'cover' }}
+                />
+              ) : (
+                <span style={{ color: 'var(--emma-ink-65)' }}>
+                  {a.mime.split('/')[1] ?? 'file'}
+                </span>
+              )}
+              <span
+                style={{
+                  maxWidth: 160,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: 'var(--emma-ink)',
+                }}
+              >
+                {a.originalName}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))}
+                aria-label={`Remove ${a.originalName}`}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--emma-ink-65)',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
         </div>
+      ) : null}
+
+      {/* ── Input ─────────────────────────────────────────── */}
+      <form
+        onSubmit={handleSubmit}
+        className="emma-input"
+        style={{ marginTop: 'var(--emma-gap-block)' }}
+      >
+        <button
+          type="button"
+          className="emma-attach"
+          onClick={() => fileInputRef.current?.click()}
+          aria-label="Attach files"
+          disabled={uploading}
+        >
+          {uploading ? '…' : '+'}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            if (files.length > 0) {
+              void handleUploadFiles(files);
+              e.target.value = '';
+            }
+          }}
+        />
+        <textarea
+          value={inputDraft}
+          onChange={(e) => setInputDraft(e.target.value)}
+          onPaste={handlePaste}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !isStreaming && !isSubmitted) {
+              e.preventDefault();
+              void handleSubmit(e);
+            }
+          }}
+          placeholder={placeholder}
+          rows={1}
+          disabled={isStreaming || isSubmitted}
+        />
+        {isStreaming || isSubmitted ? (
+          <button type="button" className="emma-send" onClick={() => stop()}>
+            {props.language === 'es' ? 'detener' : 'stop'}
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="emma-send"
+            disabled={inputDraft.trim().length === 0 && attachments.length === 0}
+          >
+            {props.language === 'es' ? 'enviar ↩' : 'send ↩'}
+          </button>
+        )}
       </form>
     </div>
   );

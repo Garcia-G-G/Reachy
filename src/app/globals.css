@@ -2,6 +2,11 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Phase 07b — Emma motion + design tokens. Motion first so emma-tokens
+   can reference --motion-* variables in its @keyframes definitions. */
+@import "../styles/motion.css";
+@import "../styles/emma-tokens.css";
+
 /* ============================================================
    Reachy — Editorial theme
    See prompts/00-CONTEXT.md §0.6 and design-editorial.html

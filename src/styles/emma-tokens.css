@@ -1,0 +1,552 @@
+/* ============================================================
+   Emma — Soft luxe v4 minimal tokens
+   See planning/07b-EMMA-DESIGN-ANIMATIONS.md
+
+   PROJECT-AGNOSTIC chrome tokens for the chat surface. These do
+   NOT override per-project brand kits — those come from brandKit
+   and only apply to AI-generated assets. Emma's CHROME is always
+   navy + amber + warm cream.
+
+   Cannot be derived: every value below is a deliberate design
+   choice from Garcia's 8-iteration design lock-down. Tightening
+   any token tightens Emma's identity across every project.
+   ============================================================ */
+
+:root {
+  /* ── Palette ─────────────────────────────────────────────── */
+  --emma-ink: #1e2a3a; /* navy — primary text + headlines */
+  --emma-paper: #f5efe2; /* warm cream — background base */
+  --emma-paper-2: #fbf5e8; /* slightly lighter cream — card surfaces */
+  --emma-amber: #d4a04b; /* honey amber — accent / dot / rule / send */
+  --emma-slate: #5c6a78; /* desaturated navy — secondary glyph */
+  --emma-warm: #8c6a3a; /* warm brown — fourth glyph */
+  --emma-ink-65: rgba(30, 42, 58, 0.65); /* secondary text */
+  --emma-ink-55: rgba(30, 42, 58, 0.55); /* tertiary text */
+  --emma-ink-25: rgba(30, 42, 58, 0.25); /* hairline rules */
+  --emma-ink-12: rgba(30, 42, 58, 0.12); /* spine + card borders */
+
+  /* ── Typography ──────────────────────────────────────────── */
+  --emma-font-display: var(--font-fraunces), Georgia, serif;
+  --emma-font-body: var(--font-fraunces), Georgia, serif;
+  --emma-font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  /* ── Default size mode (M) ──────────────────────────────── */
+  /* These are overridden by .size-s / .size-l on .emma-canvas. */
+  --canvas-w: 520px;
+  --pad-x: 28px;
+  --pad-y: 22px;
+  --emma-name-size: 56px;
+  --emma-body-size: 13px;
+  --emma-gap-block: 22px;
+}
+
+/* ── Canvas — the chat surface ─────────────────────────────── */
+.emma-canvas {
+  background-color: var(--emma-paper);
+  /* Three radial-gradient layers create an organic paper feel.
+     Static — no breathing animation. The texture itself is the warmth. */
+  background-image:
+    radial-gradient(circle at 13% 27%, rgba(30, 42, 58, 0.018) 1px, transparent 1.6px),
+    radial-gradient(circle at 64% 71%, rgba(30, 42, 58, 0.022) 1px, transparent 1.6px),
+    radial-gradient(circle at 89% 13%, rgba(212, 160, 75, 0.025) 1px, transparent 1.6px);
+  background-size:
+    9px 9px,
+    13px 13px,
+    17px 17px;
+  color: var(--emma-ink);
+  font-family: var(--emma-font-body);
+  width: var(--canvas-w);
+  padding: var(--pad-y) var(--pad-x);
+  position: relative;
+  /* Width + padding + font-size all crossfade when the size toggle
+     changes the mode class. Single easing across all three so they
+     animate as one piece. */
+  transition:
+    width var(--motion-duration-slow) var(--motion-easing-out),
+    padding var(--motion-duration-slow) var(--motion-easing-out),
+    font-size var(--motion-duration-slow) var(--motion-easing-out);
+}
+
+/* ── Size modes — driven by class on .emma-canvas ──────────── */
+.emma-canvas.size-s {
+  --canvas-w: 320px;
+  --pad-x: 18px;
+  --pad-y: 14px;
+  --emma-name-size: 36px;
+  --emma-body-size: 12px;
+  --emma-gap-block: 16px;
+}
+.emma-canvas.size-m {
+  --canvas-w: 520px;
+  --pad-x: 28px;
+  --pad-y: 22px;
+  --emma-name-size: 56px;
+  --emma-body-size: 13px;
+  --emma-gap-block: 22px;
+}
+.emma-canvas.size-l {
+  --canvas-w: 640px;
+  --pad-x: 36px;
+  --pad-y: 30px;
+  --emma-name-size: 88px;
+  --emma-body-size: 15px;
+  --emma-gap-block: 30px;
+}
+
+/* ── Spine rule — single 0.5px vertical hairline ───────────── */
+/* Like a Moleskine margin rule. Draws top-to-bottom on mount
+   via scaleY animation; static once settled. */
+.emma-canvas::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 8px;
+  width: 0.5px;
+  background-color: var(--emma-ink-12);
+  transform: scaleY(0);
+  transform-origin: top;
+  animation: emma-spine-draw var(--motion-duration-spine) var(--motion-easing-out) forwards;
+}
+@keyframes emma-spine-draw {
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* ── Emma. headline ────────────────────────────────────────── */
+.emma-name {
+  font-family: var(--emma-font-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: var(--emma-name-size);
+  letter-spacing: -0.025em;
+  color: var(--emma-ink);
+  line-height: 0.95;
+  /* On mount, the letter-spacing settles from -0.025em to -0.035em
+     over 300ms to give the headline a "set in print" feel. */
+  animation: emma-name-settle var(--motion-duration-slow) var(--motion-easing-out) forwards;
+  transition: font-size var(--motion-duration-slow) var(--motion-easing-out);
+}
+@keyframes emma-name-settle {
+  from {
+    letter-spacing: -0.025em;
+  }
+  to {
+    letter-spacing: -0.035em;
+  }
+}
+
+/* The amber period after the name is rendered as a separate span
+   so it can use the upright weight + delayed entrance. */
+.emma-name-period {
+  font-style: normal;
+  color: var(--emma-amber);
+  opacity: 0;
+  display: inline-block;
+  transform: scale(0.85);
+  animation: emma-period-pop var(--motion-duration-base) var(--motion-easing-out) 100ms forwards;
+}
+@keyframes emma-period-pop {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ── Sub-line: "para {projectName}" ─────────────────────────── */
+.emma-subline {
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--emma-ink-55);
+  text-transform: lowercase;
+}
+
+/* ── Greeting block — amber 1.5px left rule + body ─────────── */
+.emma-greeting {
+  border-left: 1.5px solid var(--emma-amber);
+  padding-left: 14px;
+  font-size: var(--emma-body-size);
+  line-height: 1.55;
+  color: var(--emma-ink);
+}
+.emma-greeting em {
+  font-style: italic;
+  color: var(--emma-amber);
+}
+
+/* ── Brand swatches — collapsed (3 × 10px circles) ─────────── */
+.emma-swatch-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.emma-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  border: 0.5px solid var(--emma-ink-12);
+  transition: transform var(--motion-duration-quick) var(--motion-easing-out);
+}
+.emma-swatch-row:hover .emma-swatch {
+  transform: scale(1.15);
+}
+
+/* ── Mood thumbs — 4 × 32px squares ────────────────────────── */
+.emma-mood-thumb {
+  width: 32px;
+  height: 32px;
+  opacity: 0.5;
+  transition: opacity var(--motion-duration-quick) var(--motion-easing-out);
+  cursor: pointer;
+  background-color: var(--emma-paper-2);
+  border: 0.5px solid var(--emma-ink-12);
+}
+.emma-mood-thumb:hover {
+  opacity: 0.85;
+}
+.emma-mood-counter {
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  color: var(--emma-ink-55);
+  letter-spacing: 0.06em;
+}
+
+/* ── Cost ticker — top-right, amber dot ─────────────────────── */
+.emma-cost {
+  font-family: var(--emma-font-mono);
+  font-size: 9px;
+  color: var(--emma-ink-65);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.04em;
+}
+.emma-cost-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background-color: var(--emma-amber);
+  display: inline-block;
+}
+.emma-cost-dot.is-pulsing {
+  animation: emma-cost-pulse var(--motion-duration-cost-pulse) var(--motion-easing-out);
+}
+@keyframes emma-cost-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.4);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ── Size toggle — [S][M][L] inline row ────────────────────── */
+.emma-size-toggle {
+  display: inline-flex;
+  gap: 0;
+  border: 0.5px solid var(--emma-ink-12);
+}
+.emma-size-toggle button {
+  font-family: var(--emma-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--emma-ink-65);
+  padding: 4px 8px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-quick) var(--motion-easing-out),
+    color var(--motion-duration-quick) var(--motion-easing-out);
+}
+.emma-size-toggle button[aria-pressed="true"] {
+  background-color: var(--emma-ink);
+  color: var(--emma-paper);
+}
+
+/* ── Starter cards (empty state) ───────────────────────────── */
+.emma-starter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.emma-starter-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background-color: var(--emma-paper-2);
+  border: 0.5px solid var(--emma-ink-12);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--emma-font-body);
+  font-size: var(--emma-body-size);
+  color: var(--emma-ink);
+  transition:
+    transform var(--motion-duration-quick) var(--motion-easing-out),
+    background-color var(--motion-duration-quick) var(--motion-easing-out);
+  opacity: 0;
+  transform: translateY(6px);
+  animation: emma-card-enter var(--motion-duration-base) var(--motion-easing-out) forwards;
+}
+.emma-starter-card:hover {
+  transform: translateY(-2px);
+}
+.emma-starter-card .emma-card-arrow {
+  margin-left: auto;
+  color: var(--emma-amber);
+  font-family: var(--emma-font-body);
+  transition: transform var(--motion-duration-quick) var(--motion-easing-out);
+}
+.emma-starter-card:hover .emma-card-arrow {
+  transform: translateX(3px);
+}
+.emma-starter-card .emma-card-glyph {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--emma-font-display);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--emma-paper);
+}
+@keyframes emma-card-enter {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.emma-starter-card.is-leaving {
+  animation: emma-card-leave var(--motion-duration-quick) var(--motion-easing-out) forwards;
+}
+@keyframes emma-card-leave {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* ── Input — underline only ────────────────────────────────── */
+.emma-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  border: none;
+  border-bottom: 0.5px solid var(--emma-ink);
+  padding: 8px 0;
+  background: transparent;
+  transition: border-bottom-width var(--motion-duration-quick) var(--motion-easing-out);
+}
+.emma-input:focus-within {
+  border-bottom-width: 1.5px;
+}
+.emma-input textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--emma-font-body);
+  font-size: var(--emma-body-size);
+  color: var(--emma-ink);
+  resize: none;
+}
+.emma-input textarea::placeholder {
+  font-style: italic;
+  color: var(--emma-ink-55);
+}
+.emma-input button.emma-send {
+  background: transparent;
+  border: none;
+  color: var(--emma-amber);
+  font-family: var(--emma-font-body);
+  font-size: var(--emma-body-size);
+  cursor: pointer;
+  padding: 0;
+  border-bottom: 0.5px solid var(--emma-amber);
+  transition: transform var(--motion-duration-quick) var(--motion-easing-out);
+}
+.emma-input button.emma-send:active {
+  animation: emma-send-overshoot 220ms var(--motion-easing-out);
+}
+@keyframes emma-send-overshoot {
+  0% {
+    transform: scale(1);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.emma-input button.emma-attach {
+  background: transparent;
+  border: none;
+  color: var(--emma-ink-65);
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+}
+
+/* ── Message bubble entrance ───────────────────────────────── */
+.emma-msg {
+  opacity: 0;
+  transform: translateY(6px);
+  animation: emma-msg-enter var(--motion-duration-base) var(--motion-easing-out) forwards;
+}
+@keyframes emma-msg-enter {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Streaming cursor — 2×14px navy bar ───────────────────── */
+.emma-stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background-color: var(--emma-ink);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: emma-cursor-pulse var(--motion-duration-cursor-pulse) ease-in-out infinite;
+}
+@keyframes emma-cursor-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ── Pre-first-token shimmer (3 dots) ─────────────────────── */
+.emma-pre-dots {
+  display: inline-flex;
+  gap: 3px;
+  color: var(--emma-ink-65);
+  font-family: var(--emma-font-body);
+}
+.emma-pre-dots span {
+  animation: emma-pre-dot var(--motion-duration-cursor-pulse) ease-in-out infinite;
+}
+.emma-pre-dots span:nth-child(2) {
+  animation-delay: 200ms;
+}
+.emma-pre-dots span:nth-child(3) {
+  animation-delay: 400ms;
+}
+@keyframes emma-pre-dot {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* ── Tool-card 4-state ───────────────────────────────────── */
+.emma-tool-card {
+  border: 0.5px solid var(--emma-ink-12);
+  background-color: var(--emma-paper-2);
+  padding: 14px;
+  transition: height var(--motion-duration-slow) var(--motion-easing-out);
+}
+.emma-tool-glyph {
+  display: inline-block;
+  font-family: var(--emma-font-display);
+  font-size: 14px;
+  color: var(--emma-ink-65);
+}
+.emma-tool-glyph.is-thinking {
+  animation: emma-tool-rotate 1.4s linear infinite;
+  transform-origin: center;
+}
+@keyframes emma-tool-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.emma-tool-glyph.is-critic {
+  color: var(--emma-amber);
+  animation: emma-tool-pulse 1.2s ease-in-out infinite;
+}
+@keyframes emma-tool-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.emma-tool-skeleton {
+  height: 80px;
+  background: linear-gradient(90deg, transparent 0%, var(--emma-ink-12) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: emma-tool-shimmer 1500ms linear infinite;
+}
+@keyframes emma-tool-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.emma-tool-reveal img {
+  opacity: 0;
+  transform: scale(0.97);
+  animation: emma-tool-image-reveal var(--motion-duration-slow) var(--motion-easing-out) forwards;
+  width: 100%;
+}
+@keyframes emma-tool-image-reveal {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.emma-tool-chips {
+  display: inline-flex;
+  gap: 8px;
+}
+.emma-tool-chips button {
+  opacity: 0;
+  transform: translateY(4px);
+  font-family: var(--emma-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 0.5px solid var(--emma-ink-12);
+  color: var(--emma-ink-65);
+  padding: 4px 8px;
+  cursor: pointer;
+  animation: emma-msg-enter var(--motion-duration-base) var(--motion-easing-out) forwards;
+}
+.emma-tool-chips button:nth-child(1) {
+  animation-delay: 0ms;
+}
+.emma-tool-chips button:nth-child(2) {
+  animation-delay: var(--motion-stagger-base);
+}
+.emma-tool-chips button:nth-child(3) {
+  animation-delay: calc(var(--motion-stagger-base) * 2);
+}
+
+/* ── Drag-drop overlay ─────────────────────────────────────── */
+.emma-canvas.is-dragging::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--emma-ink-12);
+  background-color: var(--emma-paper-2);
+  opacity: 0.6;
+  pointer-events: none;
+}

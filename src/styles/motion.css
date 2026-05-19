@@ -1,0 +1,52 @@
+/* ============================================================
+   Motion tokens — editorial restraint.
+
+   ONE easing curve, five durations, three stagger values. Every
+   transition in Emma's UI references one of these tokens so a
+   future motion-language tightening is a single-file edit.
+
+   prefers-reduced-motion sets every duration to 0ms — animations
+   vanish without per-component checks.
+   ============================================================ */
+
+:root {
+  /* Durations */
+  --motion-duration-instant: 80ms;
+  --motion-duration-quick: 120ms;
+  --motion-duration-base: 200ms;
+  --motion-duration-slow: 300ms;
+  --motion-duration-deliberate: 500ms;
+
+  /* Specific durations used by named animations (kept symbolic so
+     "the spine takes 600ms" is a single line to retune). */
+  --motion-duration-spine: 600ms;
+  --motion-duration-cost-pulse: 400ms;
+  --motion-duration-cost-count: 500ms;
+  --motion-duration-cursor-pulse: 800ms;
+
+  /* Easings — ONE curve. Editorial language doesn't need bounce. */
+  --motion-easing-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-easing-in-out: cubic-bezier(0.4, 0, 0.6, 1);
+
+  /* Stagger — for cards / chips / list entrances. */
+  --motion-stagger-tight: 40ms;
+  --motion-stagger-base: 60ms;
+  --motion-stagger-loose: 100ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-instant: 0ms;
+    --motion-duration-quick: 0ms;
+    --motion-duration-base: 0ms;
+    --motion-duration-slow: 0ms;
+    --motion-duration-deliberate: 0ms;
+    --motion-duration-spine: 0ms;
+    --motion-duration-cost-pulse: 0ms;
+    --motion-duration-cost-count: 0ms;
+    --motion-duration-cursor-pulse: 0ms;
+    --motion-stagger-tight: 0ms;
+    --motion-stagger-base: 0ms;
+    --motion-stagger-loose: 0ms;
+  }
+}

@@ -48,6 +48,9 @@ export default async function ChatPage({ params }: { params: Promise<{ slug: str
     language,
   });
 
+  const userDisplayName = session.user.name ?? session.user.email?.split('@')[0] ?? 'there';
+  const firstName = userDisplayName.split(' ')[0] ?? userDisplayName;
+
   return (
     <EmmaChat
       projectName={project.name}
@@ -56,15 +59,10 @@ export default async function ChatPage({ params }: { params: Promise<{ slug: str
       welcomeLine={welcomeLine}
       initialMessages={initialMessages}
       initialCostCents={initialCostCents}
-      brandSummary={{
-        ink: brandKit.primaryColor,
-        paper: brandKit.bgColor,
-        accent: brandKit.accentColor,
-        voiceTone: brandKit.voice?.tone ?? null,
-        visualStyle: brandKit.visualStyle ?? null,
-      }}
+      brandKit={brandKit}
       language={language}
-      userDisplayName={session.user.name ?? session.user.email?.split('@')[0] ?? 'there'}
+      userDisplayName={userDisplayName}
+      firstName={firstName}
     />
   );
 }
