@@ -395,17 +395,136 @@
   font-size: 14px;
 }
 
-/* ── Message bubble entrance ───────────────────────────────── */
+/* ── Message bubble — entrance + role differentiation (Phase 07e) ─── */
+/* Editorial single-column. Differentiation via subtle left-rule color
+   + a small mono eyebrow with the role name — no avatars, no bubbles,
+   no left/right drift. Garcia must be able to scan the thread and
+   tell at a glance who's speaking without it feeling SaaS-chat. */
 .emma-msg {
   opacity: 0;
   transform: translateY(6px);
   animation: emma-msg-enter var(--motion-duration-base) var(--motion-easing-out) forwards;
+  padding-left: 12px;
+  border-left: 1.5px solid var(--emma-ink-12);
+  margin-bottom: var(--emma-gap-block);
+}
+.emma-msg-assistant {
+  border-left-color: var(--emma-amber);
+}
+.emma-msg-user {
+  border-left-color: var(--emma-ink-65);
+}
+.emma-msg-role {
+  font-family: var(--emma-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 4px;
+  line-height: 1;
+}
+.emma-msg-assistant .emma-msg-role {
+  color: var(--emma-amber);
+}
+.emma-msg-user .emma-msg-role {
+  color: var(--emma-ink-65);
 }
 @keyframes emma-msg-enter {
   to {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ── Markdown body — editorial typography overrides (Phase 07e) ─── */
+.emma-p {
+  margin: 0 0 var(--emma-body-size);
+  font-size: var(--emma-body-size);
+  line-height: 1.55;
+  color: var(--emma-ink);
+}
+.emma-p:last-child {
+  margin-bottom: 0;
+}
+.emma-list,
+.emma-list-ordered {
+  margin: 0 0 var(--emma-body-size);
+  padding-left: 18px;
+  font-size: var(--emma-body-size);
+  line-height: 1.55;
+  color: var(--emma-ink);
+}
+.emma-list li,
+.emma-list-ordered li {
+  margin: 0 0 4px;
+}
+.emma-strong {
+  /* Design system rule: only 400 and 500 weights. Bold uses 500. */
+  font-weight: 500;
+  color: var(--emma-ink);
+}
+.emma-em {
+  /* Italics colored amber to match the greeting's voice-descriptor
+     flourish — feels like the same Emma "voice" across the surface. */
+  font-style: italic;
+  color: var(--emma-amber);
+}
+.emma-code {
+  font-family: var(--emma-font-mono);
+  font-size: calc(var(--emma-body-size) - 1px);
+  background-color: var(--emma-paper-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--emma-ink);
+}
+.emma-link {
+  color: var(--emma-amber);
+  text-decoration: underline;
+  text-decoration-thickness: 0.5px;
+  text-underline-offset: 2px;
+}
+.emma-pre {
+  font-family: var(--emma-font-mono);
+  font-size: calc(var(--emma-body-size) - 1px);
+  background-color: var(--emma-paper-2);
+  padding: 12px;
+  white-space: pre-wrap;
+  color: var(--emma-ink);
+  margin: 0 0 var(--emma-body-size);
+}
+
+/* ── Inline asset preview — image card in Emma's reply (Phase 07e) ── */
+/* Mirrors the tool-card reveal state: caption above, image with the
+   editorial border, chip row below. Lives inline in a markdown body
+   so the chat surface stays single-column. */
+.emma-inline-asset {
+  margin: 0 0 var(--emma-body-size);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.emma-inline-asset-caption {
+  font-family: var(--emma-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--emma-ink-65);
+  text-transform: lowercase;
+}
+.emma-inline-asset-link {
+  display: block;
+  border: 0.5px solid var(--emma-ink-12);
+  background-color: var(--emma-paper-2);
+}
+.emma-inline-asset-image {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  opacity: 0;
+  transform: scale(0.97);
+  animation: emma-tool-image-reveal var(--motion-duration-slow) var(--motion-easing-out) forwards;
+}
+.emma-inline-asset-chips {
+  margin-top: 4px;
 }
 
 /* ── Streaming cursor — 2×14px navy bar ───────────────────── */

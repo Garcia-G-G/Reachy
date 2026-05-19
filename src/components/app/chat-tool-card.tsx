@@ -26,7 +26,18 @@
 interface ToolPart {
   type: string; // 'tool-generateImage', 'tool-writeCopy', etc.
   toolCallId: string;
-  state: 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
+  // Phase 07e — the AI SDK v6 ToolUIPart actually emits FIVE states.
+  // The Phase 07b component was only handling four, so when the
+  // model produced 'output-denied' (or any unfamiliar value while
+  // streaming) the card body collapsed to null and the user saw an
+  // empty cream rectangle. The default fallback below also catches
+  // any future state name we haven't taught the renderer about yet.
+  state:
+    | 'input-streaming'
+    | 'input-available'
+    | 'output-available'
+    | 'output-error'
+    | 'output-denied';
   input?: unknown;
   output?: unknown;
   errorText?: string;
@@ -226,13 +237,56 @@ function renderOutput(name: string, output: unknown) {
   );
 }
 
+function renderOutputDenied(name: string) {
+  return (
+    <div style={{ color: 'var(--emma-ink-65)' }}>
+      <div style={{ fontFamily: 'var(--emma-font-mono)', fontSize: 10, letterSpacing: '0.08em' }}>
+        {name} · declinado
+      </div>
+    </div>
+  );
+}
+
+/** Phase 07e fallback — empty cards are the worst UX failure mode
+ *  because they read as a broken render. ALWAYS render visible
+ *  content; if state is unknown, show a thinking marker. */
+function renderUnknown() {
+  return (
+    <div className="flex items-center gap-2" style={{ color: 'var(--emma-ink-65)' }}>
+      <span className="emma-tool-glyph is-thinking">◐</span>
+      <span style={{ fontFamily: 'var(--emma-font-mono)', fontSize: 10, letterSpacing: '0.08em' }}>
+        pensando…
+      </span>
+    </div>
+  );
+}
+
 export function ChatToolCard({ part }: ChatToolCardProps) {
   const name = toolName(part.type);
-  let body: React.ReactNode = null;
-  if (part.state === 'input-streaming') body = renderInputStreaming();
-  else if (part.state === 'input-available') body = renderInputAvailable(name);
-  else if (part.state === 'output-error') body = renderOutputError(name, part.errorText);
-  else if (part.state === 'output-available') body = renderOutput(name, part.output);
+  let body: React.ReactNode;
+  switch (part.state) {
+    case 'input-streaming':
+      body = renderInputStreaming();
+      break;
+    case 'input-available':
+      body = renderInputAvailable(name);
+      break;
+    case 'output-error':
+      body = renderOutputError(name, part.errorText);
+      break;
+    case 'output-denied':
+      body = renderOutputDenied(name);
+      break;
+    case 'output-available':
+      body = renderOutput(name, part.output);
+      // Even the "happy path" output renderer can return null when
+      // the result shape didn't match any known tool. Fall through
+      // to the thinking glyph so the card is never empty.
+      if (body === null || body === undefined) body = renderUnknown();
+      break;
+    default:
+      body = renderUnknown();
+  }
 
   return <div className="emma-tool-card">{body}</div>;
 }

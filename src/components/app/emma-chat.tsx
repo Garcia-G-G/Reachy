@@ -223,6 +223,16 @@ export function EmmaChat(props: EmmaChatProps) {
     props.userDisplayName?.split(' ')[0]?.trim() ||
     props.userDisplayName?.trim() ||
     'amigo';
+
+  // Phase 07e — the eyebrow role label above each user message.
+  // Same fallback chain as the greeting, just uppercased + with 'TÚ'
+  // as the editorial last-resort (the prompt-template uses 'amigo'
+  // for the AI's greeting; 'TÚ' reads better as a header for the
+  // user's own messages).
+  const userRoleLabel =
+    props.firstName?.trim().toUpperCase() ||
+    props.userDisplayName?.split(' ')[0]?.trim().toUpperCase() ||
+    'TÚ';
   // Greeting uses the brand voice tone (italic amber) as a small flourish
   // inside an otherwise plain body sentence — sells the persona without
   // a full eyebrow label.
@@ -303,6 +313,7 @@ export function EmmaChat(props: EmmaChatProps) {
                 key={m.id}
                 message={m as never}
                 isStreaming={isStreaming && i === messages.length - 1}
+                userRoleLabel={userRoleLabel}
               />
             ))}
             {showPreFirstToken ? <PreFirstTokenShimmer /> : null}
