@@ -3,7 +3,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { LAYOUTS } from '@/server/ai/layoutTemplates';
 import { TOOL_DESCRIPTIONS } from '@/server/config/chatToolDescriptions';
-import type { EmmaToolContext } from '../context';
+import type { EmmaToolContext } from '../../context';
 
 /**
  * listLayouts — return all layout IDs with label + slot list.

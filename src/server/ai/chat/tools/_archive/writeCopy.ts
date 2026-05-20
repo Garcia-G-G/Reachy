@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { generateChannelCopy } from '@/server/ai/channelCopy';
 import { CHANNEL_TEMPLATES, type ChannelKey } from '@/server/config/channelTemplates';
 import { TOOL_DESCRIPTIONS } from '@/server/config/chatToolDescriptions';
-import type { EmmaToolContext } from '../context';
+import type { EmmaToolContext } from '../../context';
 
 /**
  * writeCopy — generate a single piece of channel copy. Inline call

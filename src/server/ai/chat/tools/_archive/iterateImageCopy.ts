@@ -2,7 +2,7 @@ import 'server-only';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { TOOL_DESCRIPTIONS } from '@/server/config/chatToolDescriptions';
-import type { EmmaToolContext } from '../context';
+import type { EmmaToolContext } from '../../context';
 
 /**
  * iterateImageCopy — Phase 06 quarantined the composeImage SVG-overlay

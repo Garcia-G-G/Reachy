@@ -8,7 +8,7 @@ import { db } from '@/server/db/client';
 import { campaignAsset } from '@/server/db/schema/campaignAssets';
 import { campaign } from '@/server/db/schema/campaigns';
 import { generation } from '@/server/db/schema/generations';
-import type { EmmaToolContext } from '../context';
+import type { EmmaToolContext } from '../../context';
 
 /**
  * saveAsCampaignAsset — promote a chat-generated asset to a real

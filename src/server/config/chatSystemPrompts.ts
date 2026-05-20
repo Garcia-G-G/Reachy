@@ -2,6 +2,7 @@ import 'server-only';
 import type { BrandKit } from '@/server/actions/brandKits';
 import type { Project } from '@/server/actions/projects';
 import type { ProductBrief } from '@/server/ingest/extractBrief';
+import { EMMA_CONCIERGE_SECTIONS } from './emmaConcierge';
 
 /**
  * Emma — the per-project content co-pilot. Phase 07.
@@ -192,24 +193,34 @@ export function buildEmmaSystemPrompt(input: BuildEmmaSystemPromptInput): string
   const greetingTemplate = EMMA_GREETING_TEMPLATES[input.language];
   const greetingLine = greetingTemplate.replace('{name}', safeName);
 
+  // Phase 07h — concierge sections take priority over the legacy
+  // worker-era sections. EMMA_SYSTEM_SECTIONS.MULTIMODAL +
+  // BRAND_FIDELITY are preserved because they're still load-bearing
+  // (multimodal input, brand kit discipline). The worker-leaning
+  // WORKFLOW / ITERATION_BIAS / TOOL_ETIQUETTE are dropped — the
+  // concierge sections cover the same ground.
   const sections: string[] = [
-    EMMA_SYSTEM_SECTIONS.ROLE,
+    EMMA_CONCIERGE_SECTIONS.ROLE,
     '',
-    EMMA_SYSTEM_SECTIONS.PERSONA,
+    EMMA_CONCIERGE_SECTIONS.PERSONA,
     '',
-    EMMA_SYSTEM_SECTIONS.WORKFLOW,
+    EMMA_CONCIERGE_SECTIONS.TOOL_USE_BIAS,
     '',
-    EMMA_SYSTEM_SECTIONS.ITERATION_BIAS,
+    EMMA_CONCIERGE_SECTIONS.FORMAT,
+    '',
+    EMMA_CONCIERGE_SECTIONS.CONTEXT_AWARENESS,
+    '',
+    EMMA_CONCIERGE_SECTIONS.RECOMMEND_PATTERN,
+    '',
+    EMMA_CONCIERGE_SECTIONS.EXPLAIN_PATTERN,
     '',
     EMMA_SYSTEM_SECTIONS.MULTIMODAL,
     '',
     EMMA_SYSTEM_SECTIONS.BRAND_FIDELITY,
     '',
-    EMMA_SYSTEM_SECTIONS.LANGUAGE,
+    EMMA_CONCIERGE_SECTIONS.LANGUAGE,
     '',
-    EMMA_SYSTEM_SECTIONS.TOOL_ETIQUETTE,
-    '',
-    EMMA_SYSTEM_SECTIONS.REFUSAL,
+    EMMA_CONCIERGE_SECTIONS.REFUSAL,
     '',
     '─── PROJECT CONTEXT ───',
     buildBrandContext({ project: input.project, brandKit: input.brandKit }),

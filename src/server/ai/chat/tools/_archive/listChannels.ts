@@ -3,7 +3,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { CHANNEL_TEMPLATES } from '@/server/config/channelTemplates';
 import { TOOL_DESCRIPTIONS } from '@/server/config/chatToolDescriptions';
-import type { EmmaToolContext } from '../context';
+import type { EmmaToolContext } from '../../context';
 
 /**
  * listChannels — return all copy channels with target word counts +

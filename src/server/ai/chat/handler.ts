@@ -73,6 +73,14 @@ export interface RunEmmaTurnInput {
    *  rest of the website. Defaults to the brand kit's first
    *  language when not provided. */
   uiLocale?: 'en' | 'es';
+  /** Phase 07h — the user's current client-side route (Emma is now
+   *  a global floating widget, not a dedicated page). Threaded into
+   *  the tool context so getCurrentPageContext can return it and
+   *  navigateTo can resolve relative paths. */
+  clientContext?: {
+    currentRoute?: string;
+    focusedGenerationId?: string;
+  };
 }
 
 function estimateCostCents(usage: {
@@ -261,6 +269,8 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     brandKit: brandKit_,
     productBrief,
     language,
+    currentRoute: input.clientContext?.currentRoute,
+    focusedGenerationId: input.clientContext?.focusedGenerationId,
   };
   const tools = buildEmmaTools(toolCtx);
 

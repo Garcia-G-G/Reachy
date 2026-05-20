@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
-import { getLocale } from 'next-intl/server';
 import { type NextRequest, NextResponse } from 'next/server';
+import { getLocale } from 'next-intl/server';
 import { z } from 'zod';
 import { runEmmaTurn } from '@/server/ai/chat/handler';
 import { db } from '@/server/db/client';
@@ -34,6 +34,14 @@ const inputSchema = z.object({
     )
     .max(10)
     .default([]),
+  /** Phase 07h — the client embeds its current route + any focused
+   *  asset id so concierge tools can return them without a DB hit. */
+  clientContext: z
+    .object({
+      currentRoute: z.string().max(400).optional(),
+      focusedGenerationId: z.string().uuid().optional(),
+    })
+    .optional(),
 });
 
 export const dynamic = 'force-dynamic';
@@ -105,6 +113,7 @@ export async function POST(
       },
       userDisplayName,
       uiLocale: appLocale,
+      clientContext: parsed.data.clientContext,
     });
     // The AI SDK's stream result exposes toUIMessageStreamResponse which
     // returns a Web Response carrying the SSE event stream that useChat

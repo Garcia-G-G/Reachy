@@ -2,8 +2,9 @@
 
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrandKit } from '@/server/actions/brandKits';
 import { deleteThreadHistory } from '@/server/actions/chat';
 import type { ChatAttachment, ChatMessage } from '@/server/db/schema/chatMessages';
@@ -44,6 +45,16 @@ interface EmmaChatProps {
   userDisplayName: string;
   /** Optional first-name for the greeting. Falls back to displayName. */
   firstName?: string;
+  /** Phase 07h compact mode — mounted inside the EmmaWidget panel.
+   *  Drops the big Emma. headline, brand strip, greeting, and size
+   *  toggle so the panel renders only the message list + input. */
+  compact?: boolean;
+  /** Phase 07h — current client route + focused asset, embedded in
+   *  every POST to the stream API so concierge tools can read them. */
+  clientContext?: {
+    currentRoute?: string;
+    focusedGenerationId?: string;
+  };
 }
 
 interface PendingAttachment extends ChatAttachment {
@@ -91,12 +102,19 @@ export function EmmaChat(props: EmmaChatProps) {
             body && typeof body === 'object' && 'attachments' in body
               ? (body as { attachments: ChatAttachment[] }).attachments
               : [];
-          return { body: { text, attachments: atts } };
+          // Phase 07h — embed the current route + focused asset so
+          // the server-side concierge tools can return them.
+          const clientCtx =
+            body && typeof body === 'object' && 'clientContext' in body
+              ? (body as { clientContext: unknown }).clientContext
+              : props.clientContext;
+          return { body: { text, attachments: atts, clientContext: clientCtx } };
         },
       }),
-    [props.threadId],
+    [props.threadId, props.clientContext],
   );
 
+  const router = useRouter();
   const { messages, sendMessage, setMessages, status, error, stop } = useChat({
     transport,
     messages: props.initialMessages.map(persistedToUIMessage) as never,
@@ -136,6 +154,52 @@ export function EmmaChat(props: EmmaChatProps) {
 
   const isStreaming = status === 'streaming';
   const isSubmitted = status === 'submitted';
+
+  // Phase 07h — concierge tool actions. When Emma calls
+  // navigateTo / highlightElement, the server-side tool returns the
+  // action payload as the output. The client watches the latest
+  // assistant message for those outputs and applies the side effect.
+  // We track which toolCallIds have already been handled so a
+  // re-render doesn't navigate twice.
+  const handledToolCallIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!lastAssistant) return;
+    type ToolPart = {
+      type: string;
+      toolCallId?: string;
+      state?: string;
+      output?: { action?: string; path?: string; selector?: string; durationMs?: number };
+    };
+    const toolParts = lastAssistant.parts.filter((p) => p.type.startsWith('tool-')) as ToolPart[];
+    for (const part of toolParts) {
+      if (part.state !== 'output-available') continue;
+      const id = part.toolCallId;
+      if (!id || handledToolCallIdsRef.current.has(id)) continue;
+      const output = part.output;
+      if (!output) continue;
+      if (output.action === 'navigate' && typeof output.path === 'string') {
+        handledToolCallIdsRef.current.add(id);
+        router.push(output.path);
+        continue;
+      }
+      if (output.action === 'highlight' && typeof output.selector === 'string') {
+        handledToolCallIdsRef.current.add(id);
+        const selector = output.selector;
+        const duration = output.durationMs ?? 3000;
+        try {
+          const el = document.querySelector(selector) as HTMLElement | null;
+          if (el) {
+            el.classList.add('emma-pulse-highlight');
+            window.setTimeout(() => el.classList.remove('emma-pulse-highlight'), duration);
+          }
+        } catch {
+          // Bad selector — fail silently; the assistant text already
+          // told the user what to look at.
+        }
+      }
+    }
+  }, [messages, router]);
   // Pre-first-token shimmer fires when the user message was just sent
   // and Emma hasn't started streaming yet.
   const showPreFirstToken = isSubmitted && messages[messages.length - 1]?.role === 'user';
@@ -289,45 +353,59 @@ export function EmmaChat(props: EmmaChatProps) {
         if (e.currentTarget === e.target) setIsDragging(false);
       }}
     >
-      {/* ── Header row: clear · size toggle · cost ticker ─────────── */}
-      <div
-        className="flex items-center justify-between gap-3"
-        style={{ marginBottom: 'var(--emma-gap-block)' }}
-      >
-        {/* Clear-chat affordance lives on the left. Saved assets live
-            in campaign_asset and survive the delete — the inline
-            confirm copy says so explicitly. */}
-        <EmmaClearButton
-          confirming={confirmingClear}
-          clearing={clearing}
-          messageCount={messages.length}
-          onAskConfirm={() => setConfirmingClear(true)}
-          onCancel={() => setConfirmingClear(false)}
-          onConfirm={handleClear}
-        />
-        <div className="flex items-center gap-3">
-          <EmmaSizeToggle value={size} onChange={setSize} />
+      {/* Header — full chrome in page mode, compact bar in widget mode. */}
+      {props.compact ? (
+        <div className="flex items-center justify-between gap-3" style={{ marginBottom: 8 }}>
+          <EmmaClearButton
+            confirming={confirmingClear}
+            clearing={clearing}
+            messageCount={messages.length}
+            onAskConfirm={() => setConfirmingClear(true)}
+            onCancel={() => setConfirmingClear(false)}
+            onConfirm={handleClear}
+          />
           <EmmaCostTicker cents={costCents} />
         </div>
-      </div>
+      ) : (
+        <>
+          {/* ── Header row: clear · size toggle · cost ticker ─────────── */}
+          <div
+            className="flex items-center justify-between gap-3"
+            style={{ marginBottom: 'var(--emma-gap-block)' }}
+          >
+            <EmmaClearButton
+              confirming={confirmingClear}
+              clearing={clearing}
+              messageCount={messages.length}
+              onAskConfirm={() => setConfirmingClear(true)}
+              onCancel={() => setConfirmingClear(false)}
+              onConfirm={handleClear}
+            />
+            <div className="flex items-center gap-3">
+              <EmmaSizeToggle value={size} onChange={setSize} />
+              <EmmaCostTicker cents={costCents} />
+            </div>
+          </div>
 
-      {/* ── Emma. headline ─────────────────────────────────── */}
-      <h1 className="emma-name">
-        Emma<span className="emma-name-period">.</span>
-      </h1>
-      <p className="emma-subline" style={{ marginTop: 4 }}>
-        {subline}
-      </p>
+          {/* ── Emma. headline ─────────────────────────────────── */}
+          <h1 className="emma-name">
+            Emma<span className="emma-name-period">.</span>
+          </h1>
+          <p className="emma-subline" style={{ marginTop: 4 }}>
+            {subline}
+          </p>
 
-      {/* ── Brand strip ────────────────────────────────────── */}
-      <div style={{ marginTop: 'var(--emma-gap-block)' }}>
-        <EmmaBrandStrip brandKit={props.brandKit} audience={audience} />
-      </div>
+          {/* ── Brand strip ────────────────────────────────────── */}
+          <div style={{ marginTop: 'var(--emma-gap-block)' }}>
+            <EmmaBrandStrip brandKit={props.brandKit} audience={audience} />
+          </div>
 
-      {/* ── Greeting block ─────────────────────────────────── */}
-      <div className="emma-greeting" style={{ marginTop: 'var(--emma-gap-block)' }}>
-        {greetingBody}
-      </div>
+          {/* ── Greeting block ─────────────────────────────────── */}
+          <div className="emma-greeting" style={{ marginTop: 'var(--emma-gap-block)' }}>
+            {greetingBody}
+          </div>
+        </>
+      )}
 
       {/* ── Body: empty state OR message list ─────────────── */}
       <div style={{ marginTop: 'var(--emma-gap-block)' }}>

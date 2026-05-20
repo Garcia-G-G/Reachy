@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { VISUAL_STYLE_KEYS } from '@/lib/visual-styles-meta';
 import { resolveVisualStyle } from '@/server/ai/visualStyles';
 import { TOOL_DESCRIPTIONS } from '@/server/config/chatToolDescriptions';
-import type { EmmaToolContext } from '../context';
+import type { EmmaToolContext } from '../../context';
 
 /**
  * listVisualStyles — return all visual style keys with their labels +

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, Suspense } from 'react';
+import { EmmaWidget } from '@/components/app/emma-widget';
 import { SidebarHeaders } from '@/components/app/sidebar-headers';
 import { SignOutButton } from '@/components/app/sign-out-button';
 import { MonoEyebrow } from '@/components/editorial';
@@ -68,6 +69,12 @@ function AppShell({
       </aside>
 
       <main className="px-6 py-12 md:px-12 md:py-16">{children}</main>
+
+      {/* Phase 07h — global floating concierge. Mounted at the
+          authenticated layout so it follows Garcia through every
+          /app/* route. Hidden on /login + public via its own
+          isEmmaExcludedRoute check. */}
+      <EmmaWidget />
     </div>
   );
 }

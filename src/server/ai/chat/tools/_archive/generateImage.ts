@@ -10,7 +10,7 @@ import { db } from '@/server/db/client';
 import { asset } from '@/server/db/schema/assets';
 import { generation } from '@/server/db/schema/generations';
 import { getImageQueue } from '@/server/jobs/queue';
-import type { EmmaToolContext } from '../context';
+import type { EmmaToolContext } from '../../context';
 
 /**
  * generateImage — Emma enqueues an image-gen job on the existing

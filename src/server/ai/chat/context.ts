@@ -21,8 +21,12 @@ export interface EmmaToolContext {
   project: Project;
   brandKit: BrandKit;
   productBrief: ProductBrief | null;
-  /** Language for assets Emma generates this turn. Default comes from
-   *  the brand kit's languages[0]; the handler can override (e.g. when
-   *  the user explicitly switched). */
+  /** Language for the conversation. Comes from the app locale; the
+   *  brand kit language is a fallback. */
   language: 'en' | 'es';
+  /** Phase 07h — the user's current route + any focused asset.
+   *  The chat client embeds this in every POST so concierge tools
+   *  can return it without needing to round-trip to the DB. */
+  currentRoute?: string;
+  focusedGenerationId?: string;
 }
