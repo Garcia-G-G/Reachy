@@ -10,6 +10,7 @@ import {
   CHAT_RECENT_ASSETS_IN_CONTEXT,
 } from '@/server/config/chatLimits';
 import { buildEmmaSystemPrompt } from '@/server/config/chatSystemPrompts';
+import { buildStreamErrorSurface, extractOpenAIRequestId } from '@/server/config/emmaErrors';
 import {
   EMMA_MAX_OUTPUT_TOKENS,
   EMMA_MODEL,
@@ -193,9 +194,7 @@ function persistedToModelMessages(rows: ChatMessage[]): ModelMessage[] {
     if (r.role === 'tool') continue; // orphaned by the tool-call filter
     if (r.role !== 'user' && r.role !== 'assistant') continue; // 'system' rebuilt fresh
     const rawParts = Array.isArray(r.content) ? r.content : [];
-    const cleaned = rawParts
-      .map(sanitizeHistoryPart)
-      .filter((p): p is object => p !== null);
+    const cleaned = rawParts.map(sanitizeHistoryPart).filter((p): p is object => p !== null);
     if (cleaned.length === 0) continue;
     out.push({ role: r.role, content: cleaned as never });
   }
@@ -363,6 +362,14 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     { role: 'user', content: userContent },
   ];
 
+  // Phase 07i — log dispatched turn shape so we can spot the
+  // "history grew past the context window" failure mode the moment
+  // it happens, rather than chasing it through a stream error.
+  const approxChars = JSON.stringify({ systemPrompt, modelMessages }).length;
+  console.log(
+    `[reachy:emma] dispatching turn: ${modelMessages.length} messages, ~${approxChars} chars, ~${Math.round(approxChars / 4)} tokens`,
+  );
+
   // Heavy-request detection — bump reasoning to 'high' when the
   // user's text contains orchestration cues (campaign, audit, all
   // my channels…). Sourced from EMMA_HEAVY_KEYWORDS so the catalog
@@ -429,4 +436,45 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
   });
 
   return result;
+}
+
+/**
+ * persistEmmaErrorSurface — Phase 07i.
+ *
+ * Insert a synthesized assistant row carrying the friendly
+ * error-surface payload + the OpenAI request_id we extracted from
+ * the raw stream error. Called from the stream route's onError so
+ * the user sees a real card (with [reintentar] / [copy detail]
+ * chips) instead of Emma ghosting.
+ *
+ * Fire-and-forget from the route — failures here MUST NOT block
+ * the response (the friendly fallback string is the user-visible
+ * thing; this row only matters on reload).
+ */
+export async function persistEmmaErrorSurface(args: {
+  threadId: string;
+  locale: 'en' | 'es';
+  rawError: string;
+}): Promise<void> {
+  try {
+    const requestId = extractOpenAIRequestId(args.rawError);
+    const surface = buildStreamErrorSurface(args.locale, requestId);
+    await db.insert(chatMessage).values({
+      threadId: args.threadId,
+      role: 'assistant',
+      content: [{ type: 'text', text: surface.bodyText }],
+      attachments: [],
+      costCents: 0,
+      model: EMMA_MODEL,
+      isErrorSurface: true,
+      openaiRequestId: requestId,
+    });
+    await db
+      .update(chatThread)
+      .set({ lastMessageAt: new Date() })
+      .where(eq(chatThread.id, args.threadId));
+  } catch (persistErr) {
+    const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+    console.error(`[reachy:emma] failed to persist error surface: ${msg}`);
+  }
 }

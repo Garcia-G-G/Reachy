@@ -1219,3 +1219,129 @@
     box-shadow: 0 0 0 8px rgba(212, 160, 75, 0);
   }
 }
+
+/* ── Phase 07i — error card + brief card ──────────────────
+   ChatErrorCard renders a persisted error_surface row as a
+   compact, retry-able card so a transient OpenAI failure no
+   longer ghosts the chat. ChatBriefCard renders Emma's
+   composeBrief tool output as a copy-paste-ready block. Both
+   use the existing palette (warm cream paper, navy ink, amber
+   accent) so they read as part of the chat. */
+.emma-error-card {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 12px 14px;
+  margin: 8px 0;
+  border: 1px solid var(--emma-amber);
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: rgba(212, 160, 75, 0.06);
+  font-family: var(--emma-font-body);
+  font-size: var(--emma-body-size);
+  color: var(--emma-ink);
+}
+.emma-error-card-icon {
+  font-size: 16px;
+  line-height: 1.2;
+  color: var(--emma-amber);
+  text-align: center;
+}
+.emma-error-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.emma-error-card-title {
+  font-weight: 500;
+  line-height: 1.4;
+}
+.emma-error-card-subtitle {
+  font-family: var(--emma-font-mono);
+  font-size: 11px;
+  color: var(--emma-ink-65);
+  letter-spacing: 0.02em;
+}
+.emma-error-card-chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.emma-error-card-chips button {
+  appearance: none;
+  border: 1px solid var(--emma-ink-25);
+  background: transparent;
+  color: var(--emma-ink);
+  font-family: var(--emma-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: border-color var(--motion-duration-quick) var(--motion-easing-out);
+}
+.emma-error-card-chips button:hover {
+  border-color: var(--emma-amber);
+}
+
+.emma-brief-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  margin: 8px 0;
+  border: 1px solid var(--emma-ink-25);
+  border-left: 3px solid var(--emma-ink);
+  border-radius: 4px;
+  background: var(--emma-paper-2);
+  font-family: var(--emma-font-body);
+  font-size: var(--emma-body-size);
+  color: var(--emma-ink);
+}
+.emma-brief-card-eyebrow {
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--emma-ink);
+}
+.emma-brief-card-hint {
+  font-size: 12px;
+  color: var(--emma-ink-65);
+}
+.emma-brief-card-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 4px 0;
+  padding: 10px 12px;
+  border-radius: 3px;
+  background: rgba(30, 42, 58, 0.04);
+  font-family: var(--emma-font-body);
+  font-size: var(--emma-body-size);
+  line-height: 1.55;
+  color: var(--emma-ink);
+}
+.emma-brief-card-chips {
+  display: flex;
+  gap: 8px;
+}
+.emma-brief-card-chips button {
+  appearance: none;
+  border: 1px solid var(--emma-ink-25);
+  background: transparent;
+  color: var(--emma-ink);
+  font-family: var(--emma-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration-quick) var(--motion-easing-out),
+    background var(--motion-duration-quick) var(--motion-easing-out);
+}
+.emma-brief-card-chips button:hover {
+  border-color: var(--emma-ink);
+  background: rgba(30, 42, 58, 0.04);
+}

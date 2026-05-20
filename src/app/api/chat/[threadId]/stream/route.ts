@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 import { getLocale } from 'next-intl/server';
 import { z } from 'zod';
-import { runEmmaTurn } from '@/server/ai/chat/handler';
+import { persistEmmaErrorSurface, runEmmaTurn } from '@/server/ai/chat/handler';
 import { db } from '@/server/db/client';
 import { chatThread } from '@/server/db/schema/chatThreads';
 import { project } from '@/server/db/schema/projects';
@@ -127,8 +127,34 @@ export async function POST(
     // dev terminal still has the request-id for debugging.
     return result.toUIMessageStreamResponse({
       onError: (err) => {
-        const detail = err instanceof Error ? err.message : String(err);
-        console.error(`[reachy:emma] stream error: ${detail}`);
+        // Phase 07i — the prior version logged err.toString() which
+        // came out as "[object Object]" for non-Error throws (the AI
+        // SDK wraps OpenAI's stream error events in plain objects).
+        // Structured logging surfaces the message + cause + a JSON
+        // preview so the dev terminal shows the OpenAI request_id
+        // without grepping.
+        const message = err instanceof Error ? err.message : String(err);
+        const cause = err instanceof Error ? err.cause : undefined;
+        let raw: string;
+        try {
+          raw =
+            typeof err === 'object' && err !== null
+              ? JSON.stringify(err, null, 2).slice(0, 800)
+              : String(err);
+        } catch {
+          raw = String(err);
+        }
+        console.error('[reachy:emma] stream error:', { message, cause, raw });
+
+        // Persist an error-surface row so the chat shows a retry-able
+        // card on reload — no more silent ghosting. Fire-and-forget;
+        // must not block the response.
+        void persistEmmaErrorSurface({
+          threadId,
+          locale: appLocale,
+          rawError: `${message}\n${raw}`,
+        });
+
         return appLocale === 'es'
           ? 'Algo falló por el lado del modelo. Intenta de nuevo — si sigue fallando, dime y lo revisamos.'
           : 'Something failed on the model side. Try again — flag me if it keeps failing.';

@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { chatThread } from './chatThreads';
 
 /**
@@ -47,6 +47,15 @@ export const chatMessage = pgTable(
     /** Which model produced this turn — useful for cost auditing and
      *  for "this message came from claude-sonnet-4-6" provenance. */
     model: text('model'),
+    /** Phase 07i — true when this row is a synthesized error-surface
+     *  notice (server stream errored, we persist a card the user can
+     *  retry from). The renderer branches on this flag instead of
+     *  showing the row as a normal Emma message. */
+    isErrorSurface: boolean('is_error_surface').default(false).notNull(),
+    /** Phase 07i — OpenAI request_id captured from the upstream
+     *  error payload. Null for non-error rows. Shown in the error
+     *  card so the user can quote it back when reporting. */
+    openaiRequestId: text('openai_request_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({

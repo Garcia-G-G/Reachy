@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { Children, isValidElement } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ChatBriefCard } from './chat-brief-card';
+import { ChatErrorCard } from './chat-error-card';
 import { ChatToolCard } from './chat-tool-card';
 import { ChatToolCardGroup } from './chat-tool-card-group';
 import { InlineAssetPreview } from './inline-asset-preview';
@@ -32,6 +34,64 @@ interface ChatMessageProps {
   isStreaming?: boolean;
   /** User role label. */
   userRoleLabel?: string;
+  /** Phase 07i — locale for the brief / error card chips. */
+  language?: 'en' | 'es';
+  /** Phase 07i — retry callback fired by ChatErrorCard's reintentar
+   *  chip. Re-sends the last user message. */
+  onRetry?: () => void;
+  /** Phase 07i — navigation callback for ChatBriefCard's "ir a
+   *  Generate" chip. */
+  onNavigate?: (path: string) => void;
+}
+
+/** Phase 07i — friendly error-surface fallback strings that we
+ *  persist when the model stream errors. The client detects these
+ *  even when message.metadata is absent (e.g. live stream injected
+ *  by the SDK's onError handler) so the card renders consistently. */
+const ERROR_FALLBACK_PREFIXES = [
+  'Algo falló por el lado del modelo',
+  'Something failed on the model side',
+  'Emma se trabó por un error transitorio',
+  'Emma hit a transient stream error',
+];
+
+function isErrorFallbackText(text: string): boolean {
+  const t = text.trimStart();
+  return ERROR_FALLBACK_PREFIXES.some((prefix) => t.startsWith(prefix));
+}
+
+function extractErrorMeta(message: UIMessage): {
+  isError: boolean;
+  title: string | null;
+  subtitle: string | null;
+} {
+  // 1) Metadata flag from persisted row (preferred).
+  const meta = (message.metadata ?? null) as {
+    isErrorSurface?: boolean;
+    openaiRequestId?: string | null;
+    title?: string;
+  } | null;
+  if (meta?.isErrorSurface) {
+    return {
+      isError: true,
+      title: meta.title ?? null,
+      subtitle: meta.openaiRequestId ? `OpenAI request_id: ${meta.openaiRequestId}` : null,
+    };
+  }
+  // 2) Text-content detection — covers live errors before the
+  //    persisted row carries the flag.
+  const firstText = message.parts.find((p) => p.type === 'text') as
+    | { type: 'text'; text: string }
+    | undefined;
+  if (firstText && isErrorFallbackText(firstText.text)) {
+    // Split on the first newline so the request_id line (if any)
+    // lands as the subtitle.
+    const lines = firstText.text.split('\n');
+    const title = lines[0]?.trim() ?? null;
+    const subtitle = lines.slice(1).join(' ').trim() || null;
+    return { isError: true, title, subtitle };
+  }
+  return { isError: false, title: null, subtitle: null };
 }
 
 /** Image-URL detectors for inline preview promotion. */
@@ -157,7 +217,14 @@ function buildRenderables(parts: readonly AnyMessagePart[]): Renderable[] {
   return out;
 }
 
-export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMessageProps) {
+export function ChatMessageView({
+  message,
+  isStreaming,
+  userRoleLabel,
+  language = 'es',
+  onRetry,
+  onNavigate,
+}: ChatMessageProps) {
   const t = useTranslations('Emma');
   const isUser = message.role === 'user';
   const roleClass = isUser ? 'emma-msg-user' : 'emma-msg-assistant';
@@ -168,6 +235,26 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
 
   const parts = (message.parts ?? []) as readonly AnyMessagePart[];
   const renderables = buildRenderables(parts);
+
+  // Phase 07i — when the message is a persisted error surface (or
+  // contains a recognized friendly fallback as live mid-stream),
+  // short-circuit the normal render path and show ChatErrorCard.
+  const errorMeta = extractErrorMeta(message);
+  if (errorMeta.isError) {
+    return (
+      <article className={`emma-msg ${roleClass}`}>
+        <header className="emma-msg-role">{roleLabel}</header>
+        <div className="emma-msg-body">
+          <ChatErrorCard
+            title={errorMeta.title ?? t('modelErrorFallback')}
+            subtitle={errorMeta.subtitle}
+            onRetry={onRetry}
+            language={language}
+          />
+        </div>
+      </article>
+    );
+  }
 
   // Locate the last text part for the streaming cursor. We compute
   // this from the ORIGINAL parts (not renderables) so the cursor
@@ -209,11 +296,7 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
               trimmed.startsWith('{"type":"error"') || trimmed.startsWith('{"error":');
             if (isLeakedErrorJson) {
               return (
-                <div
-                  key={key}
-                  className="emma-msg-text emma-msg-error-fallback"
-                  role="alert"
-                >
+                <div key={key} className="emma-msg-text emma-msg-error-fallback" role="alert">
                   {t('modelErrorFallback')}
                 </div>
               );
@@ -242,6 +325,44 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
                 <div className="emma-reasoning-body">{reasoningText}</div>
               </details>
             );
+          }
+          if (part.type === 'tool-composeBrief') {
+            // Phase 07i — render composeBrief tool output as a
+            // dedicated card with copy + navigate chips. Falls
+            // back to the generic tool card on pre-output states.
+            const p = part as {
+              type: string;
+              toolCallId: string;
+              state: string;
+              output?: {
+                brief?: string;
+                channel?: string;
+                path?: string;
+                field?: string;
+                pageLabel?: string;
+                error?: string;
+              };
+            };
+            if (
+              p.state === 'output-available' &&
+              p.output &&
+              typeof p.output.brief === 'string' &&
+              typeof p.output.path === 'string'
+            ) {
+              return (
+                <ChatBriefCard
+                  key={key}
+                  brief={p.output.brief}
+                  channel={p.output.channel ?? ''}
+                  path={p.output.path}
+                  field={p.output.field ?? 'Idea'}
+                  pageLabel={p.output.pageLabel ?? p.output.path}
+                  language={language}
+                  onNavigate={onNavigate}
+                />
+              );
+            }
+            return <ChatToolCard key={key} part={part as never} />;
           }
           if (part.type.startsWith('tool-')) {
             return <ChatToolCard key={key} part={part as never} />;

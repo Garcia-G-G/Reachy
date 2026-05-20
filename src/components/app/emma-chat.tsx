@@ -5,8 +5,10 @@ import { DefaultChatTransport } from 'ai';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import type { BrandKit } from '@/server/actions/brandKits';
 import { deleteThreadHistory } from '@/server/actions/chat';
+import { toastRetry } from '@/server/config/emmaErrors';
 import type { ChatAttachment, ChatMessage } from '@/server/db/schema/chatMessages';
 import { ChatMessageView, PreFirstTokenShimmer } from './chat-message';
 import { EmmaBrandStrip } from './emma-brand-strip';
@@ -65,10 +67,20 @@ function persistedToUIMessage(row: ChatMessage) {
   const parts = Array.isArray(row.content)
     ? (row.content as Array<{ type: string; [k: string]: unknown }>)
     : [];
+  // Phase 07i — surface the error-card metadata so ChatMessageView
+  // can branch to ChatErrorCard on reload. The `metadata` field is
+  // SDK-native on UIMessage; we attach it alongside parts.
+  const metadata = row.isErrorSurface
+    ? {
+        isErrorSurface: true as const,
+        openaiRequestId: row.openaiRequestId,
+      }
+    : undefined;
   return {
     id: row.id,
     role: row.role as 'user' | 'assistant' | 'system',
     parts: parts as never,
+    ...(metadata ? { metadata } : {}),
   };
 }
 
@@ -154,6 +166,63 @@ export function EmmaChat(props: EmmaChatProps) {
 
   const isStreaming = status === 'streaming';
   const isSubmitted = status === 'submitted';
+
+  // Phase 07i — track the most recent user message text so the
+  // ChatErrorCard's [reintentar] chip can re-send it without forcing
+  // the user to retype.
+  const lastUserTextRef = useRef<string>('');
+  useEffect(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m && m.role === 'user') {
+        const text =
+          (m.parts as Array<{ type: string; text?: string }>).find((p) => p.type === 'text')
+            ?.text ?? '';
+        if (text.trim().length > 0) {
+          lastUserTextRef.current = text;
+        }
+        return;
+      }
+    }
+  }, [messages]);
+
+  // Phase 07i — when an error-surface lands at the tail of the
+  // conversation (either as live fallback text mid-stream or as a
+  // persisted row after reload), pop a Sonner toast so Garcia
+  // notices even if the chat is scrolled. We only toast each row
+  // once via the seen-id ref to avoid re-firing on every re-render.
+  const toastedErrorIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    const meta = (last as { metadata?: { isErrorSurface?: boolean } }).metadata;
+    const firstText = (last.parts as Array<{ type: string; text?: string }>).find(
+      (p) => p.type === 'text',
+    )?.text;
+    const isError =
+      meta?.isErrorSurface === true ||
+      (typeof firstText === 'string' &&
+        (firstText.startsWith('Algo falló por el lado del modelo') ||
+          firstText.startsWith('Something failed on the model side')));
+    if (!isError) return;
+    if (toastedErrorIdsRef.current.has(last.id)) return;
+    toastedErrorIdsRef.current.add(last.id);
+    toast.error(toastRetry(props.language));
+  }, [messages, props.language]);
+
+  const handleRetry = useCallback(() => {
+    const text = lastUserTextRef.current.trim();
+    if (!text) return;
+    if (isStreaming || isSubmitted) return;
+    void sendMessage({ text }, { body: { text, attachments: [] } });
+  }, [isStreaming, isSubmitted, sendMessage]);
+
+  const handleNavigate = useCallback(
+    (path: string) => {
+      router.push(path);
+    },
+    [router],
+  );
 
   // Phase 07h — concierge tool actions. When Emma calls
   // navigateTo / highlightElement, the server-side tool returns the
@@ -419,6 +488,9 @@ export function EmmaChat(props: EmmaChatProps) {
                 message={m as never}
                 isStreaming={isStreaming && i === messages.length - 1}
                 userRoleLabel={userRoleLabel}
+                language={props.language}
+                onRetry={handleRetry}
+                onNavigate={handleNavigate}
               />
             ))}
             {showPreFirstToken ? <PreFirstTokenShimmer /> : null}

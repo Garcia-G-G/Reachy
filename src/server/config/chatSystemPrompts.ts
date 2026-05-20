@@ -202,6 +202,16 @@ export function buildEmmaSystemPrompt(input: BuildEmmaSystemPromptInput): string
   const sections: string[] = [
     EMMA_CONCIERGE_SECTIONS.ROLE,
     '',
+    // Phase 07i — hard prohibitions come second after ROLE so the
+    // model reads them before any "you can do anything" instincts
+    // fire. The CRITICAL_RESPONSE_PATTERN_CREATE script is the
+    // antidote to "creame una imagen" → ghosting after 500.
+    EMMA_CONCIERGE_SECTIONS.HARD_RULES,
+    '',
+    EMMA_CONCIERGE_SECTIONS.CRITICAL_RESPONSE_PATTERN_CREATE,
+    '',
+    EMMA_CONCIERGE_SECTIONS.WHEN_SHE_LEAKS,
+    '',
     EMMA_CONCIERGE_SECTIONS.PERSONA,
     '',
     EMMA_CONCIERGE_SECTIONS.TOOL_USE_BIAS,
