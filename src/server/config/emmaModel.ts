@@ -20,45 +20,30 @@ export type EmmaReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh
 
 export const EMMA_MODEL = 'gpt-5.5' as const;
 
-/** Default reasoning effort for an Emma turn. "Medium" buys
- *  thoughtful but not deliberative — the right register for
- *  conversational back-and-forth with occasional tool calls. */
-export const EMMA_REASONING_DEFAULT: EmmaReasoningEffort = 'medium';
+/** Default reasoning effort for an Emma turn. Phase 07h pivoted
+ *  her to a concierge — replies are 1-3 short paragraphs, no
+ *  multi-step asset generation, no chain-of-thought analysis. 'low'
+ *  delivers a tight reply quickly and dramatically reduces the
+ *  chance of upstream timeouts / server_error on gpt-5.5. The
+ *  worker era used 'medium' (with 'high' bumps); concierge era
+ *  doesn't need either. */
+export const EMMA_REASONING_DEFAULT: EmmaReasoningEffort = 'low';
 
-/** Bump to "high" when the model needs deep planning before a
- *  tool call — multi-asset orchestration, "build me a campaign",
- *  "audit my brand". Detected via heuristic keyword match on the
- *  latest user message. Cost ~3× higher per turn; worth it for the
- *  reasoning. */
-export const EMMA_REASONING_HEAVY: EmmaReasoningEffort = 'high';
+/** Reserved for future heavy concierge turns (multi-tool
+ *  orchestration like "audit my brand kit + show me where the gaps
+ *  are"). Currently unused — EMMA_HEAVY_KEYWORDS is empty so
+ *  isHeavyRequest never returns true. Bump back via the catalog
+ *  below if a real heavy-concierge use-case lands. */
+export const EMMA_REASONING_HEAVY: EmmaReasoningEffort = 'medium';
 
-/** Keywords that bump reasoning_effort to HEAVY when present in
- *  the latest user message. Case-insensitive substring match. The
- *  list is BILINGUAL ES/EN so Garcia's projects work in both
- *  languages without code changes. */
-export const EMMA_HEAVY_KEYWORDS: readonly string[] = [
-  // EN — orchestration cues
-  'campaign',
-  'audit',
-  'rebrand',
-  'plan everything',
-  'all my',
-  'all the',
-  'every channel',
-  'create me a campaign',
-  // ES — orchestration cues
-  'campaña',
-  'auditoría',
-  'auditoria',
-  'redo de marca',
-  'todos los canales',
-  'todos los',
-  'todas las',
-  'hazme una campaña',
-  'arma una campaña',
-];
+/** Heavy-request catalog — empty in the concierge era. Worker-era
+ *  keywords (campaign, audit, etc.) are obsolete because the worker
+ *  tools are archived. Leaving the constant + helper in place so
+ *  future revivals are a single-file edit. */
+export const EMMA_HEAVY_KEYWORDS: readonly string[] = [];
 
 export function isHeavyRequest(userMessageText: string): boolean {
+  if (EMMA_HEAVY_KEYWORDS.length === 0) return false;
   const lower = userMessageText.toLowerCase();
   return EMMA_HEAVY_KEYWORDS.some((k) => lower.includes(k.toLowerCase()));
 }

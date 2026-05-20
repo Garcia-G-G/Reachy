@@ -124,27 +124,80 @@ function estimateCostCents(usage: {
   return Math.max(1, Math.round(usd * 100));
 }
 
+/** Sanitize a single content part before it goes back to the model
+ *  as history. Phase 07h hotfix — accumulated thread data carried
+ *  three classes of garbage that were causing OpenAI server_error:
+ *
+ *    1. EMPTY reasoning parts. The SDK already warns
+ *       "Non-OpenAI reasoning parts are not supported. Skipping…"
+ *       on every turn. Drop them at source instead of letting the
+ *       SDK skip + warn.
+ *    2. Tool-call / tool-result parts referencing tools that were
+ *       archived in the 07h concierge pivot (generateImage,
+ *       writeCopy, etc.). Sending those back to the model with no
+ *       matching definition in the current registry confuses gpt-5.5
+ *       and can fail validation. We drop ALL tool-* parts from
+ *       history — the concierge tools are stateless reads and Emma
+ *       re-calls them fresh each turn, no benefit to keeping them.
+ *    3. Our own friendly error-fallback text ("Algo falló…" /
+ *       "Something failed…"). If we let it back in as a previous
+ *       assistant message, the model treats it as Emma's voice and
+ *       the next reply mirrors that tone.
+ */
+function sanitizeHistoryPart(p: unknown): unknown | null {
+  if (!p || typeof p !== 'object') return null;
+  const part = p as { type?: string; text?: string };
+  if (!part.type) return null;
+
+  if (part.type === 'reasoning') {
+    const r = (part.text ?? '').trim();
+    if (r.length === 0) return null;
+    return part; // non-empty reasoning we keep as-is
+  }
+
+  // Drop every tool-* part. Tools are stateless reads in concierge
+  // mode; re-calling per turn is cheap and avoids orphan/legacy issues.
+  if (part.type.startsWith('tool-')) return null;
+
+  if (part.type === 'text' && typeof part.text === 'string') {
+    const t = part.text.trim();
+    if (t.length === 0) return null;
+    if (
+      t.startsWith('Algo falló por el lado del modelo') ||
+      t.startsWith('Something failed on the model side') ||
+      t.startsWith('{"type":"error"') ||
+      t.startsWith('{"error":')
+    ) {
+      return null;
+    }
+    return part;
+  }
+
+  return part;
+}
+
 /** Convert persisted ChatMessage rows back to AI-SDK ModelMessage[]
- *  for inclusion in the next prompt. Content is already in Anthropic
- *  Messages content-block format (text / tool_use / tool_result /
- *  image), which is what ModelMessage accepts.
+ *  for inclusion in the next prompt. Filters each row's content via
+ *  sanitizeHistoryPart; rows that have zero useful parts after the
+ *  filter are dropped entirely. We also drop role='tool' rows since
+ *  the corresponding tool-call entries on the assistant side are
+ *  filtered out — orphan tool-results would otherwise fail
+ *  validation.
  *
  *  We cast via `as never` because the runtime shape is correct (we
  *  store back what the SDK produced) but TypeScript can't see that
- *  through the jsonb round-trip. The SDK's `validateUIMessages`
- *  helper would be too heavy for hot-path turns. */
+ *  through the jsonb round-trip. */
 function persistedToModelMessages(rows: ChatMessage[]): ModelMessage[] {
   const out: ModelMessage[] = [];
   for (const r of rows) {
-    if (r.role === 'user') {
-      out.push({ role: 'user', content: r.content as never });
-    } else if (r.role === 'assistant') {
-      out.push({ role: 'assistant', content: r.content as never });
-    } else if (r.role === 'tool') {
-      out.push({ role: 'tool', content: r.content as never });
-    }
-    // 'system' rows skipped — the system prompt is rebuilt fresh
-    // every turn from chatSystemPrompts.
+    if (r.role === 'tool') continue; // orphaned by the tool-call filter
+    if (r.role !== 'user' && r.role !== 'assistant') continue; // 'system' rebuilt fresh
+    const rawParts = Array.isArray(r.content) ? r.content : [];
+    const cleaned = rawParts
+      .map(sanitizeHistoryPart)
+      .filter((p): p is object => p !== null);
+    if (cleaned.length === 0) continue;
+    out.push({ role: r.role, content: cleaned as never });
   }
   return out;
 }
