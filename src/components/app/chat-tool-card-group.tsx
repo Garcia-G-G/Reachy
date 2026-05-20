@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { ChatImageGrid, type ChatImageGridItem } from './chat-image-grid';
 
 /**
@@ -46,13 +47,18 @@ function statusForPart(p: ToolPart): 'pending' | 'done' | 'error' {
   return 'pending';
 }
 
-function groupHeaderText(toolName: string, total: number, doneCount: number): string {
-  const labelEs = isImageTool(toolName) ? 'imágenes' : toolName;
-  if (doneCount === total) return `${total} ${labelEs} listas`;
-  return `Generando ${total} ${labelEs}`;
+function useGroupHeaderText() {
+  const t = useTranslations('Emma');
+  return (toolName: string, total: number, doneCount: number): string => {
+    const label = isImageTool(toolName) ? t('groupLabelImages') : toolName;
+    if (doneCount === total) return t('groupReady', { total, label });
+    return t('groupGenerating', { total, label });
+  };
 }
 
 export function ChatToolCardGroup({ parts, toolName }: ChatToolCardGroupProps) {
+  const t = useTranslations('Emma');
+  const groupHeaderText = useGroupHeaderText();
   const total = parts.length;
   const doneCount = parts.filter((p) => statusForPart(p) === 'done').length;
   const allDone = doneCount === total;
@@ -121,7 +127,7 @@ export function ChatToolCardGroup({ parts, toolName }: ChatToolCardGroupProps) {
         // Non-image tools that all completed — render a simple done
         // indicator. Per-tool result rendering can be added later if
         // multi-call non-image tools become common.
-        <div className="emma-tool-card-group-done-misc">{total} llamadas completadas</div>
+        <div className="emma-tool-card-group-done-misc">{t('groupDoneMisc', { total })}</div>
       )}
     </div>
   );

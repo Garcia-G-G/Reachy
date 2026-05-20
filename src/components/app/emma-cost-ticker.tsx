@@ -1,21 +1,20 @@
 'use client';
 
+import { useLocale } from 'next-intl';
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Emma cost ticker — Phase 07b.
+ * Emma cost ticker — Phase 07b, 07h locale alignment.
  *
- * Animates the running cost via requestAnimationFrame: old → new
- * value over the cost-count duration (see motion.css). Amber dot
- * pulses on every update via a CSS class toggle.
- *
- * Locale: ES uses comma as the decimal separator. Detected from the
- * `language` prop, not from navigator (so SSR matches CSR).
+ * Animates the running cost via requestAnimationFrame and pulses
+ * the amber dot on every update. Locale comes from next-intl's
+ * useLocale() — same source as the rest of the UI chrome, so the
+ * comma-vs-period decimal separator follows whatever the app is
+ * rendering everywhere else.
  */
 
 interface EmmaCostTickerProps {
   cents: number;
-  language: 'en' | 'es';
 }
 
 /** Pull the cost-count duration from the CSS custom property so the
@@ -29,16 +28,18 @@ function readMotionDurationMs(varName: string, fallback: number): number {
   return fallback;
 }
 
-function formatCents(cents: number, language: 'en' | 'es'): string {
+function formatCents(cents: number, locale: string): string {
   const usd = cents / 100;
-  return new Intl.NumberFormat(language === 'es' ? 'es-MX' : 'en-US', {
+  const tag = locale === 'es' ? 'es-MX' : 'en-US';
+  return new Intl.NumberFormat(tag, {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
   }).format(usd);
 }
 
-export function EmmaCostTicker({ cents, language }: EmmaCostTickerProps) {
+export function EmmaCostTicker({ cents }: EmmaCostTickerProps) {
+  const locale = useLocale();
   const [displayedCents, setDisplayedCents] = useState(cents);
   const [isPulsing, setIsPulsing] = useState(false);
   const prevCentsRef = useRef(cents);
@@ -88,7 +89,7 @@ export function EmmaCostTicker({ cents, language }: EmmaCostTickerProps) {
   return (
     <span className="emma-cost" aria-live="polite">
       <span className={`emma-cost-dot ${isPulsing ? 'is-pulsing' : ''}`} aria-hidden="true" />
-      {formatCents(displayedCents, language)}
+      {formatCents(displayedCents, locale)}
     </span>
   );
 }

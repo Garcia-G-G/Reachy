@@ -68,6 +68,11 @@ export interface RunEmmaTurnInput {
    *  → email-prefix → fallback. Empty strings get caught downstream
    *  in chatSystemPrompts (EMMA_FALLBACK_GREETING_NAME). */
   userDisplayName: string;
+  /** The app locale (URL / NEXT_LOCALE cookie). Drives Emma's
+   *  response language so the chat speaks the same language as the
+   *  rest of the website. Defaults to the brand kit's first
+   *  language when not provided. */
+  uiLocale?: 'en' | 'es';
 }
 
 function estimateCostCents(usage: {
@@ -166,7 +171,11 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
 
   const project_: Project = projRow as Project;
   const brandKit_: BrandKit = kitRow as unknown as BrandKit;
-  const language = (brandKit_.languages?.[0] ?? 'en') as 'en' | 'es';
+  // Prefer the explicit UI locale from the API route. Brand kit
+  // language is the fallback for callers that don't thread the
+  // locale (e.g. older scripts / tests).
+  const language: 'en' | 'es' =
+    input.uiLocale ?? ((brandKit_.languages?.[0] ?? 'en') as 'en' | 'es');
 
   // ── 2. Build the system prompt ──
   const systemPrompt = buildEmmaSystemPrompt({

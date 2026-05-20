@@ -1,22 +1,17 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { InlineAssetPreview } from './inline-asset-preview';
 
 /**
- * PendingVariant — Phase 07f.
+ * PendingVariant — Phase 07f, i18n in 07h.
  *
- * Renders a placeholder card for a generation that's in flight
- * (image worker spinning, asset not yet stored in R2). Polls the
- * existing /api/generations/[id]/status endpoint every 2.5s until
- * the generation completes or 5 minutes elapse.
- *
- * When the asset lands → swaps itself for a real InlineAssetPreview
- * (so the chips on the new asset work just like the original).
- * On failure → shows a minimal error marker; on timeout → idem.
- *
- * Used by InlineAssetPreview and ChatToolCard via the pendingIds
- * array returned from useChatAssetActions.
+ * Renders a placeholder card for a generation that's in flight.
+ * Polls /api/generations/[id]/status every 2.5s up to 5 minutes,
+ * then swaps itself for a real InlineAssetPreview when the asset
+ * lands. Labels flow through next-intl so the placeholder reads in
+ * the active app locale.
  */
 
 interface PendingVariantProps {
@@ -34,13 +29,8 @@ interface StatusResponse {
 const POLL_INTERVAL_MS = 2500;
 const POLL_DEADLINE_MS = 5 * 60 * 1000;
 
-function kindLabel(kind: 'mejorar' | 'variante', state: 'pending' | 'failed' | 'timeout'): string {
-  if (state === 'failed') return `${kind} · fallo`;
-  if (state === 'timeout') return `${kind} · tardó demasiado`;
-  return kind === 'mejorar' ? 'mejorando…' : 'generando…';
-}
-
 export function PendingVariant({ generationId, kind }: PendingVariantProps) {
+  const t = useTranslations('Emma');
   const [state, setState] = useState<'pending' | 'failed' | 'timeout'>('pending');
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
 
@@ -50,9 +40,7 @@ export function PendingVariant({ generationId, kind }: PendingVariantProps) {
 
     async function pollOnce(): Promise<'continue' | 'stop'> {
       try {
-        const res = await fetch(`/api/generations/${generationId}/status`, {
-          cache: 'no-store',
-        });
+        const res = await fetch(`/api/generations/${generationId}/status`, { cache: 'no-store' });
         if (!res.ok) return 'continue';
         const data = (await res.json()) as StatusResponse;
         if (data.status === 'done') {
@@ -68,14 +56,12 @@ export function PendingVariant({ generationId, kind }: PendingVariantProps) {
           return 'stop';
         }
       } catch {
-        // Network blips — keep polling until the deadline.
+        // Network blip — keep polling.
       }
       return 'continue';
     }
 
     async function loop() {
-      // First poll immediately so a fast-completing job doesn't wait
-      // for the initial interval.
       const first = await pollOnce();
       if (cancelled || first === 'stop') return;
       while (!cancelled && Date.now() < deadline) {
@@ -95,13 +81,29 @@ export function PendingVariant({ generationId, kind }: PendingVariantProps) {
 
   if (resolvedUrl) {
     return (
-      <InlineAssetPreview url={resolvedUrl} caption={kind === 'mejorar' ? 'mejora' : 'variante'} />
+      <InlineAssetPreview
+        url={resolvedUrl}
+        caption={kind === 'mejorar' ? t('pendingCaptionImprove') : t('pendingCaptionVariant')}
+      />
     );
   }
 
+  const label =
+    state === 'failed'
+      ? kind === 'mejorar'
+        ? t('pendingFailedImprove')
+        : t('pendingFailedVariant')
+      : state === 'timeout'
+        ? kind === 'mejorar'
+          ? t('pendingTimedOutImprove')
+          : t('pendingTimedOutVariant')
+        : kind === 'mejorar'
+          ? t('pendingImproving')
+          : t('pendingGenerating');
+
   return (
-    <span className="emma-inline-asset" role="status" aria-label={kindLabel(kind, state)}>
-      <span className="emma-inline-asset-caption">{kindLabel(kind, state)}</span>
+    <span className="emma-inline-asset" role="status" aria-label={label}>
+      <span className="emma-inline-asset-caption">{label}</span>
       {state === 'pending' ? (
         <span className="emma-tool-skeleton" style={{ display: 'block', height: 80 }} />
       ) : (
@@ -109,7 +111,7 @@ export function PendingVariant({ generationId, kind }: PendingVariantProps) {
           className="emma-inline-asset-link"
           style={{ display: 'block', padding: 24, color: 'var(--emma-amber)', textAlign: 'center' }}
         >
-          {state === 'timeout' ? 'sigue corriendo · revisa el archivo' : 'no se pudo generar'}
+          {state === 'timeout' ? t('pendingStillRunning') : t('pendingCouldNotGenerate')}
         </span>
       )}
     </span>

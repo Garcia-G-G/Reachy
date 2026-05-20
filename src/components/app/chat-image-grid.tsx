@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import { ChatImageLightbox } from './chat-image-lightbox';
 
@@ -28,6 +29,7 @@ interface ChatImageGridProps {
 }
 
 export function ChatImageGrid({ items }: ChatImageGridProps) {
+  const t = useTranslations('Emma');
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const active = openIndex !== null ? items[openIndex] : null;
 
@@ -38,14 +40,12 @@ export function ChatImageGrid({ items }: ChatImageGridProps) {
           <button
             // URLs in a grid are unique per asset (R2 keys carry the
             // generation id + variant index), so using the URL alone
-            // as the key avoids the array-index anti-pattern. If the
-            // same URL ever appears twice we'd render one cell, which
-            // is the desired dedupe behavior.
+            // as the key avoids the array-index anti-pattern.
             key={item.url}
             type="button"
             className="emma-image-grid-cell"
             onClick={() => setOpenIndex(idx)}
-            aria-label={item.caption ?? `Open image ${idx + 1}`}
+            aria-label={item.caption ?? t('lightboxOpenImage', { n: idx + 1 })}
             data-tool-cell
           >
             {/* biome-ignore lint/a11y/useAltText: button label carries semantics */}

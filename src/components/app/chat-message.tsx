@@ -1,6 +1,7 @@
 'use client';
 
 import type { UIMessage } from 'ai';
+import { useTranslations } from 'next-intl';
 import { Children, isValidElement } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -157,9 +158,13 @@ function buildRenderables(parts: readonly AnyMessagePart[]): Renderable[] {
 }
 
 export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMessageProps) {
+  const t = useTranslations('Emma');
   const isUser = message.role === 'user';
   const roleClass = isUser ? 'emma-msg-user' : 'emma-msg-assistant';
-  const roleLabel = isUser ? userRoleLabel?.trim() || 'TÚ' : 'EMMA';
+  // userFallback is locale-aware ('TÚ' for ES, 'YOU' for EN). The
+  // assistant role is always literally "EMMA" — that's her name, not
+  // a translatable label.
+  const roleLabel = isUser ? userRoleLabel?.trim() || t('userFallback') : 'EMMA';
 
   const parts = (message.parts ?? []) as readonly AnyMessagePart[];
   const renderables = buildRenderables(parts);
@@ -208,7 +213,7 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
           if (part.type === 'reasoning') {
             return (
               <details key={key} className="emma-reasoning">
-                <summary className="emma-reasoning-summary">razonamiento</summary>
+                <summary className="emma-reasoning-summary">{t('reasoning')}</summary>
                 <div className="emma-reasoning-body">{part.text}</div>
               </details>
             );
@@ -231,8 +236,9 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
 }
 
 export function PreFirstTokenShimmer() {
+  const t = useTranslations('Emma');
   return (
-    <div className="emma-msg emma-msg-assistant" role="status" aria-label="Emma is thinking">
+    <div className="emma-msg emma-msg-assistant" role="status" aria-label={t('preThinkingAria')}>
       <div className="emma-pre-dots">
         <span>·</span>
         <span>·</span>

@@ -1,38 +1,38 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { PendingVariant } from './pending-variant';
 import { type ChatAssetAction, useChatAssetActions } from './use-chat-asset-actions';
 
 /**
- * ChatToolActionChips — Phase 07f.
+ * ChatToolActionChips — Phase 07f, i18n in 07h.
  *
  * The mejorar / variante / guardar chip row rendered inside a
  * ChatToolCard's reveal state. Mirrors the chips on
  * InlineAssetPreview and uses the SAME useChatAssetActions hook
  * so the UX is consistent across both surfaces.
  *
- * Tool cards live OUTSIDE a markdown <p> (they render inside an
- * <article className="emma-msg">), so they don't have the
- * hydration constraint — div/button works here. We still use
- * div + span to match the editorial styling tokens.
+ * Strings flow through next-intl so EN locale renders English
+ * chips ("improve / variant / save") and ES renders Spanish.
  */
 
 interface ChatToolActionChipsProps {
   generationId: string;
 }
 
-function chipLabel(
-  action: ChatAssetAction,
-  busy: ChatAssetAction | null,
-  savedFlash: boolean,
-): string {
-  if (action === 'mejorar') return busy === 'mejorar' ? 'mejorando…' : 'mejorar';
-  if (action === 'variante') return busy === 'variante' ? 'generando…' : 'variante';
-  if (savedFlash) return 'guardado ✓';
-  return busy === 'guardar' ? 'guardando…' : 'guardar';
+function useChipLabel() {
+  const t = useTranslations('Emma');
+  return (action: ChatAssetAction, busy: ChatAssetAction | null, savedFlash: boolean): string => {
+    if (action === 'mejorar') return busy === 'mejorar' ? t('chipImproveBusy') : t('chipImprove');
+    if (action === 'variante') return busy === 'variante' ? t('chipVariantBusy') : t('chipVariant');
+    if (savedFlash) return t('chipSaved');
+    return busy === 'guardar' ? t('chipSaveBusy') : t('chipSave');
+  };
 }
 
 export function ChatToolActionChips({ generationId }: ChatToolActionChipsProps) {
+  const t = useTranslations('Emma');
+  const chipLabel = useChipLabel();
   const actions = useChatAssetActions({ generationId });
   return (
     <div className="emma-tool-chips" style={{ marginTop: 12 }}>
@@ -40,7 +40,7 @@ export function ChatToolActionChips({ generationId }: ChatToolActionChipsProps) 
         type="button"
         onClick={actions.onMejorar}
         disabled={actions.busy !== null}
-        aria-label="Mejorar la imagen"
+        aria-label={t('ariaImprove')}
       >
         {chipLabel('mejorar', actions.busy, actions.savedFlash)}
       </button>
@@ -48,7 +48,7 @@ export function ChatToolActionChips({ generationId }: ChatToolActionChipsProps) 
         type="button"
         onClick={actions.onVariante}
         disabled={actions.busy !== null}
-        aria-label="Generar una variante"
+        aria-label={t('ariaVariant')}
       >
         {chipLabel('variante', actions.busy, actions.savedFlash)}
       </button>
@@ -56,7 +56,7 @@ export function ChatToolActionChips({ generationId }: ChatToolActionChipsProps) 
         type="button"
         onClick={actions.onGuardar}
         disabled={actions.busy !== null}
-        aria-label="Guardar al archivo"
+        aria-label={t('ariaSave')}
       >
         {chipLabel('guardar', actions.busy, actions.savedFlash)}
       </button>

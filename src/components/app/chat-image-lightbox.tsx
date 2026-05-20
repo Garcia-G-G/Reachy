@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatToolActionChips } from './chat-tool-action-chips';
@@ -25,6 +26,7 @@ interface ChatImageLightboxProps {
 }
 
 export function ChatImageLightbox({ url, caption, generationId, onClose }: ChatImageLightboxProps) {
+  const t = useTranslations('Emma');
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -54,7 +56,7 @@ export function ChatImageLightbox({ url, caption, generationId, onClose }: ChatI
       }}
       role="dialog"
       aria-modal="true"
-      aria-label={caption ?? 'image preview'}
+      aria-label={caption ?? t('lightboxImagePreview')}
     >
       {/* Inner panel stops backdrop click from propagating up so
           clicks INSIDE the lightbox don't close it. */}
@@ -76,7 +78,7 @@ export function ChatImageLightbox({ url, caption, generationId, onClose }: ChatI
           type="button"
           className="emma-lightbox-close"
           onClick={onClose}
-          aria-label="Close preview"
+          aria-label={t('lightboxClose')}
         >
           ×
         </button>

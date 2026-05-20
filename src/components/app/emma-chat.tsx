@@ -2,6 +2,7 @@
 
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
+import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { BrandKit } from '@/server/actions/brandKits';
 import { deleteThreadHistory } from '@/server/actions/chat';
@@ -61,6 +62,12 @@ function persistedToUIMessage(row: ChatMessage) {
 }
 
 export function EmmaChat(props: EmmaChatProps) {
+  // All UI chrome flows through next-intl so the chat tracks the app
+  // locale (ES / EN). props.language still informs the SERVER-SIDE
+  // system prompt (handler.ts derives it from the brand kit) but
+  // doesn't drive client labels anymore — that's why the chat used to
+  // feel mixed when locale and brand kit disagreed.
+  const t = useTranslations('Emma');
   const [size, setSize] = useEmmaSize();
   const [costCents, setCostCents] = useState(props.initialCostCents);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -234,56 +241,36 @@ export function EmmaChat(props: EmmaChatProps) {
     [sendText],
   );
 
-  const placeholder =
-    props.language === 'es'
-      ? `Pregúntale a Emma sobre ${props.projectName}…`
-      : `Ask Emma about ${props.projectName}…`;
+  const placeholder = t('inputPlaceholder', { project: props.projectName });
+  const subline = t('subline', { project: props.projectName });
 
-  const subline =
-    props.language === 'es' ? `para ${props.projectName}` : `for ${props.projectName}`;
-
-  // Phase 07c — `||` not `??` so empty strings fall through to the
-  // next fallback. Last resort 'amigo' matches the server-side fallback
-  // so the persona stays consistent in the prompt and the UI.
+  // `||` not `??` so empty strings fall through. Last resort 'amigo'
+  // matches the server-side fallback in chatSystemPrompts so the
+  // persona stays consistent across prompt + UI (07c).
   const greetingName =
     props.firstName?.trim() ||
     props.userDisplayName?.split(' ')[0]?.trim() ||
     props.userDisplayName?.trim() ||
     'amigo';
 
-  // Phase 07e — the eyebrow role label above each user message.
-  // Same fallback chain as the greeting, just uppercased + with 'TÚ'
-  // as the editorial last-resort (the prompt-template uses 'amigo'
-  // for the AI's greeting; 'TÚ' reads better as a header for the
-  // user's own messages).
+  // Eyebrow role label above each user message (07e). 'TÚ' / 'YOU'
+  // fallback comes from the Emma namespace so it matches the locale.
   const userRoleLabel =
     props.firstName?.trim().toUpperCase() ||
     props.userDisplayName?.split(' ')[0]?.trim().toUpperCase() ||
-    'TÚ';
-  // Greeting uses the brand voice tone (italic amber) as a small flourish
-  // inside an otherwise plain body sentence — sells the persona without
-  // a full eyebrow label.
+    t('userFallback');
+
+  // Greeting weaves the brand voice tone into a one-line sentence.
+  // ICU-style `<em>` placeholder gives next-intl the markup it needs
+  // to style the tone in italic amber inline.
   const tone = props.brandKit.voice?.tone ?? null;
-  const greetingBody =
-    props.language === 'es' ? (
-      tone ? (
-        <>
-          {`Hola ${greetingName}. Tu marca es `}
-          <em>{tone.toLowerCase()}</em>
-          {`. ¿Por dónde empezamos?`}
-        </>
-      ) : (
-        <>{`Hola ${greetingName}. ¿Por dónde empezamos?`}</>
-      )
-    ) : tone ? (
-      <>
-        {`Hi ${greetingName}. Your brand reads `}
-        <em>{tone.toLowerCase()}</em>
-        {`. Where do you want to start?`}
-      </>
-    ) : (
-      <>{`Hi ${greetingName}. Where do you want to start?`}</>
-    );
+  const greetingBody = tone
+    ? t.rich('greetingWithTone', {
+        name: greetingName,
+        tone: tone.toLowerCase(),
+        em: (chunks) => <em>{chunks}</em>,
+      })
+    : t('greetingPlain', { name: greetingName });
 
   const audience = props.brandKit.keywords?.slice(0, 4).join(' · ') ?? null;
 
@@ -311,7 +298,6 @@ export function EmmaChat(props: EmmaChatProps) {
             in campaign_asset and survive the delete — the inline
             confirm copy says so explicitly. */}
         <EmmaClearButton
-          language={props.language}
           confirming={confirmingClear}
           clearing={clearing}
           messageCount={messages.length}
@@ -321,7 +307,7 @@ export function EmmaChat(props: EmmaChatProps) {
         />
         <div className="flex items-center gap-3">
           <EmmaSizeToggle value={size} onChange={setSize} />
-          <EmmaCostTicker cents={costCents} language={props.language} />
+          <EmmaCostTicker cents={costCents} />
         </div>
       </div>
 
@@ -346,7 +332,7 @@ export function EmmaChat(props: EmmaChatProps) {
       {/* ── Body: empty state OR message list ─────────────── */}
       <div style={{ marginTop: 'var(--emma-gap-block)' }}>
         {messages.length === 0 ? (
-          <EmmaEmptyState language={props.language} onSelect={handleStarterPick} />
+          <EmmaEmptyState onSelect={handleStarterPick} />
         ) : (
           <div>
             {messages.map((m, i) => (
@@ -420,7 +406,7 @@ export function EmmaChat(props: EmmaChatProps) {
               <button
                 type="button"
                 onClick={() => setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))}
-                aria-label={`Remove ${a.originalName}`}
+                aria-label={t('removeAttachment', { name: a.originalName })}
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -446,7 +432,7 @@ export function EmmaChat(props: EmmaChatProps) {
           type="button"
           className="emma-attach"
           onClick={() => fileInputRef.current?.click()}
-          aria-label="Attach files"
+          aria-label={t('attach')}
           disabled={uploading}
         >
           {uploading ? '…' : '+'}
@@ -480,7 +466,7 @@ export function EmmaChat(props: EmmaChatProps) {
         />
         {isStreaming || isSubmitted ? (
           <button type="button" className="emma-send" onClick={() => stop()}>
-            {props.language === 'es' ? 'detener' : 'stop'}
+            {t('stop')}
           </button>
         ) : (
           <button
@@ -488,7 +474,7 @@ export function EmmaChat(props: EmmaChatProps) {
             className="emma-send"
             disabled={inputDraft.trim().length === 0 && attachments.length === 0}
           >
-            {props.language === 'es' ? 'enviar ↩' : 'send ↩'}
+            {t('send')}
           </button>
         )}
       </form>
@@ -508,7 +494,6 @@ export function EmmaChat(props: EmmaChatProps) {
  * 0 messages we hide the affordance entirely (nothing to clear).
  */
 interface EmmaClearButtonProps {
-  language: 'en' | 'es';
   confirming: boolean;
   clearing: boolean;
   messageCount: number;
@@ -518,37 +503,28 @@ interface EmmaClearButtonProps {
 }
 
 function EmmaClearButton(props: EmmaClearButtonProps) {
+  const t = useTranslations('Emma');
   if (props.messageCount === 0) return null;
-  const isEs = props.language === 'es';
-  const idleLabel = isEs ? 'borrar conversación' : 'clear chat';
-  const reassure = isEs ? 'los guardados se quedan' : 'saved items stay';
-  const cancelLabel = isEs ? 'cancelar' : 'cancel';
-  const confirmLabel = props.clearing
-    ? isEs
-      ? 'borrando…'
-      : 'clearing…'
-    : isEs
-      ? 'sí, borrar'
-      : 'yes, clear';
+  const confirmLabel = props.clearing ? t('clearBusy') : t('clearConfirm');
 
   if (!props.confirming) {
     return (
       <button type="button" className="emma-clear-link" onClick={props.onAskConfirm}>
-        {idleLabel}
+        {t('clearIdle')}
       </button>
     );
   }
 
   return (
     <span className="emma-clear-confirm">
-      <span className="emma-clear-reassure">{reassure}</span>
+      <span className="emma-clear-reassure">{t('clearReassure')}</span>
       <button
         type="button"
         className="emma-clear-cancel"
         onClick={props.onCancel}
         disabled={props.clearing}
       >
-        {cancelLabel}
+        {t('clearCancel')}
       </button>
       <button
         type="button"

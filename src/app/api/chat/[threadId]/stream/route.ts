@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm';
+import { getLocale } from 'next-intl/server';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { runEmmaTurn } from '@/server/ai/chat/handler';
@@ -86,6 +87,14 @@ export async function POST(
   const userDisplayName =
     session.user.name?.trim() || session.user.email?.split('@')[0]?.trim() || 'amigo';
 
+  // App locale (from URL prefix / NEXT_LOCALE cookie) is the single
+  // source of truth for Emma's UI chrome AND her response language.
+  // Phase 07h — previously the system prompt language came from the
+  // brand kit; that diverged from the URL locale when they
+  // disagreed. Threading the app locale through here keeps the chat
+  // and the rest of the website speaking the same language.
+  const appLocale = (await getLocale()) === 'en' ? 'en' : 'es';
+
   try {
     const result = await runEmmaTurn({
       threadId,
@@ -95,6 +104,7 @@ export async function POST(
         attachments: parsed.data.attachments,
       },
       userDisplayName,
+      uiLocale: appLocale,
     });
     // The AI SDK's stream result exposes toUIMessageStreamResponse which
     // returns a Web Response carrying the SSE event stream that useChat
