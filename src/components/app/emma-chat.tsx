@@ -4,6 +4,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { BrandKit } from '@/server/actions/brandKits';
+import { deleteThreadHistory } from '@/server/actions/chat';
 import type { ChatAttachment, ChatMessage } from '@/server/db/schema/chatMessages';
 import { ChatMessageView, PreFirstTokenShimmer } from './chat-message';
 import { EmmaBrandStrip } from './emma-brand-strip';
@@ -89,7 +90,7 @@ export function EmmaChat(props: EmmaChatProps) {
     [props.threadId],
   );
 
-  const { messages, sendMessage, status, error, stop } = useChat({
+  const { messages, sendMessage, setMessages, status, error, stop } = useChat({
     transport,
     messages: props.initialMessages.map(persistedToUIMessage) as never,
     onFinish: () => {
@@ -99,6 +100,32 @@ export function EmmaChat(props: EmmaChatProps) {
       setCostCents((c) => c + 5);
     },
   });
+
+  // Clear-chat affordance — inline confirm pattern. The action wipes
+  // chat_message rows server-side; saved assets (campaign_asset rows
+  // created via `guardar`) live in a separate table and survive. Cost
+  // also resets to 0 because the ticker reads from chat_message.
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const handleClear = useCallback(async () => {
+    if (clearing) return;
+    setClearing(true);
+    try {
+      const res = await deleteThreadHistory(props.threadId);
+      if (!res.ok) {
+        alert(res.error);
+        return;
+      }
+      setMessages([]);
+      setCostCents(0);
+      setConfirmingClear(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'failed');
+    } finally {
+      setClearing(false);
+    }
+  }, [clearing, props.threadId, setMessages]);
 
   const isStreaming = status === 'streaming';
   const isSubmitted = status === 'submitted';
@@ -275,13 +302,27 @@ export function EmmaChat(props: EmmaChatProps) {
         if (e.currentTarget === e.target) setIsDragging(false);
       }}
     >
-      {/* ── Header row: cost ticker + size toggle ─────────── */}
+      {/* ── Header row: clear · size toggle · cost ticker ─────────── */}
       <div
-        className="flex items-start justify-end gap-3"
+        className="flex items-center justify-between gap-3"
         style={{ marginBottom: 'var(--emma-gap-block)' }}
       >
-        <EmmaSizeToggle value={size} onChange={setSize} />
-        <EmmaCostTicker cents={costCents} language={props.language} />
+        {/* Clear-chat affordance lives on the left. Saved assets live
+            in campaign_asset and survive the delete — the inline
+            confirm copy says so explicitly. */}
+        <EmmaClearButton
+          language={props.language}
+          confirming={confirmingClear}
+          clearing={clearing}
+          messageCount={messages.length}
+          onAskConfirm={() => setConfirmingClear(true)}
+          onCancel={() => setConfirmingClear(false)}
+          onConfirm={handleClear}
+        />
+        <div className="flex items-center gap-3">
+          <EmmaSizeToggle value={size} onChange={setSize} />
+          <EmmaCostTicker cents={costCents} language={props.language} />
+        </div>
       </div>
 
       {/* ── Emma. headline ─────────────────────────────────── */}
@@ -452,5 +493,71 @@ export function EmmaChat(props: EmmaChatProps) {
         )}
       </form>
     </div>
+  );
+}
+
+/**
+ * Clear-chat button — inline confirm pattern.
+ *
+ * Idle state: small mono link-style "borrar conversación" (ES) or
+ * "clear chat" (EN). Click → morphs into a 1-line confirm strip:
+ *   `borrar? los guardados se quedan · [cancelar] [sí, borrar]`
+ *
+ * Editorial-light: no modal, no destructive-red color. The amber
+ * confirm button is the only chromatic emphasis. When the chat has
+ * 0 messages we hide the affordance entirely (nothing to clear).
+ */
+interface EmmaClearButtonProps {
+  language: 'en' | 'es';
+  confirming: boolean;
+  clearing: boolean;
+  messageCount: number;
+  onAskConfirm: () => void;
+  onCancel: () => void;
+  onConfirm: () => Promise<void> | void;
+}
+
+function EmmaClearButton(props: EmmaClearButtonProps) {
+  if (props.messageCount === 0) return null;
+  const isEs = props.language === 'es';
+  const idleLabel = isEs ? 'borrar conversación' : 'clear chat';
+  const reassure = isEs ? 'los guardados se quedan' : 'saved items stay';
+  const cancelLabel = isEs ? 'cancelar' : 'cancel';
+  const confirmLabel = props.clearing
+    ? isEs
+      ? 'borrando…'
+      : 'clearing…'
+    : isEs
+      ? 'sí, borrar'
+      : 'yes, clear';
+
+  if (!props.confirming) {
+    return (
+      <button type="button" className="emma-clear-link" onClick={props.onAskConfirm}>
+        {idleLabel}
+      </button>
+    );
+  }
+
+  return (
+    <span className="emma-clear-confirm">
+      <span className="emma-clear-reassure">{reassure}</span>
+      <button
+        type="button"
+        className="emma-clear-cancel"
+        onClick={props.onCancel}
+        disabled={props.clearing}
+      >
+        {cancelLabel}
+      </button>
+      <button
+        type="button"
+        className="emma-clear-confirm-go"
+        onClick={() => void props.onConfirm()}
+        disabled={props.clearing}
+      >
+        {confirmLabel}
+      </button>
+    </span>
   );
 }
