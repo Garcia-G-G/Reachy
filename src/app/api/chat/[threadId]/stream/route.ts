@@ -118,7 +118,22 @@ export async function POST(
     // The AI SDK's stream result exposes toUIMessageStreamResponse which
     // returns a Web Response carrying the SSE event stream that useChat
     // on the client consumes natively.
-    return result.toUIMessageStreamResponse();
+    //
+    // onError replaces the SDK's default 'An error occurred.' with a
+    // locale-aware friendly message. Without this override, an upstream
+    // OpenAI server_error (transient overload, request-id payload, etc.)
+    // can land as raw JSON inside the chat bubble — Garcia saw this
+    // mid-07h testing. We also log the raw error server-side so the
+    // dev terminal still has the request-id for debugging.
+    return result.toUIMessageStreamResponse({
+      onError: (err) => {
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error(`[reachy:emma] stream error: ${detail}`);
+        return appLocale === 'es'
+          ? 'Algo falló por el lado del modelo. Intenta de nuevo — si sigue fallando, dime y lo revisamos.'
+          : 'Something failed on the model side. Try again — flag me if it keeps failing.';
+      },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[reachy:emma] turn failed: ${msg}`);

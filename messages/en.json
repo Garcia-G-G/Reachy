@@ -53,6 +53,7 @@
     "pendingCouldNotGenerate": "could not generate",
     "removeAttachment": "Remove {name}",
     "uploadFailed": "upload failed",
+    "modelErrorFallback": "Something failed on the model side. Try again.",
     "lightboxClose": "Close preview",
     "lightboxOpenImage": "Open image {n}",
     "lightboxImagePreview": "image preview",

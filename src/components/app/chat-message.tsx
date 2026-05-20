@@ -199,6 +199,25 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
           const key = `${message.id}-${idx}`;
           if (part.type === 'text') {
             const isLastText = key === lastTextKey;
+            // Phase 07h hotfix — defensive: text persisted before the
+            // server-side onError + sanitizer landed may still carry
+            // raw provider error JSON. Detect the OpenAI Responses
+            // error event shape and render a friendly fallback
+            // instead of dumping the blob into the chat.
+            const trimmed = part.text.trimStart();
+            const isLeakedErrorJson =
+              trimmed.startsWith('{"type":"error"') || trimmed.startsWith('{"error":');
+            if (isLeakedErrorJson) {
+              return (
+                <div
+                  key={key}
+                  className="emma-msg-text emma-msg-error-fallback"
+                  role="alert"
+                >
+                  {t('modelErrorFallback')}
+                </div>
+              );
+            }
             return (
               <div key={key} className="emma-msg-text">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
@@ -211,10 +230,16 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
             );
           }
           if (part.type === 'reasoning') {
+            // Skip empty reasoning parts — they render as a useless
+            // "▶ razonamiento" stub when the model didn't actually
+            // produce reasoning content (e.g. when the turn errored
+            // before reasoning landed).
+            const reasoningText = (part.text ?? '').trim();
+            if (reasoningText.length === 0) return null;
             return (
               <details key={key} className="emma-reasoning">
                 <summary className="emma-reasoning-summary">{t('reasoning')}</summary>
-                <div className="emma-reasoning-body">{part.text}</div>
+                <div className="emma-reasoning-body">{reasoningText}</div>
               </details>
             );
           }

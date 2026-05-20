@@ -1008,6 +1008,19 @@
   pointer-events: none;
 }
 
+/* Phase 07h hotfix — friendly fallback for leaked provider error
+   JSON. The detector lives in chat-message.tsx; this class styles
+   it as a quiet amber notice rather than raw text. */
+.emma-msg-error-fallback {
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--emma-amber);
+  border-left: 1.5px solid var(--emma-amber);
+  padding: 8px 12px;
+  background-color: var(--emma-paper-2);
+}
+
 /* ============================================================
    Phase 07h — Floating Emma widget (bubble + panel)
    ============================================================ */

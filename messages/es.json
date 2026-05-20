@@ -66,6 +66,7 @@
     "pendingCouldNotGenerate": "no se pudo generar",
     "removeAttachment": "Eliminar {name}",
     "uploadFailed": "subida falló",
+    "modelErrorFallback": "Algo falló por el lado del modelo. Intenta de nuevo.",
     "lightboxClose": "Cerrar previsualización",
     "lightboxOpenImage": "Abrir imagen {n}",
     "lightboxImagePreview": "previsualización de imagen",

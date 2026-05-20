@@ -83,6 +83,31 @@ export interface RunEmmaTurnInput {
   };
 }
 
+/** Strip text parts that look like provider error JSON before they
+ *  reach the persistence layer. The shape we've seen leak is
+ *  `{"type":"error","sequence_number":N,"error":{...}}` — the SSE
+ *  event the OpenAI Responses API emits when a request fails mid-
+ *  stream. Without this filter, the raw JSON shows up as Emma's
+ *  reply text on reload.
+ *
+ *  Cheap detector: starts-with check on a trimmed prefix. False
+ *  positives are unlikely — Emma doesn't emit JSON-shaped replies
+ *  in concierge mode. */
+function sanitizeStepContent(content: unknown): unknown[] {
+  if (!Array.isArray(content)) return [];
+  return content.filter((part) => {
+    if (!part || typeof part !== 'object') return false;
+    const p = part as { type?: string; text?: unknown };
+    if (p.type === 'text' && typeof p.text === 'string') {
+      const t = p.text.trimStart();
+      if (t.startsWith('{"type":"error"') || t.startsWith('{"error":')) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
 function estimateCostCents(usage: {
   inputTokens?: number;
   outputTokens?: number;
@@ -312,6 +337,24 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
       // produced by this step. `step.content` is the AI SDK
       // ContentPart[] — provider-agnostic, the jsonb persistence is
       // the same shape regardless of which model produced it.
+      //
+      // Phase 07h hotfix — when an upstream provider errors mid-stream
+      // (OpenAI server_error etc.), the SDK may have emitted partial
+      // content + an error event. Sanitize before persist:
+      //  (a) skip when finishReason === 'error' AND the content is
+      //      empty / reasoning-only — there's nothing useful to keep.
+      //  (b) filter out text parts whose body looks like raw error
+      //      JSON (the OpenAI Responses error event shape) so they
+      //      never reach the renderer.
+      const sanitized = sanitizeStepContent(step.content);
+      const hasUsefulPart = sanitized.some((p) => {
+        const t = (p as { type?: string }).type;
+        return t === 'text' || t === 'tool-call' || t === 'tool-result';
+      });
+      if (step.finishReason === 'error' && !hasUsefulPart) {
+        console.warn(`[reachy:emma] dropping empty error-step (no useful content)`);
+        return;
+      }
       const cost = estimateCostCents({
         inputTokens: step.usage?.inputTokens,
         outputTokens: step.usage?.outputTokens,
@@ -320,7 +363,7 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
       await db.insert(chatMessage).values({
         threadId: input.threadId,
         role: 'assistant',
-        content: step.content,
+        content: sanitized,
         attachments: [],
         costCents: cost,
         model: EMMA_MODEL,
