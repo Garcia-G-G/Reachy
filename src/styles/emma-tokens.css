@@ -495,12 +495,28 @@
 /* ── Inline asset preview — image card in Emma's reply (Phase 07e) ── */
 /* Mirrors the tool-card reveal state: caption above, image with the
    editorial border, chip row below. Lives inline in a markdown body
-   so the chat surface stays single-column. */
+   so the chat surface stays single-column.
+   Phase 07f — element switched from <figure> to <span> because
+   ReactMarkdown wraps content in <p> and block-level descendants
+   (figure/figcaption/div) trigger the browser to auto-close <p>,
+   which breaks hydration. Span is phrasing content so <p> stays
+   intact; display:flex still works on span. */
 .emma-inline-asset {
   margin: 0 0 var(--emma-body-size);
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.emma-inline-asset-error {
+  display: block;
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  color: var(--emma-amber);
+  letter-spacing: 0.06em;
+}
+.emma-inline-asset-chips button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .emma-inline-asset-caption {
   font-family: var(--emma-font-mono);

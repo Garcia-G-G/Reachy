@@ -1,5 +1,7 @@
 'use client';
 
+import { ChatToolActionChips } from './chat-tool-action-chips';
+
 /**
  * ChatToolCard — Phase 07b 4-state editorial lifecycle.
  *
@@ -107,6 +109,7 @@ function renderOutput(name: string, output: unknown) {
 
   if (name === 'generateImage' || name === 'regenerateAsset') {
     const urls = (o.assetUrls as string[] | undefined) ?? [];
+    const generationId = typeof o.generationId === 'string' ? o.generationId : null;
     if (urls.length === 0 && o.error) {
       return <div style={{ color: 'var(--emma-amber)' }}>{String(o.error)}</div>;
     }
@@ -118,17 +121,17 @@ function renderOutput(name: string, output: unknown) {
             <img src={u} alt="" />
           </a>
         ))}
-        <div className="emma-tool-chips" style={{ marginTop: 12 }}>
-          <button type="button">mejorar</button>
-          <button type="button">variante</button>
-          <button type="button">guardar</button>
-        </div>
+        {generationId ? <ChatToolActionChips generationId={generationId} /> : null}
       </div>
     );
   }
 
   if (name === 'writeCopy') {
     const text = (o.text as string | undefined) ?? '';
+    // writeCopy does not return a generationId today — the chip row
+    // requires one for the server actions to load the row. We omit
+    // the chips on copy outputs to avoid showing dead buttons; a
+    // future refactor could thread a copyGenerationId through.
     return (
       <div>
         <pre
@@ -143,11 +146,6 @@ function renderOutput(name: string, output: unknown) {
         >
           {text}
         </pre>
-        <div className="emma-tool-chips" style={{ marginTop: 12 }}>
-          <button type="button">mejorar</button>
-          <button type="button">variante</button>
-          <button type="button">guardar</button>
-        </div>
       </div>
     );
   }
