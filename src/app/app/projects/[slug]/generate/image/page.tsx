@@ -11,6 +11,7 @@ import { getRecentGenerations } from '@/server/actions/images';
 import { getProjectBySlug } from '@/server/actions/projects';
 import { isFalConfigured } from '@/server/ai/fal';
 import { isOpenAIConfigured } from '@/server/ai/openai';
+import { canonicalizeVisualStyleKey } from '@/server/ai/visualStyles';
 import { isR2Configured } from '@/server/storage/r2';
 
 interface GeneratePageProps {
@@ -36,12 +37,23 @@ export default async function GenerateImagePage({ params }: GeneratePageProps) {
   // Falls back to 'es' (Reachy's primary market) if no brand kit is set.
   const brandLanguages = (bundle?.brandKit?.languages ?? ['es']) as Array<'en' | 'es'>;
 
+  // Canonicalize the brand kit's visualStyle before handing it to the
+  // form — older brand_kit rows carry legacy keys (editorial,
+  // paper-cutout, flat-2d, infographic, isometric, abstract) that
+  // disappeared in the May-2026 visual-style rewrite. The client form
+  // looks the key up directly in VISUAL_STYLE_META and crashes on a
+  // miss; canonicalizing here maps the legacy value to its current
+  // equivalent (e.g. 'abstract' → 'editorial-collage').
+  const brandVisualStyle: VisualStyleKey | null = bundle?.brandKit?.visualStyle
+    ? canonicalizeVisualStyleKey(bundle.brandKit.visualStyle)
+    : null;
+
   return (
     <GenerateImagePageContent
       slug={slug}
       projectId={project.id}
       hasBrandKit={Boolean(bundle?.brandKit)}
-      brandVisualStyle={(bundle?.brandKit?.visualStyle ?? null) as VisualStyleKey | null}
+      brandVisualStyle={brandVisualStyle}
       brandLanguages={brandLanguages}
       providerAvailability={{
         openai: isOpenAIConfigured(),

@@ -430,7 +430,14 @@ export function GenerateImageForm({
   const noProvider = !modelEntry;
 
   // Active brand style for the override picker's "default" label.
-  const activeBrandStyle = brandVisualStyle ?? DEFAULT_VISUAL_STYLE;
+  // Defensive: a legacy brand_kit row could still slip a stale key
+  // (e.g. 'abstract') past TypeScript. If VISUAL_STYLE_META has no
+  // entry for the value, fall back to DEFAULT_VISUAL_STYLE so the
+  // form renders instead of throwing. The page-level
+  // canonicalizeVisualStyleKey should normally make this unreachable.
+  const rawBrandStyle = brandVisualStyle ?? DEFAULT_VISUAL_STYLE;
+  const activeBrandStyle: VisualStyleKey =
+    rawBrandStyle in VISUAL_STYLE_META ? rawBrandStyle : DEFAULT_VISUAL_STYLE;
 
   return (
     <div className="grid grid-cols-1 gap-12 lg:grid-cols-[7fr_5fr]">
