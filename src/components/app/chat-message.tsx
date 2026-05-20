@@ -5,24 +5,23 @@ import { Children, isValidElement } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChatToolCard } from './chat-tool-card';
+import { ChatToolCardGroup } from './chat-tool-card-group';
 import { InlineAssetPreview } from './inline-asset-preview';
 
 /**
- * Renders one chat message in the v4 minimal editorial layout +
- * Phase 07e role differentiation + markdown.
+ * Renders one chat message — Phase 07g restructured.
  *
- * Single-column — no avatars, no left/right split. Differentiation
- * via a mono eyebrow with the role name (EMMA in amber / GARCIA in
- * navy 65%) and a 1.5px left rule in the matching color.
- *
- * Assistant text parts render through ReactMarkdown so bold / lists
- * / italics / code formatting lands as styled output, not literal
- * asterisks. Inline image URLs (PNG/JPG/WEBP/GIF or R2 pub.r2.dev)
- * are detected and replaced with the InlineAssetPreview card.
- *
- * User text parts also go through ReactMarkdown — they're rare to
- * contain markup but if Garcia pastes a URL, it lands as a link not
- * raw text.
+ *   - DEDUPES tool parts by (toolType, toolCallId), keeping the
+ *     LAST occurrence in part order so the latest state wins. This
+ *     fixes the "8 cards for 4 calls" bug where the SDK's streaming
+ *     evolution and the onStepFinish persistence created stale
+ *     duplicate entries.
+ *   - GROUPS consecutive tool parts of the same tool name into a
+ *     single ChatToolCardGroup. Solo tool parts use the compact
+ *     ChatToolCard.
+ *   - Spacing between sibling blocks within an assistant message
+ *     uses --emma-gap-within-turn (smaller). The OUTER gap between
+ *     messages uses --emma-gap-between-turns and lives on .emma-msg.
  */
 
 interface ChatMessageProps {
@@ -30,15 +29,11 @@ interface ChatMessageProps {
   /** Set true on the LAST message when the AI SDK status is
    *  'streaming' — drives the cursor on the last text part. */
   isStreaming?: boolean;
-  /** User role label (typically derived from session.user.name
-   *  first-word uppercase, or "TÚ" as fallback). Defaults to "TÚ"
-   *  if not provided. */
+  /** User role label. */
   userRoleLabel?: string;
 }
 
-/** Image-URL detectors. Any URL ending in a common image extension
- *  OR matching the R2 pub.r2.dev host (where our generated assets
- *  land) is treated as a previewable asset. */
+/** Image-URL detectors for inline preview promotion. */
 const IMAGE_URL_RE = /^https?:\/\/[^\s]+\.(png|jpg|jpeg|webp|gif|svg)(\?[^\s]*)?$/i;
 const R2_PUB_RE = /^https?:\/\/pub-[a-z0-9]+\.r2\.dev\/[^\s]+/i;
 
@@ -46,16 +41,10 @@ function isImageUrl(href: string): boolean {
   return IMAGE_URL_RE.test(href.trim()) || R2_PUB_RE.test(href.trim());
 }
 
-/** Extract a string-y representation of a React children prop. Used to
- *  catch the "a paragraph that is JUST a URL" pattern that emerges
- *  when the model writes an image URL on its own line. */
 function extractStringChild(children: React.ReactNode): string | null {
   const arr = Children.toArray(children);
   if (arr.length === 0) return null;
-  // A single text child — just return it.
   if (arr.length === 1 && typeof arr[0] === 'string') return arr[0];
-  // Children may be: [text, <a>url</a>, text] when remark auto-links a
-  // bare URL. We unwrap an inner <a> whose href matches its body.
   const single = arr.length === 1 ? arr[0] : null;
   if (
     single &&
@@ -67,7 +56,6 @@ function extractStringChild(children: React.ReactNode): string | null {
   return null;
 }
 
-/** ReactMarkdown component overrides — editorial typography. */
 const MARKDOWN_COMPONENTS: Components = {
   a: ({ href, children }) => {
     if (href && isImageUrl(href)) {
@@ -81,9 +69,6 @@ const MARKDOWN_COMPONENTS: Components = {
     );
   },
   p: ({ children }) => {
-    // Catch a paragraph that contains ONLY an image URL (whether as a
-    // bare string or auto-linked <a>). Promote it to an InlineAssetPreview
-    // so the URL doesn't appear as text alongside the preview.
     const bare = extractStringChild(children);
     if (bare && isImageUrl(bare)) {
       return <InlineAssetPreview url={bare.trim()} />;
@@ -98,26 +83,117 @@ const MARKDOWN_COMPONENTS: Components = {
   pre: ({ children }) => <pre className="emma-pre">{children}</pre>,
 };
 
+/** A single message part — either as it came from the AI SDK or as a
+ *  synthesized "tool group" we built during the walk. */
+type AnyMessagePart = UIMessage['parts'][number] & {
+  toolCallId?: string;
+};
+
+interface ToolGroupRenderable {
+  type: 'tool-group';
+  groupId: string;
+  toolName: string;
+  parts: AnyMessagePart[];
+}
+
+type Renderable = AnyMessagePart | ToolGroupRenderable;
+
+/** Walk parts, dedupe tool entries by (type + toolCallId) keeping the
+ *  latest, then group runs of consecutive tool parts of the same type
+ *  into ToolGroupRenderable entries. */
+function buildRenderables(parts: readonly AnyMessagePart[]): Renderable[] {
+  // Step 1 — dedupe. For tool parts, key on (type + toolCallId). For
+  // everything else, key on a unique ordinal so they pass through.
+  // Map.set with the same key replaces, so the LAST occurrence wins —
+  // exactly the behavior we want when the SDK streams stale states
+  // followed by the fresh ones.
+  const dedupedMap = new Map<string, AnyMessagePart>();
+  parts.forEach((part, idx) => {
+    if (part.type.startsWith('tool-') && part.toolCallId) {
+      dedupedMap.set(`${part.type}::${part.toolCallId}`, part);
+    } else {
+      dedupedMap.set(`__nontool_${idx}`, part);
+    }
+  });
+  const deduped = Array.from(dedupedMap.values());
+
+  // Step 2 — group consecutive tool parts of the same type. Two
+  // siblings of `tool-generateImage` become one group; a single one
+  // stays alone.
+  const out: Renderable[] = [];
+  let i = 0;
+  while (i < deduped.length) {
+    const part = deduped[i];
+    if (!part) {
+      i++;
+      continue;
+    }
+    if (part.type.startsWith('tool-')) {
+      const toolName = part.type;
+      const groupParts: AnyMessagePart[] = [part];
+      let j = i + 1;
+      while (j < deduped.length && deduped[j]?.type === toolName) {
+        const next = deduped[j];
+        if (next) groupParts.push(next);
+        j++;
+      }
+      if (groupParts.length >= 2) {
+        out.push({
+          type: 'tool-group',
+          groupId: `${toolName}-${groupParts[0]?.toolCallId ?? i}`,
+          toolName,
+          parts: groupParts,
+        });
+      } else {
+        out.push(part);
+      }
+      i = j;
+    } else {
+      out.push(part);
+      i++;
+    }
+  }
+  return out;
+}
+
 export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const roleClass = isUser ? 'emma-msg-user' : 'emma-msg-assistant';
   const roleLabel = isUser ? userRoleLabel?.trim() || 'TÚ' : 'EMMA';
 
+  const parts = (message.parts ?? []) as readonly AnyMessagePart[];
+  const renderables = buildRenderables(parts);
+
+  // Locate the last text part for the streaming cursor. We compute
+  // this from the ORIGINAL parts (not renderables) so the cursor
+  // targets the right text block.
   const lastTextIdx = (() => {
-    for (let i = message.parts.length - 1; i >= 0; i--) {
-      if (message.parts[i]?.type === 'text') return i;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (parts[i]?.type === 'text') return i;
     }
     return -1;
   })();
+  const lastTextKey = lastTextIdx >= 0 ? `${message.id}-${lastTextIdx}` : null;
 
   return (
     <article className={`emma-msg ${roleClass}`}>
       <header className="emma-msg-role">{roleLabel}</header>
       <div className="emma-msg-body">
-        {message.parts.map((part, idx) => {
+        {renderables.map((r, idx) => {
+          if (r.type === 'tool-group') {
+            const group = r as ToolGroupRenderable;
+            return (
+              <ChatToolCardGroup
+                key={group.groupId}
+                parts={group.parts as never}
+                toolName={group.toolName.replace(/^tool-/, '')}
+              />
+            );
+          }
+          const part = r as AnyMessagePart;
           const key = `${message.id}-${idx}`;
           if (part.type === 'text') {
-            const isLastText = idx === lastTextIdx;
+            const isLastText = key === lastTextKey;
             return (
               <div key={key} className="emma-msg-text">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
@@ -131,20 +207,9 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
           }
           if (part.type === 'reasoning') {
             return (
-              <details key={key} style={{ fontSize: 11, color: 'var(--emma-ink-55)' }}>
-                <summary
-                  style={{
-                    cursor: 'pointer',
-                    fontFamily: 'var(--emma-font-mono)',
-                    fontSize: 9,
-                    letterSpacing: '0.08em',
-                  }}
-                >
-                  reasoning
-                </summary>
-                <div style={{ marginTop: 8, whiteSpace: 'pre-wrap', paddingLeft: 8 }}>
-                  {part.text}
-                </div>
+              <details key={key} className="emma-reasoning">
+                <summary className="emma-reasoning-summary">razonamiento</summary>
+                <div className="emma-reasoning-body">{part.text}</div>
               </details>
             );
           }
@@ -165,10 +230,6 @@ export function ChatMessageView({ message, isStreaming, userRoleLabel }: ChatMes
   );
 }
 
-/** Pre-first-token shimmer — three dots that pulse with the cursor-
- *  pulse motion duration, staggered 200ms each. Rendered by the
- *  parent when status==='submitted' and no assistant message exists
- *  yet for this turn. */
 export function PreFirstTokenShimmer() {
   return (
     <div className="emma-msg emma-msg-assistant" role="status" aria-label="Emma is thinking">

@@ -395,24 +395,48 @@
   font-size: 14px;
 }
 
-/* ── Message bubble — entrance + role differentiation (Phase 07e) ─── */
+/* ── Within-turn vs between-turn spacing — Phase 07g ─────────────── */
+/* Tighter gap between sibling blocks (text + tool card + reasoning)
+   inside a single assistant message; the bigger gap only kicks in
+   between separate messages. Without this, a tool-heavy assistant
+   turn racks up 80-100px of internal air. */
+:root {
+  --emma-gap-within-turn: 10px;
+  --emma-gap-between-turns: var(--emma-gap-block);
+  --emma-tool-card-compact-h: 40px;
+  --emma-tool-card-grouped-pre-h: 80px;
+  --emma-tool-card-grouped-done-min-h: 280px;
+}
+
+/* ── Message bubble — entrance + role differentiation ─────────────── */
 /* Editorial single-column. Differentiation via subtle left-rule color
-   + a small mono eyebrow with the role name — no avatars, no bubbles,
-   no left/right drift. Garcia must be able to scan the thread and
-   tell at a glance who's speaking without it feeling SaaS-chat. */
+   + a small mono eyebrow with the role name + a very faint paper-2
+   background on the user's bubbles (07g). No avatars, no bubbles, no
+   left/right drift. */
 .emma-msg {
   opacity: 0;
   transform: translateY(6px);
   animation: emma-msg-enter var(--motion-duration-base) var(--motion-easing-out) forwards;
   padding-left: 12px;
   border-left: 1.5px solid var(--emma-ink-12);
-  margin-bottom: var(--emma-gap-block);
+  margin-bottom: var(--emma-gap-between-turns);
 }
 .emma-msg-assistant {
   border-left-color: var(--emma-amber);
 }
 .emma-msg-user {
   border-left-color: var(--emma-ink-65);
+  /* 07g — faint paper-2 background tint to give the chat the
+     alternating-turns rhythm of ChatGPT without bubbles. Padding
+     opens 8px on the non-rule sides so text doesn't kiss the edge. */
+  background-color: var(--emma-paper-2);
+  padding: 8px 12px 8px 12px;
+}
+/* Within-turn rhythm — direct children of .emma-msg-body sit at the
+   tighter gap. Note: the LAST child has no bottom gap (handled by
+   the message's own margin-bottom). */
+.emma-msg-body > * + * {
+  margin-top: var(--emma-gap-within-turn);
 }
 .emma-msg-role {
   font-family: var(--emma-font-mono);
@@ -589,13 +613,247 @@
   }
 }
 
-/* ── Tool-card 4-state ───────────────────────────────────── */
+/* ── Tool-card layouts (Phase 07b 4-state + 07g compact) ─────────── */
 .emma-tool-card {
   border: 0.5px solid var(--emma-ink-12);
   background-color: var(--emma-paper-2);
   padding: 14px;
   transition: height var(--motion-duration-slow) var(--motion-easing-out);
 }
+/* Compact wrapper — pre-result single-card states sit in a 40px tall
+   1-line row instead of the prior 14px-padded block. */
+.emma-tool-card-compact-wrap {
+  padding: 0;
+  min-height: var(--emma-tool-card-compact-h);
+}
+.emma-tool-card-compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--emma-tool-card-compact-h);
+  padding: 0 14px;
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.emma-tool-card-compact-label {
+  flex: 1;
+  text-transform: lowercase;
+}
+.emma-tool-card-compact-detail {
+  color: var(--emma-ink-65);
+  font-size: 9px;
+}
+
+/* Grouped tool card — N parallel calls of the same tool collapse
+   into one card with a header + mini-grid (07g). */
+.emma-tool-card-group {
+  padding: 0;
+  min-height: var(--emma-tool-card-grouped-pre-h);
+}
+.emma-tool-card-group[data-all-done="true"] {
+  min-height: var(--emma-tool-card-grouped-done-min-h);
+}
+.emma-tool-card-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--emma-tool-card-compact-h);
+  padding: 0 14px;
+  border-bottom: 0.5px solid var(--emma-ink-12);
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--emma-ink-65);
+}
+.emma-tool-card-group-title {
+  flex: 1;
+  text-transform: lowercase;
+  color: var(--emma-ink);
+}
+.emma-tool-card-group-progress {
+  color: var(--emma-ink-65);
+}
+.emma-tool-card-group-mini-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 6px;
+  padding: 12px 14px;
+}
+.emma-tool-card-group-cell {
+  height: 40px;
+  border: 0.5px solid var(--emma-ink-12);
+  background-color: var(--emma-paper);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.emma-tool-card-group-cell .emma-tool-skeleton {
+  height: 100%;
+  width: 100%;
+}
+.emma-tool-cell-done .emma-tool-card-group-cell-check {
+  color: var(--emma-amber);
+  font-family: var(--emma-font-mono);
+  font-size: 12px;
+}
+.emma-tool-cell-error .emma-tool-card-group-cell-x {
+  color: var(--emma-amber);
+  font-family: var(--emma-font-mono);
+  font-size: 14px;
+}
+.emma-tool-card-group-done-misc {
+  padding: 14px;
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  color: var(--emma-ink-65);
+  letter-spacing: 0.06em;
+}
+
+/* Image grid (2×2 default; degrades to 2-column at narrow widths). */
+.emma-image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 12px;
+}
+.emma-image-grid[data-count="1"] {
+  grid-template-columns: 1fr;
+}
+.emma-image-grid-cell {
+  position: relative;
+  border: 0.5px solid var(--emma-ink-12);
+  background-color: var(--emma-paper);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition:
+    transform var(--motion-duration-quick) var(--motion-easing-out),
+    border-color var(--motion-duration-quick) var(--motion-easing-out);
+}
+.emma-image-grid-cell:hover {
+  transform: translateY(-2px);
+  border-color: var(--emma-amber);
+}
+.emma-image-grid-cell img {
+  width: 100%;
+  height: 100%;
+  max-height: 140px;
+  object-fit: cover;
+  display: block;
+}
+.emma-image-grid-caption {
+  font-family: var(--emma-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--emma-ink-65);
+  padding: 4px 6px;
+  text-align: left;
+}
+
+/* Lightbox — full-size modal triggered from the image grid. */
+.emma-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(20, 17, 13, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 32px;
+  animation: emma-lightbox-fade-in var(--motion-duration-base) var(--motion-easing-out);
+}
+@keyframes emma-lightbox-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.emma-lightbox-panel {
+  position: relative;
+  max-width: min(960px, 92vw);
+  max-height: 92vh;
+  background-color: var(--emma-paper);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  overflow: auto;
+}
+.emma-lightbox-caption {
+  font-family: var(--emma-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--emma-ink-65);
+  text-transform: lowercase;
+}
+.emma-lightbox-image {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+.emma-lightbox-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: var(--emma-ink-65);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+.emma-lightbox-close:hover {
+  color: var(--emma-ink);
+}
+.emma-lightbox-chips {
+  display: flex;
+  justify-content: center;
+}
+
+/* Compact reasoning collapsible (07g) — 1-line header, click to
+   expand. Subtler than the pre-07g full block. */
+.emma-reasoning {
+  font-size: 11px;
+  color: var(--emma-ink-55);
+}
+.emma-reasoning-summary {
+  cursor: pointer;
+  font-family: var(--emma-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--emma-ink-65);
+  list-style: none;
+}
+.emma-reasoning-summary::-webkit-details-marker {
+  display: none;
+}
+.emma-reasoning-summary::before {
+  content: "▶ ";
+  color: var(--emma-ink-65);
+  margin-right: 4px;
+}
+.emma-reasoning[open] .emma-reasoning-summary::before {
+  content: "▼ ";
+}
+.emma-reasoning-body {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  padding-left: 14px;
+  border-left: 0.5px solid var(--emma-ink-12);
+}
+
 .emma-tool-glyph {
   display: inline-block;
   font-family: var(--emma-font-display);

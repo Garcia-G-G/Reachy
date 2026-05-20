@@ -3,37 +3,22 @@
 import { ChatToolActionChips } from './chat-tool-action-chips';
 
 /**
- * ChatToolCard — Phase 07b 4-state editorial lifecycle.
+ * ChatToolCard — Phase 07g compact layout.
  *
- *   thinking (input-streaming)  → ◐ glyph rotates 360° over 1.4s
- *   skeleton (input-available)  → shimmer sweep across the panel
- *   critic   (still pending,
- *             named via input-
- *             available + a
- *             critic-hint)      → amber ✦ pulse 1.2s
- *   reveal   (output-available) → image fades in + scales 0.97→1,
- *                                  chips stagger-enter 60ms each
+ *   thinking   (input-streaming) → 40px row · ◐ + label
+ *   running    (input-available) → 40px row · ✦|◐ + label (amber for image-gen)
+ *   error      (output-error)    → 40px row · label · message
+ *   denied     (output-denied)   → 40px row · label
+ *   done       (output-available)→ expanded · per-tool body + chips
  *
- * Card height transitions over the slow motion duration between
- * states so the panel doesn't jump.
- *
- * NOTE: the AI SDK v6 state machine has 3 active states
- * (input-streaming / input-available / output-available). We map
- * input-available → skeleton OR critic by checking whether the
- * tool name corresponds to an image-gen path (longer wait, critic
- * grades) vs a fast inline call (short wait, no grade). This is a
- * UX heuristic, not a state semantics change.
+ * Pre-result heights live in --emma-tool-card-compact-h (40px) so a
+ * row of pending calls doesn't dominate the chat surface. The done
+ * state expands naturally to the image / copy block.
  */
 
 interface ToolPart {
-  type: string; // 'tool-generateImage', 'tool-writeCopy', etc.
+  type: string;
   toolCallId: string;
-  // Phase 07e — the AI SDK v6 ToolUIPart actually emits FIVE states.
-  // The Phase 07b component was only handling four, so when the
-  // model produced 'output-denied' (or any unfamiliar value while
-  // streaming) the card body collapsed to null and the user saw an
-  // empty cream rectangle. The default fallback below also catches
-  // any future state name we haven't taught the renderer about yet.
   state:
     | 'input-streaming'
     | 'input-available'
@@ -56,53 +41,111 @@ function toolName(type: string): string {
 const IMAGE_GEN_TOOLS = new Set(['generateImage', 'regenerateAsset', 'iterateImageCopy']);
 
 function isCritiqueablePending(name: string): boolean {
-  // Image gen tools spend most of their pending time on critic + retry
-  // loops, so we render the amber critic glyph instead of generic
-  // skeleton shimmer.
   return IMAGE_GEN_TOOLS.has(name);
 }
 
-function renderInputStreaming() {
+function shortLabelFor(name: string, state: ToolPart['state']): string {
+  if (state === 'input-streaming') {
+    if (IMAGE_GEN_TOOLS.has(name)) return 'preparando imagen…';
+    if (name === 'writeCopy') return 'preparando copy…';
+    return `preparando ${name}…`;
+  }
+  if (state === 'input-available') {
+    if (IMAGE_GEN_TOOLS.has(name)) return 'generando imagen';
+    if (name === 'writeCopy') return 'escribiendo';
+    if (name === 'ingestUploadedFile') return 'leyendo archivo';
+    if (name === 'describeImage') return 'mirando imagen';
+    return `corriendo ${name}`;
+  }
+  if (state === 'output-error') return `${name} · error`;
+  if (state === 'output-denied') return `${name} · declinado`;
+  return name;
+}
+
+function renderCompactRow(args: {
+  glyph: '◐' | '✦' | '×' | '!' | '✓';
+  glyphIs: 'thinking' | 'critic' | 'static';
+  label: string;
+  tone: 'ink' | 'amber';
+  detail?: string;
+}) {
+  const glyphClass =
+    args.glyphIs === 'thinking'
+      ? 'emma-tool-glyph is-thinking'
+      : args.glyphIs === 'critic'
+        ? 'emma-tool-glyph is-critic'
+        : 'emma-tool-glyph';
   return (
-    <div className="flex items-center gap-2" style={{ color: 'var(--emma-ink-65)' }}>
-      <span className="emma-tool-glyph is-thinking">◐</span>
-      <span style={{ fontFamily: 'var(--emma-font-mono)', fontSize: 10, letterSpacing: '0.08em' }}>
-        thinking…
+    <div
+      className="emma-tool-card-compact"
+      style={{ color: args.tone === 'amber' ? 'var(--emma-amber)' : 'var(--emma-ink-65)' }}
+    >
+      <span className={glyphClass} aria-hidden="true">
+        {args.glyph}
       </span>
+      <span className="emma-tool-card-compact-label">{args.label}</span>
+      {args.detail ? <span className="emma-tool-card-compact-detail">{args.detail}</span> : null}
     </div>
   );
+}
+
+function renderInputStreaming(name: string) {
+  return renderCompactRow({
+    glyph: '◐',
+    glyphIs: 'thinking',
+    label: shortLabelFor(name, 'input-streaming'),
+    tone: 'ink',
+  });
 }
 
 function renderInputAvailable(name: string) {
   if (isCritiqueablePending(name)) {
-    return (
-      <div>
-        <div className="flex items-center gap-2 mb-3" style={{ color: 'var(--emma-amber)' }}>
-          <span className="emma-tool-glyph is-critic">✦</span>
-          <span
-            style={{ fontFamily: 'var(--emma-font-mono)', fontSize: 10, letterSpacing: '0.08em' }}
-          >
-            critic running
-          </span>
-        </div>
-        <div className="emma-tool-skeleton" />
-      </div>
-    );
+    return renderCompactRow({
+      glyph: '✦',
+      glyphIs: 'critic',
+      label: shortLabelFor(name, 'input-available'),
+      tone: 'amber',
+    });
   }
-  return <div className="emma-tool-skeleton" />;
+  return renderCompactRow({
+    glyph: '◐',
+    glyphIs: 'thinking',
+    label: shortLabelFor(name, 'input-available'),
+    tone: 'ink',
+  });
 }
 
 function renderOutputError(name: string, error?: string) {
-  return (
-    <div style={{ color: 'var(--emma-amber)' }}>
-      <div style={{ fontFamily: 'var(--emma-font-mono)', fontSize: 10, letterSpacing: '0.08em' }}>
-        {name} · error
-      </div>
-      <div style={{ marginTop: 4, color: 'var(--emma-ink)' }}>{error ?? 'unknown error'}</div>
-    </div>
-  );
+  return renderCompactRow({
+    glyph: '!',
+    glyphIs: 'static',
+    label: shortLabelFor(name, 'output-error'),
+    tone: 'amber',
+    detail: error?.slice(0, 80),
+  });
 }
 
+function renderOutputDenied(name: string) {
+  return renderCompactRow({
+    glyph: '×',
+    glyphIs: 'static',
+    label: shortLabelFor(name, 'output-denied'),
+    tone: 'ink',
+  });
+}
+
+function renderUnknown(name: string) {
+  return renderCompactRow({
+    glyph: '◐',
+    glyphIs: 'thinking',
+    label: shortLabelFor(name, 'input-streaming'),
+    tone: 'ink',
+  });
+}
+
+/** Per-tool DONE-state body. The card no longer enforces compact
+ *  height once we're in output-available — the body sets its own
+ *  natural height. */
 function renderOutput(name: string, output: unknown) {
   if (!output || typeof output !== 'object') return null;
   const o = output as Record<string, unknown>;
@@ -111,7 +154,7 @@ function renderOutput(name: string, output: unknown) {
     const urls = (o.assetUrls as string[] | undefined) ?? [];
     const generationId = typeof o.generationId === 'string' ? o.generationId : null;
     if (urls.length === 0 && o.error) {
-      return <div style={{ color: 'var(--emma-amber)' }}>{String(o.error)}</div>;
+      return renderOutputError(name, String(o.error));
     }
     return (
       <div className="emma-tool-reveal">
@@ -128,10 +171,6 @@ function renderOutput(name: string, output: unknown) {
 
   if (name === 'writeCopy') {
     const text = (o.text as string | undefined) ?? '';
-    // writeCopy does not return a generationId today — the chip row
-    // requires one for the server actions to load the row. We omit
-    // the chips on copy outputs to avoid showing dead buttons; a
-    // future refactor could thread a copyGenerationId through.
     return (
       <div>
         <pre
@@ -217,8 +256,6 @@ function renderOutput(name: string, output: unknown) {
     );
   }
 
-  // Generic fallback — informational tools (listLayouts, searchBrandKit, etc.)
-  // render as a collapsible details block.
   return (
     <details style={{ fontSize: 10, color: 'var(--emma-ink-65)' }}>
       <summary
@@ -235,36 +272,13 @@ function renderOutput(name: string, output: unknown) {
   );
 }
 
-function renderOutputDenied(name: string) {
-  return (
-    <div style={{ color: 'var(--emma-ink-65)' }}>
-      <div style={{ fontFamily: 'var(--emma-font-mono)', fontSize: 10, letterSpacing: '0.08em' }}>
-        {name} · declinado
-      </div>
-    </div>
-  );
-}
-
-/** Phase 07e fallback — empty cards are the worst UX failure mode
- *  because they read as a broken render. ALWAYS render visible
- *  content; if state is unknown, show a thinking marker. */
-function renderUnknown() {
-  return (
-    <div className="flex items-center gap-2" style={{ color: 'var(--emma-ink-65)' }}>
-      <span className="emma-tool-glyph is-thinking">◐</span>
-      <span style={{ fontFamily: 'var(--emma-font-mono)', fontSize: 10, letterSpacing: '0.08em' }}>
-        pensando…
-      </span>
-    </div>
-  );
-}
-
 export function ChatToolCard({ part }: ChatToolCardProps) {
   const name = toolName(part.type);
+  const isCompact = part.state !== 'output-available';
   let body: React.ReactNode;
   switch (part.state) {
     case 'input-streaming':
-      body = renderInputStreaming();
+      body = renderInputStreaming(name);
       break;
     case 'input-available':
       body = renderInputAvailable(name);
@@ -277,14 +291,20 @@ export function ChatToolCard({ part }: ChatToolCardProps) {
       break;
     case 'output-available':
       body = renderOutput(name, part.output);
-      // Even the "happy path" output renderer can return null when
-      // the result shape didn't match any known tool. Fall through
-      // to the thinking glyph so the card is never empty.
-      if (body === null || body === undefined) body = renderUnknown();
+      if (body === null || body === undefined) body = renderUnknown(name);
       break;
     default:
-      body = renderUnknown();
+      body = renderUnknown(name);
   }
 
-  return <div className="emma-tool-card">{body}</div>;
+  return (
+    <div
+      className={`emma-tool-card ${isCompact ? 'emma-tool-card-compact-wrap' : ''}`}
+      data-tool-cell
+      data-tool-name={name}
+      data-tool-state={part.state}
+    >
+      {body}
+    </div>
+  );
 }
