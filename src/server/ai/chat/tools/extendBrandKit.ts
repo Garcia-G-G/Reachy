@@ -19,10 +19,12 @@ import type { EmmaToolContext } from '../context';
 export function createExtendBrandKitTool(ctx: EmmaToolContext) {
   return tool({
     description: TOOL_DESCRIPTIONS.extendBrandKit,
-    inputSchema: z.object({
-      field: z.enum(['logoKey', 'palette', 'visualStyle', 'voiceTone', 'allowsHumans']),
-      value: z.string().min(1).max(400).describe(TOOL_DESCRIPTIONS.extendBrandKitValueHelp),
-    }),
+    inputSchema: z
+      .object({
+        field: z.enum(['logoKey', 'palette', 'visualStyle', 'voiceTone', 'allowsHumans']),
+        value: z.string().min(1).max(400).describe(TOOL_DESCRIPTIONS.extendBrandKitValueHelp),
+      })
+      .strict(),
     execute: async (input) => {
       const patch: Partial<typeof brandKit.$inferInsert> = {};
 

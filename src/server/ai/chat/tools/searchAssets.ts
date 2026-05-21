@@ -20,11 +20,13 @@ import type { EmmaToolContext } from '../context';
 export function createSearchAssetsTool(ctx: EmmaToolContext) {
   return tool({
     description: TOOL_DESCRIPTIONS.searchAssets,
-    inputSchema: z.object({
-      query: z.string().min(1).max(200),
-      kind: z.enum(['image', 'copy', 'video']).optional(),
-      limit: z.number().int().min(1).max(20).default(8),
-    }),
+    inputSchema: z
+      .object({
+        query: z.string().min(1).max(200),
+        kind: z.enum(['image', 'copy', 'video']).optional(),
+        limit: z.number().int().min(1).max(20).default(8),
+      })
+      .strict(),
     execute: async (input) => {
       const conditions = [eq(generation.projectId, ctx.projectId), eq(generation.status, 'done')];
       if (input.kind) conditions.push(eq(generation.type, input.kind));

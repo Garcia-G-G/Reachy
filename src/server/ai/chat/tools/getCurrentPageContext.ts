@@ -18,7 +18,7 @@ export function createGetCurrentPageContextTool(ctx: EmmaToolContext) {
   return tool({
     description:
       "Read the user's current page context — route, project (when on a project page), and any focused asset. Call this at the start of any turn where guidance depends on where the user is.",
-    inputSchema: z.object({}),
+    inputSchema: z.object({}).strict(),
     execute: async () => {
       return {
         route: ctx.currentRoute ?? null,

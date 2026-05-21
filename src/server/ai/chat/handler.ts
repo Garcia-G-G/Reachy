@@ -9,7 +9,7 @@ import {
   CHAT_MAX_TOOL_CALLS_PER_TURN,
   CHAT_RECENT_ASSETS_IN_CONTEXT,
 } from '@/server/config/chatLimits';
-import { buildEmmaSystemPrompt } from '@/server/config/chatSystemPrompts';
+import { buildEmmaSystemPrompt, type EmmaSessionSnapshot } from '@/server/config/chatSystemPrompts';
 import { buildStreamErrorSurface, extractOpenAIRequestId } from '@/server/config/emmaErrors';
 import {
   EMMA_MAX_OUTPUT_TOKENS,
@@ -30,6 +30,8 @@ import { chatThread } from '@/server/db/schema/chatThreads';
 import { generation } from '@/server/db/schema/generations';
 import { project } from '@/server/db/schema/projects';
 import type { ProductBrief } from '@/server/ingest/extractBrief';
+import { detectOrphanedToolUse, sanitizeForOpenAI } from '@/server/lib/messageSanitizer';
+import { estimateTokens } from '@/server/lib/tokenEstimate';
 import { signedDownloadUrl } from '@/server/storage/r2';
 import type { EmmaToolContext } from './context';
 import { buildEmmaTools } from './tools';
@@ -263,6 +265,23 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     input.uiLocale ?? ((brandKit_.languages?.[0] ?? 'en') as 'en' | 'es');
 
   // ── 2. Build the system prompt ──
+  // Phase 07j — session snapshot so Emma can reference the current
+  // page + last generation in her questions instead of asking
+  // generic "¿qué necesitás?".
+  const lastGenerationForSnapshot: EmmaSessionSnapshot['lastGeneration'] = (() => {
+    const r = recentAssetsRows[0];
+    if (!r) return null;
+    const params = (r.params ?? {}) as { idea?: string };
+    return {
+      kind: r.type ?? 'image',
+      idea: params.idea ?? '',
+    };
+  })();
+  const sessionSnapshot: EmmaSessionSnapshot = {
+    userFirstName: input.userDisplayName?.trim().split(/\s+/)[0] || 'amigo',
+    currentRoute: input.clientContext?.currentRoute ?? null,
+    lastGeneration: lastGenerationForSnapshot,
+  };
   const systemPrompt = buildEmmaSystemPrompt({
     project: project_,
     brandKit: brandKit_,
@@ -270,6 +289,7 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     recentAssets,
     language,
     userDisplayName: input.userDisplayName,
+    sessionSnapshot,
   });
 
   // ── 3. Load history + persist the new user message ──
@@ -352,7 +372,7 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
   const tools = buildEmmaTools(toolCtx);
 
   // ── 5. Map history + new user message to AI-SDK messages ──
-  const modelMessages: ModelMessage[] = [
+  const modelMessagesRaw: ModelMessage[] = [
     ...persistedToModelMessages(history).filter((m) => {
       // Drop empty placeholder messages from any 'system'-role rows
       // we never expect, but defensively keep the filter.
@@ -362,13 +382,39 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     { role: 'user', content: userContent },
   ];
 
+  // Phase 07j — final guard against orphan tool-call / tool-result
+  // pairs leaking to OpenAI. The persisted-history sanitizer already
+  // drops every tool-* part, so this should be a no-op 99% of the
+  // time — but it's belt-and-braces against future regressions
+  // (and detectOrphanedToolUse below tells us when it actually fired).
+  const hadOrphan = detectOrphanedToolUse(modelMessagesRaw);
+  const modelMessages = sanitizeForOpenAI(modelMessagesRaw);
+
   // Phase 07i — log dispatched turn shape so we can spot the
   // "history grew past the context window" failure mode the moment
   // it happens, rather than chasing it through a stream error.
-  const approxChars = JSON.stringify({ systemPrompt, modelMessages }).length;
+  const approxChars = estimateTokens({ systemPrompt, modelMessages }) * 4;
+  const estimatedTokens = estimateTokens({ systemPrompt, modelMessages });
   console.log(
-    `[reachy:emma] dispatching turn: ${modelMessages.length} messages, ~${approxChars} chars, ~${Math.round(approxChars / 4)} tokens`,
+    `[reachy:emma] dispatching turn: ${modelMessages.length} messages, ~${approxChars} chars, ~${estimatedTokens} tokens`,
   );
+
+  // Phase 07j — EMMA_DEBUG=1 surfaces the full diagnostic payload
+  // so a regression can be traced without redeploying.
+  if (process.env.EMMA_DEBUG === '1') {
+    console.log('[reachy:emma:debug] outgoing request', {
+      chatId: input.threadId,
+      messageCount: modelMessages.length,
+      estimatedTokens,
+      systemPromptChars: systemPrompt.length,
+      systemPromptTokens: estimateTokens(systemPrompt),
+      toolNames: Object.keys(tools),
+      lastMessageRole: modelMessages.at(-1)?.role,
+      hadOrphanedToolUse: hadOrphan,
+      currentRoute: sessionSnapshot.currentRoute,
+      hasLastGeneration: sessionSnapshot.lastGeneration !== null,
+    });
+  }
 
   // Heavy-request detection — bump reasoning to 'high' when the
   // user's text contains orchestration cues (campaign, audit, all

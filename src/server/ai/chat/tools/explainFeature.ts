@@ -21,13 +21,15 @@ export function createExplainFeatureTool(ctx: EmmaToolContext) {
   return tool({
     description:
       'Explain a Reachy feature. Returns bilingual title + description + CTA + navPath. Use when the user asks "what is X" or "how do I do Y".',
-    inputSchema: z.object({
-      featureKey: z
-        .enum(keyEnum)
-        .describe(
-          'Catalog key — e.g. autopilot / generate-image / library / identity / campaigns.',
-        ),
-    }),
+    inputSchema: z
+      .object({
+        featureKey: z
+          .enum(keyEnum)
+          .describe(
+            'Catalog key — e.g. autopilot / generate-image / library / identity / campaigns.',
+          ),
+      })
+      .strict(),
     execute: async (input) => {
       const feature = emmaFeatureByKey(input.featureKey);
       if (!feature) {

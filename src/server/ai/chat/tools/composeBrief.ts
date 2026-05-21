@@ -38,29 +38,35 @@ const CHANNELS: readonly ComposeBriefChannel[] = [
 
 export function createComposeBriefTool(ctx: EmmaToolContext) {
   return tool({
-    description:
-      'Compose a complete, human-voiced brief that the user can paste into the right Reachy Generate page. ALWAYS use this when the user asks to "create / make / generate / hazme / créame" anything. You do NOT generate the asset; you compose the brief and tell the user where to paste it.',
-    inputSchema: z.object({
-      channel: z
-        .enum(CHANNELS as [ComposeBriefChannel, ...ComposeBriefChannel[]])
-        .describe(
-          'The target Reachy channel — picks the right paste location (Generate → Image / Copy / Reel) + format preset.',
-        ),
-      productContext: z
-        .string()
-        .min(1)
-        .max(800)
-        .describe(
-          "The user's ask in concrete terms — the feature, moment, audience, or angle that should drive the brief. Quote the user verbatim when you can.",
-        ),
-      voiceHint: z
-        .string()
-        .max(200)
-        .optional()
-        .describe(
-          'Optional voice direction beyond the brand default (e.g. "more direct than usual", "techie audience, no marketing language").',
-        ),
-    }),
+    description: [
+      'Compose a complete, human-voiced brief the user can paste into the right Reachy Generate page.',
+      'Use this when the user asks to create / make / generate / hazme / créame something AND you already have both a CHANNEL and a CONCRETE PRODUCT/FEATURE/MOMENT to write about.',
+      'DO NOT call this with an empty or one-word productContext — if the user said "creame una" with nothing else, ask 1-2 questions FIRST (channel + angle), THEN call this with the gathered info.',
+      'You do NOT generate the asset; you compose the brief and tell the user where to paste it.',
+    ].join(' '),
+    inputSchema: z
+      .object({
+        channel: z
+          .enum(CHANNELS as [ComposeBriefChannel, ...ComposeBriefChannel[]])
+          .describe(
+            'The target Reachy channel — picks the right paste location (Generate → Image / Copy / Reel) + format preset.',
+          ),
+        productContext: z
+          .string()
+          .min(1)
+          .max(800)
+          .describe(
+            "The user's ask in concrete terms — the feature, moment, audience, or angle that should drive the brief. Quote the user verbatim when you can.",
+          ),
+        voiceHint: z
+          .string()
+          .max(200)
+          .optional()
+          .describe(
+            'Optional voice direction beyond the brand default (e.g. "more direct than usual", "techie audience, no marketing language").',
+          ),
+      })
+      .strict(),
     execute: async (input) => {
       if (!ctx.project.slug) {
         return {

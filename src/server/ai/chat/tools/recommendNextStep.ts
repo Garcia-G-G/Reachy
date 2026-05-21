@@ -30,7 +30,7 @@ export function createRecommendNextStepTool(ctx: EmmaToolContext) {
   return tool({
     description:
       'Read the current project state and return a digest Emma uses to suggest next actions. Call when the user asks "what should I do" / "where do I go next" / "no sé qué hacer".',
-    inputSchema: z.object({}),
+    inputSchema: z.object({}).strict(),
     execute: async () => {
       const projectId = ctx.projectId;
 

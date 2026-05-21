@@ -16,11 +16,13 @@ import type { EmmaToolContext } from '../context';
 export function createSearchBrandKitTool(ctx: EmmaToolContext) {
   return tool({
     description: TOOL_DESCRIPTIONS.searchBrandKit,
-    inputSchema: z.object({
-      field: z
-        .enum(['palette', 'tone', 'voice', 'audience', 'logo', 'visualStyle', 'all'])
-        .default('all'),
-    }),
+    inputSchema: z
+      .object({
+        field: z
+          .enum(['palette', 'tone', 'voice', 'audience', 'logo', 'visualStyle', 'all'])
+          .default('all'),
+      })
+      .strict(),
     execute: async (input) => {
       const k = ctx.brandKit;
       if (input.field === 'palette') {

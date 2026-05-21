@@ -27,11 +27,13 @@ import type { EmmaToolContext } from '../context';
 export function createIngestUploadedFileTool(ctx: EmmaToolContext) {
   return tool({
     description: TOOL_DESCRIPTIONS.ingestUploadedFile,
-    inputSchema: z.object({
-      r2Key: z.string().min(1),
-      mime: z.string().nullable(),
-      originalName: z.string().min(1),
-    }),
+    inputSchema: z
+      .object({
+        r2Key: z.string().min(1),
+        mime: z.string().nullable(),
+        originalName: z.string().min(1),
+      })
+      .strict(),
     execute: async (input) => {
       try {
         const buf = await getR2Object(input.r2Key);

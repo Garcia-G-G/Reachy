@@ -20,13 +20,15 @@ import type { EmmaToolContext } from '../context';
 export function createDescribeImageTool(_ctx: EmmaToolContext) {
   return tool({
     description: TOOL_DESCRIPTIONS.describeImage,
-    inputSchema: z.object({
-      r2Key: z.string().min(1),
-      focus: z
-        .enum(['style', 'copy', 'composition', 'palette', 'all'])
-        .default('all')
-        .describe('What aspect to emphasize. Default `all` returns the full analysis.'),
-    }),
+    inputSchema: z
+      .object({
+        r2Key: z.string().min(1),
+        focus: z
+          .enum(['style', 'copy', 'composition', 'palette', 'all'])
+          .default('all')
+          .describe('What aspect to emphasize. Default `all` returns the full analysis.'),
+      })
+      .strict(),
     execute: async (input) => {
       const buf = await getR2Object(input.r2Key);
       const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;

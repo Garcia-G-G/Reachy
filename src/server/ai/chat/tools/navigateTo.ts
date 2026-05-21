@@ -24,21 +24,23 @@ export function createNavigateToTool(ctx: EmmaToolContext) {
   return tool({
     description:
       'Navigate the user to a path in the app. ASK FIRST in the prior message ("te llevo a X — ¿okay?"); only call after they confirm. Use {slug} as a placeholder for the current project slug.',
-    inputSchema: z.object({
-      path: z
-        .string()
-        .min(1)
-        .max(400)
-        .describe(
-          'The destination path. May include {slug} which the server resolves to the current project slug. Examples: "/app/projects/{slug}/library" / "/app/projects/{slug}/identity" / "/app/projects/new-from-upload".',
-        ),
-      reason: z
-        .string()
-        .min(1)
-        .max(280)
-        .optional()
-        .describe('Short one-line rationale shown to the user before navigation.'),
-    }),
+    inputSchema: z
+      .object({
+        path: z
+          .string()
+          .min(1)
+          .max(400)
+          .describe(
+            'The destination path. May include {slug} which the server resolves to the current project slug. Examples: "/app/projects/{slug}/library" / "/app/projects/{slug}/identity" / "/app/projects/new-from-upload".',
+          ),
+        reason: z
+          .string()
+          .min(1)
+          .max(280)
+          .optional()
+          .describe('Short one-line rationale shown to the user before navigation.'),
+      })
+      .strict(),
     execute: async (input) => {
       let resolved = input.path;
       if (resolved.includes('{slug}')) {
