@@ -1,6 +1,7 @@
 import 'server-only';
 import type { ToolSet } from 'ai';
 import type { EmmaToolContext } from '../context';
+import { createComposeBriefTool } from './composeBrief';
 import { createDescribeImageTool } from './describeImage';
 import { createExplainFeatureTool } from './explainFeature';
 import { createExtendBrandKitTool } from './extendBrandKit';
@@ -33,6 +34,11 @@ import { createSearchBrandKitTool } from './searchBrandKit';
  *   - highlightElement      — pulse a UI control to point at it
  *   - explainFeature        — quote the feature catalog verbatim
  *   - recommendNextStep     — read project state, surface 2-4 actions
+ *   - composeBrief          — Phase 07i. Writes a paste-ready brief
+ *                             when the user says "creame X". Without
+ *                             this in the registry the HARD_RULES in
+ *                             emmaConcierge cite a tool the model
+ *                             can't call, which destabilizes gpt-5.5.
  */
 export function buildEmmaTools(ctx: EmmaToolContext): ToolSet {
   return {
@@ -42,6 +48,7 @@ export function buildEmmaTools(ctx: EmmaToolContext): ToolSet {
     highlightElement: createHighlightElementTool(ctx),
     explainFeature: createExplainFeatureTool(ctx),
     recommendNextStep: createRecommendNextStepTool(ctx),
+    composeBrief: createComposeBriefTool(ctx),
     // State readers kept from worker era
     searchAssets: createSearchAssetsTool(ctx),
     searchBrandKit: createSearchBrandKitTool(ctx),

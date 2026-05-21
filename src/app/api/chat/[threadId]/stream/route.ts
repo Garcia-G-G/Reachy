@@ -127,15 +127,33 @@ export async function POST(
     // dev terminal still has the request-id for debugging.
     return result.toUIMessageStreamResponse({
       onError: (err) => {
-        // Phase 07i — the prior version logged err.toString() which
-        // came out as "[object Object]" for non-Error throws (the AI
-        // SDK wraps OpenAI's stream error events in plain objects).
-        // Structured logging surfaces the message + cause + a JSON
-        // preview so the dev terminal shows the OpenAI request_id
-        // without grepping.
-        const message = err instanceof Error ? err.message : String(err);
-        const cause = err instanceof Error ? err.cause : undefined;
+        // Phase 07i — OpenAI's Responses-API stream errors arrive as
+        // plain objects shaped `{ type: 'error', sequence_number, error:
+        // { type, code, message, param } }`. Those don't have a `.message`
+        // at the top level, so the prior `err.message` fallback produced
+        // "[object Object]" in the dev terminal. Unwrap the inner error
+        // explicitly so the log shows the real OpenAI message + the
+        // request_id that lives inside it.
+        let message: string;
+        let cause: unknown;
         let raw: string;
+        if (err instanceof Error) {
+          message = err.message;
+          cause = err.cause;
+        } else if (
+          err !== null &&
+          typeof err === 'object' &&
+          'error' in err &&
+          (err as { error?: unknown }).error !== null &&
+          typeof (err as { error?: unknown }).error === 'object' &&
+          typeof ((err as { error: { message?: unknown } }).error.message) === 'string'
+        ) {
+          message = (err as { error: { message: string } }).error.message;
+          cause = (err as { error: { code?: unknown } }).error.code;
+        } else {
+          message = typeof err === 'string' ? err : 'unknown stream error';
+          cause = undefined;
+        }
         try {
           raw =
             typeof err === 'object' && err !== null
@@ -148,7 +166,9 @@ export async function POST(
 
         // Persist an error-surface row so the chat shows a retry-able
         // card on reload — no more silent ghosting. Fire-and-forget;
-        // must not block the response.
+        // must not block the response. We pass `message + raw` together
+        // because the request_id can live in either depending on how
+        // OpenAI emits the event.
         void persistEmmaErrorSurface({
           threadId,
           locale: appLocale,
