@@ -87,6 +87,10 @@ export default async function LibraryPage({ params, searchParams }: LibraryPageP
       tab={tab}
       images={imageOnly.map((a) => ({
         id: a.id,
+        // Phase 08 — generationId is what the editor route keys on. The
+        // schema has had it on `asset` since the AI-typography pivot;
+        // not exposing it here is what kept the library a dead-end.
+        generationId: a.generationId,
         format: a.format,
         width: a.width,
         height: a.height,
@@ -103,6 +107,10 @@ export default async function LibraryPage({ params, searchParams }: LibraryPageP
 
 interface LibraryAsset {
   id: string;
+  /** Phase 08 — present when the asset was rendered through the
+   *  AI-typography pipeline (which is everything since 2026-05).
+   *  Library cells link to the editor only when this is set. */
+  generationId: string | null;
   format: string | null;
   width: number | null;
   height: number | null;
@@ -156,7 +164,7 @@ function Content({
         (images.length === 0 ? (
           <p className="text-ink-3 italic">{t('empty')}</p>
         ) : (
-          <LibraryGrid assets={images} />
+          <LibraryGrid assets={images} slug={slug} />
         ))}
 
       {tab === 'copy' &&
