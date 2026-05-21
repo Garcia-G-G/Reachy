@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { AskEmmaBlock } from '@/components/app/ask-emma-block';
 import { LayoutPreview } from '@/components/app/layout-previews';
 import { IMAGE_FORMATS, type ImageFormat } from '@/lib/image-formats';
 import {
@@ -431,9 +433,35 @@ export function GenerationEditor(props: GenerationEditorProps) {
               window.location.href = `/app/projects/${slug}/generate/image/${res.data.generationId}`;
             }}
           />
+
+          {/* Phase 08c — edit copilot. Mounts as the 5th sidebar
+              block; bootstraps its own thread + chips, pins Emma to
+              this generation via clientContext.focusedGenerationId.
+              The global EmmaWidget auto-hides while this is alive
+              (data-emma-inline-mounted on body). */}
+          {status === 'done' && !isLegacy ? (
+            <EditorAskEmma generationId={generationId} slug={slug} />
+          ) : null}
         </aside>
       </div>
     </div>
+  );
+}
+
+/** Thin wrapper that resolves the current pathname for AskEmmaBlock's
+ *  clientContext.currentRoute and wires the onNewGeneration callback
+ *  to the same navigation the manual sidebar buttons use. */
+function EditorAskEmma({ generationId, slug }: { generationId: string; slug: string }) {
+  const pathname = usePathname() ?? `/app/projects/${slug}/generate/image/${generationId}`;
+  return (
+    <AskEmmaBlock
+      generationId={generationId}
+      projectSlug={slug}
+      currentRoute={pathname}
+      onNewGeneration={(newId) => {
+        window.location.href = `/app/projects/${slug}/generate/image/${newId}`;
+      }}
+    />
   );
 }
 

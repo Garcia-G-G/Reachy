@@ -133,6 +133,22 @@ export interface EmmaSessionSnapshot {
   } | null;
 }
 
+/** Phase 08c — when Emma is mounted inside the asset editor, the
+ *  handler threads in the focused generation's current state. This
+ *  unlocks edit-mode behavior: Emma can call changeHeadline /
+ *  changeLayout / changePalette / addVariant / regenerateAsset
+ *  tools because she now knows what's on screen.
+ *
+ *  When null (Emma is on a page that's NOT the editor), the edit
+ *  tools aren't registered and Emma stays in pure-concierge mode. */
+export interface EmmaEditFocus {
+  generationId: string;
+  headline: string | null;
+  layoutId: string | null;
+  palette: { ink: string; paper: string; accent: string } | null;
+  format: string | null;
+}
+
 function buildSessionSnapshot(snap: EmmaSessionSnapshot): string {
   const lines = [
     '[SESSION]',
@@ -143,6 +159,35 @@ function buildSessionSnapshot(snap: EmmaSessionSnapshot): string {
       : 'last generation: (none yet)',
   ];
   return lines.join('\n');
+}
+
+/** Phase 08c — edit-mode block. Only injected when Emma is bound to
+ *  a focused generation. Tells the model which edit tools it has, the
+ *  current state of the asset (so "shorter headline" knows what it's
+ *  shortening), and the cost / latency it's spending on each call. */
+function buildEditModeBlock(focus: EmmaEditFocus): string {
+  const palette = focus.palette
+    ? `${focus.palette.ink} (ink) / ${focus.palette.paper} (paper) / ${focus.palette.accent} (accent)`
+    : '(not recorded)';
+  return [
+    '─── EDIT MODE ───',
+    `You are mounted inside the editor for generation ${focus.generationId}.`,
+    `Current state — headline: "${focus.headline ?? '(none)'}", layout: ${focus.layoutId ?? '(unknown)'}, palette: ${palette}, format: ${focus.format ?? '(unknown)'}.`,
+    '',
+    'Edit tools available to you (use ONLY when the user asks for the matching action):',
+    '  - changeHeadline({ newHeadline, ... }) — rewrite headline / "más sobrio" / "más corto".',
+    '  - changeLayout({ layoutId }) — switch to another layout template.',
+    '  - changePalette({ ink, paper, accent }) — swap colors. You pick concrete hex.',
+    '  - addVariant({ tweakPrompt? }) — same brief, model re-rolls.',
+    '  - regenerateAsset({ tweakHint }) — full re-roll informed by a hint.',
+    '',
+    'Each edit costs ~$0.21 and takes 15-30s. After a successful tool call:',
+    '  1. Confirm in ONE short line ("Listo. Headline más corto.").',
+    '  2. Ask ONE follow-up question — never a menu.',
+    'The editor handles navigation to the new generation automatically; do NOT call navigateTo for edit results.',
+    '',
+    'When the user says "más sobrio" / "más caliente" / "más afilado" without naming what to change: ask "¿el headline, los colores, o el layout?" before calling any tool.',
+  ].join('\n');
 }
 
 /** Question bank rendered as plain prose so the model can copy
@@ -178,6 +223,10 @@ export interface BuildEmmaSystemPromptInput {
    *  block becomes "(no session snapshot)". The stream route threads
    *  one in for every live turn. */
   sessionSnapshot?: EmmaSessionSnapshot;
+  /** Phase 08c. Optional — only set when Emma is mounted in the
+   *  asset editor (AskEmmaBlock). Unlocks edit-mode language in the
+   *  prompt. */
+  editFocus?: EmmaEditFocus | null;
 }
 
 /**
@@ -255,11 +304,13 @@ export function buildEmmaSystemPrompt(input: BuildEmmaSystemPromptInput): string
       ? buildSessionSnapshot(input.sessionSnapshot)
       : '[SESSION]\n(no session snapshot)',
     '',
+    input.editFocus ? buildEditModeBlock(input.editFocus) : '',
+    input.editFocus ? '' : '',
     '─── USER ───',
     greetingLine,
   ];
 
-  return sections.join('\n');
+  return sections.filter((s) => s !== '' || true).join('\n');
 }
 
 /** Welcome line Emma shows in an empty thread. */

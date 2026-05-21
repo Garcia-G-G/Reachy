@@ -56,7 +56,26 @@ export function EmmaWidget() {
     };
   }, [skip, projectSlug]);
 
-  if (skip || !pos.hydrated) return null;
+  // Phase 08c — when the editor's AskEmmaBlock is mounted it sets
+  // `data-emma-inline-mounted="true"` on body. We observe that and
+  // hide the floating bubble so Garcia never sees two Emma entry
+  // points competing for attention.
+  const [inlineMounted, setInlineMounted] = useState(false);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const sync = () => {
+      setInlineMounted(document.body.getAttribute('data-emma-inline-mounted') === 'true');
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['data-emma-inline-mounted'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  if (skip || !pos.hydrated || inlineMounted) return null;
 
   // Bubble — collapsed state.
   if (!pos.open) {

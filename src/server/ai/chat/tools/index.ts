@@ -3,6 +3,11 @@ import type { ToolSet } from 'ai';
 import type { EmmaToolContext } from '../context';
 import { createComposeBriefTool } from './composeBrief';
 import { createDescribeImageTool } from './describeImage';
+import { createAddVariantTool } from './edit/addVariant';
+import { createChangeHeadlineTool } from './edit/changeHeadline';
+import { createChangeLayoutTool } from './edit/changeLayout';
+import { createChangePaletteTool } from './edit/changePalette';
+import { createRegenerateAssetTool } from './edit/regenerateAsset';
 import { createExplainFeatureTool } from './explainFeature';
 import { createExtendBrandKitTool } from './extendBrandKit';
 import { createGetCurrentPageContextTool } from './getCurrentPageContext';
@@ -41,7 +46,7 @@ import { createSearchBrandKitTool } from './searchBrandKit';
  *                             can't call, which destabilizes gpt-5.5.
  */
 export function buildEmmaTools(ctx: EmmaToolContext): ToolSet {
-  return {
+  const base: ToolSet = {
     // Concierge core
     getCurrentPageContext: createGetCurrentPageContextTool(ctx),
     navigateTo: createNavigateToTool(ctx),
@@ -56,4 +61,20 @@ export function buildEmmaTools(ctx: EmmaToolContext): ToolSet {
     ingestUploadedFile: createIngestUploadedFileTool(ctx),
     extendBrandKit: createExtendBrandKitTool(ctx),
   };
+  // Phase 08c — edit copilot. Only register edit tools when Emma is
+  // bound to a focused generation (the AskEmmaBlock embeds in the
+  // editor sidebar with focusedGenerationId set). Outside the editor
+  // these would either error on every call (no focused asset) or
+  // worse, encourage the model to invent a generationId.
+  if (ctx.focusedGenerationId) {
+    return {
+      ...base,
+      changeHeadline: createChangeHeadlineTool(ctx),
+      changeLayout: createChangeLayoutTool(ctx),
+      changePalette: createChangePaletteTool(ctx),
+      addVariant: createAddVariantTool(ctx),
+      regenerateAsset: createRegenerateAssetTool(ctx),
+    };
+  }
+  return base;
 }

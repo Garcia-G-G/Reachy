@@ -9,7 +9,11 @@ import {
   CHAT_MAX_TOOL_CALLS_PER_TURN,
   CHAT_RECENT_ASSETS_IN_CONTEXT,
 } from '@/server/config/chatLimits';
-import { buildEmmaSystemPrompt, type EmmaSessionSnapshot } from '@/server/config/chatSystemPrompts';
+import {
+  buildEmmaSystemPrompt,
+  type EmmaEditFocus,
+  type EmmaSessionSnapshot,
+} from '@/server/config/chatSystemPrompts';
 import { buildStreamErrorSurface, extractOpenAIRequestId } from '@/server/config/emmaErrors';
 import {
   EMMA_MAX_OUTPUT_TOKENS,
@@ -282,6 +286,61 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     currentRoute: input.clientContext?.currentRoute ?? null,
     lastGeneration: lastGenerationForSnapshot,
   };
+
+  // Phase 08c — when the AskEmmaBlock pins Emma to a focused
+  // generation, hydrate its current state for the [EDIT MODE] block
+  // so the system prompt knows what's on screen. Single DB hit per
+  // turn; in-flight history sanitization keeps the prompt lean.
+  let editFocus: EmmaEditFocus | null = null;
+  if (input.clientContext?.focusedGenerationId) {
+    const [focusedGen] = await db
+      .select({
+        id: generation.id,
+        format: generation.format,
+        params: generation.params,
+      })
+      .from(generation)
+      .where(eq(generation.id, input.clientContext.focusedGenerationId))
+      .limit(1);
+    if (focusedGen && (focusedGen as { params?: unknown }).params) {
+      type PromptStateLike = {
+        layoutId?: string;
+        brandColors?: { ink?: string; paper?: string; accent?: string };
+        copy?: { headline?: string } | Array<{ headline?: string }>;
+      };
+      const rawParams = focusedGen.params as {
+        aiPromptState?: PromptStateLike;
+      } & PromptStateLike;
+      const aiState = rawParams.aiPromptState ?? rawParams;
+      const copy = aiState?.copy;
+      let headline: string | null = null;
+      if (Array.isArray(copy)) {
+        for (const slot of copy) {
+          if (slot?.headline) {
+            headline = slot.headline;
+            break;
+          }
+        }
+      } else {
+        headline = copy?.headline ?? null;
+      }
+      const colors = aiState?.brandColors;
+      editFocus = {
+        generationId: focusedGen.id,
+        headline,
+        layoutId: aiState?.layoutId ?? null,
+        palette: colors
+          ? {
+              ink: colors.ink ?? '#14110D',
+              paper: colors.paper ?? '#F1EBDF',
+              accent: colors.accent ?? '#B6481A',
+            }
+          : null,
+        format: focusedGen.format,
+      };
+    }
+  }
+
   const systemPrompt = buildEmmaSystemPrompt({
     project: project_,
     brandKit: brandKit_,
@@ -290,6 +349,7 @@ export async function runEmmaTurn(input: RunEmmaTurnInput) {
     language,
     userDisplayName: input.userDisplayName,
     sessionSnapshot,
+    editFocus,
   });
 
   // ── 3. Load history + persist the new user message ──
