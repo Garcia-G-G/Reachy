@@ -1,0 +1,235 @@
+/* ============================================================
+   Reachy — compact control tokens (Phase 08)
+
+   The principle: editorial Fraunces stays in CONTENT (page hero,
+   asset headlines, library section titles, Emma's chat surface).
+   Functional CONTROLS — pickers, chips, toggles — use sans for
+   labels and mono for the eyebrow header. That separation is
+   what made the previous form feel "antiguo": the 13-tile layout
+   picker rendered every label in display-serif at 13px which
+   reads as decoration, not control.
+
+   Cannot be derived: each value below is a deliberate sizing
+   choice from Garcia's "ligero y moderno" target. Tightening any
+   tightens the look of every compact control that adopts the
+   tokens (currently: ControlPicker, library-lightbox metadata
+   chips, edit-copilot suggestion chips).
+   ============================================================ */
+
+:root {
+  /* ── Chip geometry ───────────────────────────────────────── */
+  --ctrl-chip-w: 56px;
+  --ctrl-chip-h: 72px;
+  --ctrl-chip-gap: 8px;
+  --ctrl-chip-radius: 6px;
+  --ctrl-chip-padding: 6px;
+  --ctrl-strip-padding-y: 8px;
+
+  /* ── Label typography ────────────────────────────────────── */
+  --ctrl-label-size: 11px;
+  --ctrl-label-line-height: 1.2;
+  --ctrl-label-weight: 500;
+  --ctrl-label-family: var(--font-sans);
+  --ctrl-label-color: var(--ink-2, #4a4338);
+  --ctrl-label-color-muted: var(--ink-3, #8b8170);
+
+  /* ── Header (eyebrow) typography ─────────────────────────── */
+  --ctrl-header-size: 12px;
+  --ctrl-header-family: var(--font-mono);
+  --ctrl-header-weight: 500;
+  --ctrl-header-tracking: 0.06em;
+  --ctrl-header-transform: uppercase;
+
+  /* ── Selection / hover surfaces ──────────────────────────── */
+  --ctrl-selected-outline: 1.5px solid var(--ink, #14110d);
+  --ctrl-selected-dot-size: 4px;
+  --ctrl-selected-dot-color: var(--accent, #b6481a);
+  --ctrl-hover-bg: rgba(20, 17, 13, 0.04);
+  --ctrl-border-color: rgba(20, 17, 13, 0.18);
+
+  /* ── Tooltip ─────────────────────────────────────────────── */
+  --ctrl-tooltip-bg: var(--ink, #14110d);
+  --ctrl-tooltip-fg: var(--paper, #f1ebdf);
+  --ctrl-tooltip-radius: 4px;
+  --ctrl-tooltip-padding-y: 6px;
+  --ctrl-tooltip-padding-x: 10px;
+  --ctrl-tooltip-max-w: 280px;
+  --ctrl-tooltip-delay-ms: 200ms;
+
+  /* ── Motion (mirrors emma-tokens motion if present) ──────── */
+  --ctrl-motion-duration-quick: 150ms;
+  --ctrl-motion-duration-base: 200ms;
+  --ctrl-motion-easing-out: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ── ControlPicker layout ───────────────────────────────────── */
+.ctrl-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ctrl-picker-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ctrl-picker-header-label {
+  font-family: var(--ctrl-header-family);
+  font-size: var(--ctrl-header-size);
+  font-weight: var(--ctrl-header-weight);
+  letter-spacing: var(--ctrl-header-tracking);
+  text-transform: var(--ctrl-header-transform);
+  color: var(--ink, #14110d);
+}
+
+.ctrl-picker-header-hint {
+  font-family: var(--ctrl-header-family);
+  font-size: var(--ctrl-header-size);
+  letter-spacing: var(--ctrl-header-tracking);
+  color: var(--ctrl-label-color-muted);
+}
+
+.ctrl-picker-header-hint strong {
+  color: var(--ink, #14110d);
+  font-weight: 500;
+}
+
+.ctrl-picker-see-all {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font-family: var(--ctrl-header-family);
+  font-size: var(--ctrl-header-size);
+  letter-spacing: var(--ctrl-header-tracking);
+  text-transform: var(--ctrl-header-transform);
+  color: var(--ctrl-label-color-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--ctrl-motion-duration-quick) var(--ctrl-motion-easing-out);
+}
+
+.ctrl-picker-see-all:hover {
+  color: var(--accent, #b6481a);
+}
+
+.ctrl-picker-strip {
+  display: flex;
+  gap: var(--ctrl-chip-gap);
+  overflow-x: auto;
+  padding: var(--ctrl-strip-padding-y) 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ctrl-border-color) transparent;
+}
+
+.ctrl-picker-strip::-webkit-scrollbar {
+  height: 6px;
+}
+.ctrl-picker-strip::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ctrl-picker-strip::-webkit-scrollbar-thumb {
+  background: var(--ctrl-border-color);
+  border-radius: 3px;
+}
+
+.ctrl-picker-chip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: var(--ctrl-chip-w);
+  padding: var(--ctrl-chip-padding);
+  border: 1px solid var(--ctrl-border-color);
+  border-radius: var(--ctrl-chip-radius);
+  background: transparent;
+  cursor: pointer;
+  text-align: center;
+  position: relative;
+  transition:
+    border-color var(--ctrl-motion-duration-quick) var(--ctrl-motion-easing-out),
+    background var(--ctrl-motion-duration-quick) var(--ctrl-motion-easing-out);
+}
+
+.ctrl-picker-chip:hover:not([disabled]) {
+  background: var(--ctrl-hover-bg);
+}
+
+.ctrl-picker-chip[data-selected="true"] {
+  border: var(--ctrl-selected-outline);
+  background: var(--ctrl-hover-bg);
+}
+
+.ctrl-picker-chip[data-selected="true"]::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: var(--ctrl-selected-dot-size);
+  height: var(--ctrl-selected-dot-size);
+  border-radius: 50%;
+  background: var(--ctrl-selected-dot-color);
+}
+
+.ctrl-picker-chip:focus-visible {
+  outline: 2px solid var(--accent, #b6481a);
+  outline-offset: 2px;
+}
+
+.ctrl-picker-chip[disabled] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ctrl-picker-chip-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+}
+
+.ctrl-picker-chip-preview svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.ctrl-picker-chip-label {
+  font-family: var(--ctrl-label-family);
+  font-size: var(--ctrl-label-size);
+  font-weight: var(--ctrl-label-weight);
+  line-height: var(--ctrl-label-line-height);
+  color: var(--ctrl-label-color);
+  word-break: break-word;
+}
+
+/* ── Tooltip popup ─────────────────────────────────────────── */
+.ctrl-tooltip-popup {
+  background: var(--ctrl-tooltip-bg);
+  color: var(--ctrl-tooltip-fg);
+  border-radius: var(--ctrl-tooltip-radius);
+  padding: var(--ctrl-tooltip-padding-y) var(--ctrl-tooltip-padding-x);
+  max-width: var(--ctrl-tooltip-max-w);
+  font-family: var(--ctrl-label-family);
+  font-size: var(--ctrl-label-size);
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+/* ── "See all" gallery dialog body ─────────────────────────── */
+.ctrl-picker-gallery {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctrl-picker-chip,
+  .ctrl-picker-see-all {
+    transition-duration: 0ms !important;
+  }
+}

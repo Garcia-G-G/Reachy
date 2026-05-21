@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 import { LayoutPreview } from '@/components/app/layout-previews';
+import { ControlPicker, type ControlPickerItem } from '@/components/ui/control-picker';
 import {
   IMAGE_FORMAT_CATEGORIES,
   IMAGE_FORMAT_CATEGORY_LABELS,
@@ -580,79 +581,102 @@ export function GenerateImageForm({
           </div>
         </fieldset>
 
-        <div>
-          <label htmlFor="gen-style" className="mono-eyebrow mb-3 block">
-            Visual style
-            <span className="ml-2 text-ink-3 normal-case">
-              — default: <strong>{VISUAL_STYLE_META[activeBrandStyle].label}</strong>
-            </span>
-          </label>
-          <select
-            id="gen-style"
-            value={visualStyleOverride ?? ''}
-            onChange={(e) =>
-              setVisualStyleOverride(
-                e.target.value === '' ? null : (e.target.value as VisualStyleKey),
-              )
-            }
-            disabled={formDisabled}
-            className="field cursor-pointer"
-          >
-            <option value="">
-              Use brand default ({VISUAL_STYLE_META[activeBrandStyle].label})
-            </option>
-            {VISUAL_STYLE_KEYS.map((key) => (
-              <option key={key} value={key}>
-                {VISUAL_STYLE_META[key].label} — {VISUAL_STYLE_META[key].tagline}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Phase 08 — compact ControlPicker replaces the native select.
+            Visual style is functional metadata, not a brand moment;
+            sans labels + tooltip-on-hover beat a select on a touch
+            target and avoid the 30-line dropdown for a 7-option list. */}
+        <ControlPicker<VisualStylePickerId>
+          id="gen-style"
+          label="Visual style"
+          hint={
+            <>
+              default: <strong>{VISUAL_STYLE_META[activeBrandStyle].label}</strong>
+            </>
+          }
+          items={buildVisualStyleItems(activeBrandStyle)}
+          value={visualStyleOverride ?? 'default'}
+          onChange={(v) => setVisualStyleOverride(v === 'default' ? null : v)}
+          disabled={formDisabled}
+          galleryTitle="Visual style"
+          galleryRenderer={({ onPick, close }) =>
+            buildVisualStyleItems(activeBrandStyle).map((item) => {
+              const selected = (visualStyleOverride ?? 'default') === item.id;
+              return (
+                <GalleryTile
+                  key={item.id}
+                  active={selected}
+                  disabled={formDisabled}
+                  label={item.label}
+                  sublabel={item.tagline ?? ''}
+                  onClick={() => {
+                    onPick(item.id);
+                    close();
+                  }}
+                />
+              );
+            })
+          }
+        />
 
-        <div>
-          <div className="mb-3 flex items-baseline justify-between gap-3">
-            <span className="mono-eyebrow">Layout</span>
-            <span className="mono-eyebrow text-ink-3">
+        {/* Phase 08 — Layout picker becomes a compact strip + gallery
+            dialog. The 13-tile 3-col grid moved into the gallery for
+            users who want comparison-shop mode; default state is one
+            breathable strip. Tooltip carries the long tagline. */}
+        <ControlPicker<LayoutPickerId>
+          id="gen-layout"
+          label="Layout"
+          hint={
+            <>
               default for {IMAGE_FORMATS[format].label}:{' '}
-              <strong className="text-ink">
-                {LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label}
-              </strong>
-            </span>
-          </div>
-          {/* Visual layout picker — 3-col grid of schematic SVG previews.
-              Picking one sets layoutOverride. The first tile is "Default"
-              (delegates to DEFAULT_LAYOUT_FOR_FORMAT) and the last is
-              "No overlay" (raw AI image, no typography). */}
-          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-            <LayoutTile
-              active={layoutOverride === null}
-              disabled={formDisabled}
-              label="Default"
-              sublabel={LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label}
-              onClick={() => setLayoutOverride(null)}
-              previewId={DEFAULT_LAYOUT_FOR_FORMAT[format]}
-            />
-            {LAYOUT_IDS.map((id) => (
+              <strong>{LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label}</strong>
+            </>
+          }
+          items={buildLayoutItems(format)}
+          value={layoutOverride === null ? 'default' : layoutOverride}
+          onChange={(v) => setLayoutOverride(v === 'default' ? null : v)}
+          disabled={formDisabled}
+          galleryTitle="Layout"
+          galleryRenderer={({ onPick, close }) => (
+            <>
               <LayoutTile
-                key={id}
-                active={layoutOverride === id}
+                active={layoutOverride === null}
                 disabled={formDisabled}
-                label={LAYOUT_META[id].label}
-                sublabel={LAYOUT_META[id].tagline}
-                onClick={() => setLayoutOverride(id)}
-                previewId={id}
+                label="Default"
+                sublabel={LAYOUT_META[DEFAULT_LAYOUT_FOR_FORMAT[format]].label}
+                onClick={() => {
+                  onPick('default');
+                  close();
+                }}
+                previewId={DEFAULT_LAYOUT_FOR_FORMAT[format]}
               />
-            ))}
-            <LayoutTile
-              active={layoutOverride === 'none'}
-              disabled={formDisabled}
-              label="No overlay"
-              sublabel="Raw AI image, no typography"
-              onClick={() => setLayoutOverride('none')}
-              previewId={null}
-            />
-          </div>
-        </div>
+              {LAYOUT_IDS.map((id) => (
+                <LayoutTile
+                  key={id}
+                  active={layoutOverride === id}
+                  disabled={formDisabled}
+                  label={LAYOUT_META[id].label}
+                  sublabel={LAYOUT_META[id].tagline}
+                  onClick={() => {
+                    onPick(id);
+                    close();
+                  }}
+                  previewId={id}
+                />
+              ))}
+              <LayoutTile
+                active={layoutOverride === 'none'}
+                disabled={formDisabled}
+                label="No overlay"
+                sublabel="Raw AI image, no typography"
+                onClick={() => {
+                  onPick('none');
+                  close();
+                }}
+                previewId={null}
+              />
+            </>
+          )}
+        />
 
         {/* MODE: exploration (N independent attempts) vs sequence (N frames
             that read as a build / carousel). Sequence mode requires a layout
@@ -1106,6 +1130,130 @@ function MoreLikeThisModal({ target, initialIdea, onClose, onSubmit }: MoreLikeT
         </div>
       </div>
     </div>
+  );
+}
+
+/** Phase 08 — synthetic id space for the Layout ControlPicker.
+ *  'default' delegates to DEFAULT_LAYOUT_FOR_FORMAT[currentFormat];
+ *  'none' is the raw-AI-image-no-overlay escape hatch. */
+type LayoutPickerId = 'default' | LayoutId | 'none';
+
+/** Phase 08 — same pattern for visual style: 'default' delegates to
+ *  the brand kit's current visualStyle. */
+type VisualStylePickerId = 'default' | VisualStyleKey;
+
+function buildLayoutItems(
+  currentFormat: ImageFormat,
+): readonly ControlPickerItem<LayoutPickerId>[] {
+  const defaultLayout = DEFAULT_LAYOUT_FOR_FORMAT[currentFormat];
+  // Compact preview wrapper — LayoutPreview renders at its natural
+  // 64×80 by default; the strip wants ~40×40 to fit the chip envelope.
+  const compactPreview = (id: LayoutId | null) => (
+    <div
+      style={{
+        width: 36,
+        height: 40,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {id ? (
+        <LayoutPreview layoutId={id} />
+      ) : (
+        // X-cross fallback mirrors the original "no overlay" tile.
+        <svg viewBox="0 0 64 80" width={28} height={36} role="img" aria-label="no overlay">
+          <title>No overlay (raw AI image)</title>
+          <rect
+            x={0.5}
+            y={0.5}
+            width={63}
+            height={79}
+            fill="#F1EBDF"
+            stroke="#14110D"
+            strokeWidth={1}
+          />
+          <line x1={6} y1={6} x2={58} y2={74} stroke="#9c9486" strokeWidth={1.5} />
+          <line x1={58} y1={6} x2={6} y2={74} stroke="#9c9486" strokeWidth={1.5} />
+        </svg>
+      )}
+    </div>
+  );
+  return [
+    {
+      id: 'default',
+      label: 'Default',
+      shortLabel: 'Default',
+      tagline: `Auto-pick — ${LAYOUT_META[defaultLayout].label}: ${LAYOUT_META[defaultLayout].tagline}`,
+      preview: compactPreview(defaultLayout),
+    },
+    ...LAYOUT_IDS.map<ControlPickerItem<LayoutPickerId>>((id) => ({
+      id,
+      label: LAYOUT_META[id].label,
+      tagline: LAYOUT_META[id].tagline,
+      preview: compactPreview(id),
+    })),
+    {
+      id: 'none',
+      label: 'No overlay',
+      tagline: 'Raw AI image, no typography overlay.',
+      preview: compactPreview(null),
+    },
+  ];
+}
+
+function buildVisualStyleItems(
+  brandDefault: VisualStyleKey,
+): readonly ControlPickerItem<VisualStylePickerId>[] {
+  return [
+    {
+      id: 'default',
+      label: 'Brand default',
+      tagline: `Use the project's current style — ${VISUAL_STYLE_META[brandDefault].label}: ${VISUAL_STYLE_META[brandDefault].tagline}`,
+    },
+    ...VISUAL_STYLE_KEYS.map<ControlPickerItem<VisualStylePickerId>>((key) => ({
+      id: key,
+      label: VISUAL_STYLE_META[key].label,
+      tagline: VISUAL_STYLE_META[key].tagline,
+    })),
+  ];
+}
+
+/** Text-only gallery tile used by the visual-style See-all dialog
+ *  (no SVG preview available for visual styles yet). */
+function GalleryTile({
+  active,
+  disabled,
+  label,
+  sublabel,
+  onClick,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  label: string;
+  sublabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex flex-col items-start gap-1 border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50"
+      style={{
+        borderColor: active ? 'var(--ink, #14110D)' : 'rgba(20,17,13,0.18)',
+        background: active ? 'var(--paper, #F1EBDF)' : 'transparent',
+      }}
+      aria-pressed={active}
+    >
+      <span
+        className="block leading-tight"
+        style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 14 }}
+      >
+        {label}
+      </span>
+      <span className="block text-[11px] leading-snug text-ink-3">{sublabel}</span>
+    </button>
   );
 }
 

@@ -6,6 +6,7 @@
    can reference --motion-* variables in its @keyframes definitions. */
 @import "../styles/motion.css";
 @import "../styles/emma-tokens.css";
+@import "../styles/control-tokens.css";
 
 /* ============================================================
    Reachy — Editorial theme
